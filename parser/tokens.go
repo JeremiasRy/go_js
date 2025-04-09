@@ -5,89 +5,89 @@ type Token int
 
 const (
 	// BASIC
-	T_NUM Token = iota
-	T_REGEXP
-	T_STRING
-	T_NAME
-	T_PRIVATEID
-	T_EOF
+	TOKEN_NUM Token = iota
+	TOKEN_REGEXP
+	TOKEN_STRING
+	TOKEN_NAME
+	TOKEN_PRIVATEID
+	TOKEN_EOF
 
 	// PUNCTUATION
-	T_BRACKETL
-	T_BRACKETR
-	T_BRACEL
-	T_BRACER
-	T_PARENL
-	T_PARENR
-	T_COMMA
-	T_SEMI
-	T_COLON
-	T_DOT
-	T_QUESTION
-	T_QUESTIONDOT
-	T_ARROW
-	T_TEMPLATE
-	T_INVALIDTEMPLATE
-	T_ELLIPSIS
-	T_BACKQUOTE
-	T_DOLLARBRACEL
+	TOKEN_BRACKETL
+	TOKEN_BRACKETR
+	TOKEN_BRACEL
+	TOKEN_BRACER
+	TOKEN_PARENL
+	TOKEN_PARENR
+	TOKEN_COMMA
+	TOKEN_SEMI
+	TOKEN_COLON
+	TOKEN_DOT
+	TOKEN_QUESTION
+	TOKEN_QUESTIONDOT
+	TOKEN_ARROW
+	TOKEN_TEMPLATE
+	TOKEN_INVALIDTEMPLATE
+	TOKEN_ELLIPSIS
+	TOKEN_BACKQUOTE
+	TOKEN_DOLLARBRACEL
 
 	// Operator token types
-	T_EQ
-	T_ASSIGN
-	T_INCDEC
-	T_PREFIX
-	T_LOGICALOR
-	T_LOGICALAND
-	T_BITWISEOR
-	T_BITWISEXOR
-	T_BITWISEAND
-	T_EQUALITY
-	T_RELATIONAL
-	T_BITSHIFT
-	T_PLUSMIN
-	T_MODULO
-	T_STAR
-	T_SLASH
-	T_STARSTAR
-	T_COALESCE
+	TOKEN_EQ
+	TOKEN_ASSIGN
+	TOKEN_INCDEC
+	TOKEN_PREFIX
+	TOKEN_LOGICALOR
+	TOKEN_LOGICALAND
+	TOKEN_BITWISEOR
+	TOKEN_BITWISEXOR
+	TOKEN_BITWISEAND
+	TOKEN_EQUALITY
+	TOKEN_RELATIONAL
+	TOKEN_BITSHIFT
+	TOKEN_PLUSMIN
+	TOKEN_MODULO
+	TOKEN_STAR
+	TOKEN_SLASH
+	TOKEN_STARSTAR
+	TOKEN_COALESCE
 
 	// Keywords
-	T_BREAK
-	T_CASE
-	T_CATCH
-	T_CONTINUE
-	T_DEBUGGER
-	T_DEFAULT
-	T_DO
-	T_ELSE
-	T_FINALLY
-	T_FOR
-	T_FUNCTION
-	T_IF
-	T_RETURN
-	T_SWITCH
-	T_THROW
-	T_TRY
-	T_VAR
-	T_CONST
-	T_WHILE
-	T_WITH
-	T_NEW
-	T_THIS
-	T_SUPER
-	T_CLASS
-	T_EXTENDS
-	T_EXPORT
-	T_IMPORT
-	T_NULL
-	T_TRUE
-	T_FALSE
-	T_IN
-	T_INSTANCEOF
-	T_TYPEOF
-	T_VOID
-	T_DELETE
+	TOKEN_BREAK
+	TOKEN_CASE
+	TOKEN_CATCH
+	TOKEN_CONTINUE
+	TOKEN_DEBUGGER
+	TOKEN_DEFAULT
+	TOKEN_DO
+	TOKEN_ELSE
+	TOKEN_FINALLY
+	TOKEN_FOR
+	TOKEN_FUNCTION
+	TOKEN_IF
+	TOKEN_RETURN
+	TOKEN_SWITCH
+	TOKEN_THROW
+	TOKEN_TRY
+	TOKEN_VAR
+	TOKEN_CONST
+	TOKEN_WHILE
+	TOKEN_WITH
+	TOKEN_NEW
+	TOKEN_THIS
+	TOKEN_SUPER
+	TOKEN_CLASS
+	TOKEN_EXTENDS
+	TOKEN_EXPORT
+	TOKEN_IMPORT
+	TOKEN_NULL
+	TOKEN_TRUE
+	TOKEN_FALSE
+	TOKEN_IN
+	TOKEN_INSTANCEOF
+	TOKEN_TYPEOF
+	TOKEN_VOID
+	TOKEN_DELETE
 )
 
 type Binop struct {
@@ -109,96 +109,97 @@ type TokenType struct {
 	postfix       bool
 	binop         *Binop
 	updateContext *UpdateContext
+	identifier    Token
 }
 
 var Tokens = map[Token]*TokenType{
 	// Basic token types
-	T_NUM:       newToken("num", "", map[string]bool{"startsExpr": true}, nil),
-	T_REGEXP:    newToken("regexp", "", map[string]bool{"startsExpr": true}, nil),
-	T_STRING:    newToken("string", "", map[string]bool{"startsExpr": true}, nil),
-	T_NAME:      newToken("name", "", map[string]bool{"startsExpr": true}, nil),
-	T_PRIVATEID: newToken("privateId", "", map[string]bool{"startsExpr": true}, nil),
-	T_EOF:       newToken("eof", "", map[string]bool{}, nil),
+	TOKEN_NUM:       newToken("num", "", map[string]bool{"startsExpr": true}, nil, TOKEN_NUM),
+	TOKEN_REGEXP:    newToken("regexp", "", map[string]bool{"startsExpr": true}, nil, TOKEN_REGEXP),
+	TOKEN_STRING:    newToken("string", "", map[string]bool{"startsExpr": true}, nil, TOKEN_STRING),
+	TOKEN_NAME:      newToken("name", "", map[string]bool{"startsExpr": true}, nil, TOKEN_NAME),
+	TOKEN_PRIVATEID: newToken("privateId", "", map[string]bool{"startsExpr": true}, nil, TOKEN_PRIVATEID),
+	TOKEN_EOF:       newToken("eof", "", map[string]bool{}, nil, TOKEN_EOF),
 
 	// Punctuation token types
-	T_BRACKETL:        newToken("[", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil),
-	T_BRACKETR:        newToken("]", "", map[string]bool{}, nil),
-	T_BRACEL:          newToken("{", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil),
-	T_BRACER:          newToken("}", "", map[string]bool{}, nil),
-	T_PARENL:          newToken("(", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil),
-	T_PARENR:          newToken(")", "", map[string]bool{}, nil),
-	T_COMMA:           newToken(",", "", map[string]bool{"beforeExpr": true}, nil),
-	T_SEMI:            newToken(";", "", map[string]bool{"beforeExpr": true}, nil),
-	T_COLON:           newToken(":", "", map[string]bool{"beforeExpr": true}, nil),
-	T_DOT:             newToken(".", "", map[string]bool{}, nil),
-	T_QUESTION:        newToken("?", "", map[string]bool{"beforeExpr": true}, nil),
-	T_QUESTIONDOT:     newToken("?.", "", map[string]bool{}, nil),
-	T_ARROW:           newToken("=>", "", map[string]bool{"beforeExpr": true}, nil),
-	T_TEMPLATE:        newToken("template", "", map[string]bool{}, nil),
-	T_INVALIDTEMPLATE: newToken("invalidTemplate", "", map[string]bool{}, nil),
-	T_ELLIPSIS:        newToken("...", "", map[string]bool{"beforeExpr": true}, nil),
-	T_BACKQUOTE:       newToken("`", "", map[string]bool{"startsExpr": true}, nil),
-	T_DOLLARBRACEL:    newToken("${", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil),
+	TOKEN_BRACKETL:        newToken("[", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil, TOKEN_BRACKETL),
+	TOKEN_BRACKETR:        newToken("]", "", map[string]bool{}, nil, TOKEN_BRACKETR),
+	TOKEN_BRACEL:          newToken("{", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil, TOKEN_BRACEL),
+	TOKEN_BRACER:          newToken("}", "", map[string]bool{}, nil, TOKEN_BRACER),
+	TOKEN_PARENL:          newToken("(", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil, TOKEN_PARENL),
+	TOKEN_PARENR:          newToken(")", "", map[string]bool{}, nil, TOKEN_PARENR),
+	TOKEN_COMMA:           newToken(",", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_COMMA),
+	TOKEN_SEMI:            newToken(";", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_SEMI),
+	TOKEN_COLON:           newToken(":", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_COLON),
+	TOKEN_DOT:             newToken(".", "", map[string]bool{}, nil, TOKEN_DOT),
+	TOKEN_QUESTION:        newToken("?", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_QUESTION),
+	TOKEN_QUESTIONDOT:     newToken("?.", "", map[string]bool{}, nil, TOKEN_QUESTIONDOT),
+	TOKEN_ARROW:           newToken("=>", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_ARROW),
+	TOKEN_TEMPLATE:        newToken("template", "", map[string]bool{}, nil, TOKEN_TEMPLATE),
+	TOKEN_INVALIDTEMPLATE: newToken("invalidTemplate", "", map[string]bool{}, nil, TOKEN_INVALIDTEMPLATE),
+	TOKEN_ELLIPSIS:        newToken("...", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_ELLIPSIS),
+	TOKEN_BACKQUOTE:       newToken("`", "", map[string]bool{"startsExpr": true}, nil, TOKEN_BACKQUOTE),
+	TOKEN_DOLLARBRACEL:    newToken("${", "", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil, TOKEN_DOLLARBRACEL),
 
 	// Operator token types
-	T_EQ:         newToken("=", "", map[string]bool{"beforeExpr": true, "isAssign": true}, nil),
-	T_ASSIGN:     newToken("_=", "", map[string]bool{"beforeExpr": true, "isAssign": true}, nil),
-	T_INCDEC:     newToken("++/--", "", map[string]bool{"prefix": true, "postfix": true, "startsExpr": true}, nil),
-	T_PREFIX:     newToken("!/~", "", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil),
-	T_LOGICALOR:  newToken("||", "", map[string]bool{}, &Binop{prec: 1}),
-	T_LOGICALAND: newToken("&&", "", map[string]bool{}, &Binop{prec: 2}),
-	T_BITWISEOR:  newToken("|", "", map[string]bool{}, &Binop{prec: 3}),
-	T_BITWISEXOR: newToken("^", "", map[string]bool{}, &Binop{prec: 4}),
-	T_BITWISEAND: newToken("&", "", map[string]bool{}, &Binop{prec: 5}),
-	T_EQUALITY:   newToken("==/!=/===/!==", "", map[string]bool{}, &Binop{prec: 6}),
-	T_RELATIONAL: newToken("</>/<=/>=", "", map[string]bool{}, &Binop{prec: 7}),
-	T_BITSHIFT:   newToken("<</>>/>>>", "", map[string]bool{}, &Binop{prec: 8}),
-	T_PLUSMIN:    newToken("+/-", "", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, &Binop{prec: 9}),
-	T_MODULO:     newToken("%", "", map[string]bool{}, &Binop{prec: 10}),
-	T_STAR:       newToken("*", "", map[string]bool{}, &Binop{prec: 10}),
-	T_SLASH:      newToken("/", "", map[string]bool{}, &Binop{prec: 10}),
-	T_STARSTAR:   newToken("**", "", map[string]bool{"beforeExpr": true}, nil),
-	T_COALESCE:   newToken("??", "", map[string]bool{}, &Binop{prec: 1}),
+	TOKEN_EQ:         newToken("=", "", map[string]bool{"beforeExpr": true, "isAssign": true}, nil, TOKEN_EQ),
+	TOKEN_ASSIGN:     newToken("_=", "", map[string]bool{"beforeExpr": true, "isAssign": true}, nil, TOKEN_ASSIGN),
+	TOKEN_INCDEC:     newToken("++/--", "", map[string]bool{"prefix": true, "postfix": true, "startsExpr": true}, nil, TOKEN_INCDEC),
+	TOKEN_PREFIX:     newToken("!/~", "", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil, TOKEN_PREFIX),
+	TOKEN_LOGICALOR:  newToken("||", "", map[string]bool{}, &Binop{prec: 1}, TOKEN_LOGICALOR),
+	TOKEN_LOGICALAND: newToken("&&", "", map[string]bool{}, &Binop{prec: 2}, TOKEN_LOGICALAND),
+	TOKEN_BITWISEOR:  newToken("|", "", map[string]bool{}, &Binop{prec: 3}, TOKEN_BITWISEOR),
+	TOKEN_BITWISEXOR: newToken("^", "", map[string]bool{}, &Binop{prec: 4}, TOKEN_BITWISEXOR),
+	TOKEN_BITWISEAND: newToken("&", "", map[string]bool{}, &Binop{prec: 5}, TOKEN_BITWISEAND),
+	TOKEN_EQUALITY:   newToken("==/!=/===/!==", "", map[string]bool{}, &Binop{prec: 6}, TOKEN_EQUALITY),
+	TOKEN_RELATIONAL: newToken("</>/<=/>=", "", map[string]bool{}, &Binop{prec: 7}, TOKEN_RELATIONAL),
+	TOKEN_BITSHIFT:   newToken("<</>>/>>>", "", map[string]bool{}, &Binop{prec: 8}, TOKEN_BITSHIFT),
+	TOKEN_PLUSMIN:    newToken("+/-", "", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, &Binop{prec: 9}, TOKEN_PLUSMIN),
+	TOKEN_MODULO:     newToken("%", "", map[string]bool{}, &Binop{prec: 10}, TOKEN_MODULO),
+	TOKEN_STAR:       newToken("*", "", map[string]bool{}, &Binop{prec: 10}, TOKEN_STAR),
+	TOKEN_SLASH:      newToken("/", "", map[string]bool{}, &Binop{prec: 10}, TOKEN_SLASH),
+	TOKEN_STARSTAR:   newToken("**", "", map[string]bool{"beforeExpr": true}, nil, TOKEN_STARSTAR),
+	TOKEN_COALESCE:   newToken("??", "", map[string]bool{}, &Binop{prec: 1}, TOKEN_COALESCE),
 
 	// Keywords
-	T_BREAK:      newToken("break", "break", map[string]bool{}, nil),
-	T_CASE:       newToken("case", "case", map[string]bool{"beforeExpr": true}, nil),
-	T_CATCH:      newToken("catch", "catch", map[string]bool{}, nil),
-	T_CONTINUE:   newToken("continue", "continue", map[string]bool{}, nil),
-	T_DEBUGGER:   newToken("debugger", "debugger", map[string]bool{}, nil),
-	T_DEFAULT:    newToken("default", "default", map[string]bool{"beforeExpr": true}, nil),
-	T_DO:         newToken("do", "do", map[string]bool{"isLoop": true, "beforeExpr": true}, nil),
-	T_ELSE:       newToken("else", "else", map[string]bool{"beforeExpr": true}, nil),
-	T_FINALLY:    newToken("finally", "finally", map[string]bool{}, nil),
-	T_FOR:        newToken("for", "for", map[string]bool{"isLoop": true}, nil),
-	T_FUNCTION:   newToken("function", "function", map[string]bool{"startsExpr": true}, nil),
-	T_IF:         newToken("if", "if", map[string]bool{}, nil),
-	T_RETURN:     newToken("return", "return", map[string]bool{"beforeExpr": true}, nil),
-	T_SWITCH:     newToken("switch", "switch", map[string]bool{}, nil),
-	T_THROW:      newToken("throw", "throw", map[string]bool{"beforeExpr": true}, nil),
-	T_TRY:        newToken("try", "try", map[string]bool{}, nil),
-	T_VAR:        newToken("var", "var", map[string]bool{}, nil),
-	T_CONST:      newToken("const", "const", map[string]bool{}, nil),
-	T_WHILE:      newToken("while", "while", map[string]bool{"isLoop": true}, nil),
-	T_WITH:       newToken("with", "with", map[string]bool{}, nil),
-	T_NEW:        newToken("new", "new", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil),
-	T_THIS:       newToken("this", "this", map[string]bool{"startsExpr": true}, nil),
-	T_SUPER:      newToken("super", "super", map[string]bool{"startsExpr": true}, nil),
-	T_CLASS:      newToken("class", "class", map[string]bool{"startsExpr": true}, nil),
-	T_EXTENDS:    newToken("extends", "extends", map[string]bool{"beforeExpr": true}, nil),
-	T_EXPORT:     newToken("export", "export", map[string]bool{}, nil),
-	T_IMPORT:     newToken("import", "import", map[string]bool{"startsExpr": true}, nil),
-	T_NULL:       newToken("null", "null", map[string]bool{"startsExpr": true}, nil),
-	T_TRUE:       newToken("true", "true", map[string]bool{"startsExpr": true}, nil),
-	T_FALSE:      newToken("false", "false", map[string]bool{"startsExpr": true}, nil),
-	T_IN:         newToken("in", "in", map[string]bool{"beforeExpr": true}, &Binop{prec: 7}),
-	T_INSTANCEOF: newToken("instanceof", "instanceof", map[string]bool{"beforeExpr": true}, &Binop{prec: 7}),
-	T_TYPEOF:     newToken("typeof", "typeof", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil),
-	T_VOID:       newToken("void", "void", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil),
-	T_DELETE:     newToken("delete", "delete", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil),
+	TOKEN_BREAK:      newToken("break", "break", map[string]bool{}, nil, TOKEN_BREAK),
+	TOKEN_CASE:       newToken("case", "case", map[string]bool{"beforeExpr": true}, nil, TOKEN_CASE),
+	TOKEN_CATCH:      newToken("catch", "catch", map[string]bool{}, nil, TOKEN_CATCH),
+	TOKEN_CONTINUE:   newToken("continue", "continue", map[string]bool{}, nil, TOKEN_CONTINUE),
+	TOKEN_DEBUGGER:   newToken("debugger", "debugger", map[string]bool{}, nil, TOKEN_DEBUGGER),
+	TOKEN_DEFAULT:    newToken("default", "default", map[string]bool{"beforeExpr": true}, nil, TOKEN_DEFAULT),
+	TOKEN_DO:         newToken("do", "do", map[string]bool{"isLoop": true, "beforeExpr": true}, nil, TOKEN_DO),
+	TOKEN_ELSE:       newToken("else", "else", map[string]bool{"beforeExpr": true}, nil, TOKEN_ELSE),
+	TOKEN_FINALLY:    newToken("finally", "finally", map[string]bool{}, nil, TOKEN_FINALLY),
+	TOKEN_FOR:        newToken("for", "for", map[string]bool{"isLoop": true}, nil, TOKEN_FOR),
+	TOKEN_FUNCTION:   newToken("function", "function", map[string]bool{"startsExpr": true}, nil, TOKEN_FUNCTION),
+	TOKEN_IF:         newToken("if", "if", map[string]bool{}, nil, TOKEN_IF),
+	TOKEN_RETURN:     newToken("return", "return", map[string]bool{"beforeExpr": true}, nil, TOKEN_RETURN),
+	TOKEN_SWITCH:     newToken("switch", "switch", map[string]bool{}, nil, TOKEN_SWITCH),
+	TOKEN_THROW:      newToken("throw", "throw", map[string]bool{"beforeExpr": true}, nil, TOKEN_THROW),
+	TOKEN_TRY:        newToken("try", "try", map[string]bool{}, nil, TOKEN_TRY),
+	TOKEN_VAR:        newToken("var", "var", map[string]bool{}, nil, TOKEN_VAR),
+	TOKEN_CONST:      newToken("const", "const", map[string]bool{}, nil, TOKEN_CONST),
+	TOKEN_WHILE:      newToken("while", "while", map[string]bool{"isLoop": true}, nil, TOKEN_WHILE),
+	TOKEN_WITH:       newToken("with", "with", map[string]bool{}, nil, TOKEN_WITH),
+	TOKEN_NEW:        newToken("new", "new", map[string]bool{"beforeExpr": true, "startsExpr": true}, nil, TOKEN_NEW),
+	TOKEN_THIS:       newToken("this", "this", map[string]bool{"startsExpr": true}, nil, TOKEN_THIS),
+	TOKEN_SUPER:      newToken("super", "super", map[string]bool{"startsExpr": true}, nil, TOKEN_SUPER),
+	TOKEN_CLASS:      newToken("class", "class", map[string]bool{"startsExpr": true}, nil, TOKEN_CLASS),
+	TOKEN_EXTENDS:    newToken("extends", "extends", map[string]bool{"beforeExpr": true}, nil, TOKEN_EXTENDS),
+	TOKEN_EXPORT:     newToken("export", "export", map[string]bool{}, nil, TOKEN_EXPORT),
+	TOKEN_IMPORT:     newToken("import", "import", map[string]bool{"startsExpr": true}, nil, TOKEN_IMPORT),
+	TOKEN_NULL:       newToken("null", "null", map[string]bool{"startsExpr": true}, nil, TOKEN_NULL),
+	TOKEN_TRUE:       newToken("true", "true", map[string]bool{"startsExpr": true}, nil, TOKEN_TRUE),
+	TOKEN_FALSE:      newToken("false", "false", map[string]bool{"startsExpr": true}, nil, TOKEN_FALSE),
+	TOKEN_IN:         newToken("in", "in", map[string]bool{"beforeExpr": true}, &Binop{prec: 7}, TOKEN_IN),
+	TOKEN_INSTANCEOF: newToken("instanceof", "instanceof", map[string]bool{"beforeExpr": true}, &Binop{prec: 7}, TOKEN_INSTANCEOF),
+	TOKEN_TYPEOF:     newToken("typeof", "typeof", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil, TOKEN_TYPEOF),
+	TOKEN_VOID:       newToken("void", "void", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil, TOKEN_VOID),
+	TOKEN_DELETE:     newToken("delete", "delete", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil, TOKEN_DELETE),
 }
 
-func newToken(label string, keyword string, overrides map[string]bool, binop *Binop) *TokenType {
+func newToken(label string, keyword string, overrides map[string]bool, binop *Binop, identifier Token) *TokenType {
 	defaults := map[string]bool{
 		"beforeExpr": false,
 		"startsExpr": false,
@@ -223,6 +224,7 @@ func newToken(label string, keyword string, overrides map[string]bool, binop *Bi
 		postfix:       defaults["postfix"],
 		binop:         binop,
 		updateContext: nil,
+		identifier:    identifier,
 	}
 }
 
@@ -239,20 +241,20 @@ const (
 	FUNCTION_STATEMENT
 	FUNCTION_EXPRESSION
 	FUNCTION_EXPRESSION_GENERATOR
-	FUNCTON_GENERATOR
+	FUNCTION_GENERATOR
 )
 
 var ContextTypes = map[TokenContextType]*TokContext{
-	BRACKET_STATEMENT:             newTokContext("{", false, false, false, nil),
-	BRACKET_EXPRESSION:            newTokContext("{", true, false, false, nil),
-	BRACKET_TEMPLATE:              newTokContext("${", false, false, false, nil),
-	PAREN_STATEMENT:               newTokContext("(", false, false, false, nil),
-	PAREN_EXPRESSION:              newTokContext("(", true, false, false, nil),
-	QUOTE_TEMPLATE:                newTokContext("`", true, true, false, func(p *Parser) { /* JS impl had this: p.tryReadTemplateToken()*/ }),
-	FUNCTION_STATEMENT:            newTokContext("function", false, false, false, nil),
-	FUNCTION_EXPRESSION:           newTokContext("function", true, false, false, nil),
-	FUNCTION_EXPRESSION_GENERATOR: newTokContext("function", true, false, true, nil),
-	FUNCTON_GENERATOR:             newTokContext("function", false, false, true, nil),
+	BRACKET_STATEMENT:             newTokContext("{", false, false, false, nil, BRACKET_STATEMENT),
+	BRACKET_EXPRESSION:            newTokContext("{", true, false, false, nil, BRACKET_EXPRESSION),
+	BRACKET_TEMPLATE:              newTokContext("${", false, false, false, nil, BRACKET_TEMPLATE),
+	PAREN_STATEMENT:               newTokContext("(", false, false, false, nil, PAREN_STATEMENT),
+	PAREN_EXPRESSION:              newTokContext("(", true, false, false, nil, PAREN_EXPRESSION),
+	QUOTE_TEMPLATE:                newTokContext("`", true, true, false, func(p *Parser) { /* JS impl had this: p.tryReadTemplateToken()*/ }, QUOTE_TEMPLATE),
+	FUNCTION_STATEMENT:            newTokContext("function", false, false, false, nil, FUNCTION_STATEMENT),
+	FUNCTION_EXPRESSION:           newTokContext("function", true, false, false, nil, FUNCTION_EXPRESSION),
+	FUNCTION_EXPRESSION_GENERATOR: newTokContext("function", true, false, true, nil, FUNCTION_EXPRESSION_GENERATOR),
+	FUNCTION_GENERATOR:            newTokContext("function", false, false, true, nil, FUNCTION_GENERATOR),
 }
 
 type TokContext struct {
@@ -261,14 +263,16 @@ type TokContext struct {
 	PreserveSpace bool
 	Override      func(*Parser)
 	Generator     bool
+	Identifier    TokenContextType
 }
 
-func newTokContext(token string, isExpr, preserveSpace, generator bool, override func(*Parser)) *TokContext {
+func newTokContext(token string, isExpr, preserveSpace, generator bool, override func(*Parser), identifier TokenContextType) *TokContext {
 	return &TokContext{
 		Token:         token,
 		IsExpr:        isExpr,
 		PreserveSpace: preserveSpace,
 		Generator:     generator,
 		Override:      override,
+		Identifier:    identifier,
 	}
 }

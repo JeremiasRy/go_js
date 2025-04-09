@@ -1,15 +1,5 @@
 package parser
 
-type SourceLocation struct {
-	Start Location
-	End   Location
-}
-
-type Location struct {
-	Line   int
-	Column int
-}
-
 type Label struct {
 	Kind string
 }
@@ -41,7 +31,7 @@ type Parser struct {
 	LastTokEnd               int
 	LastTokStartLoc          *SourceLocation
 	LastTokEndLoc            *SourceLocation
-	Context                  []TokContext // Assumed struct
+	Context                  []*TokContext // Assumed struct
 	ExprAllowed              bool
 	InModule                 bool
 	Strict                   bool
@@ -56,3 +46,44 @@ type Parser struct {
 	RegexpState              *RegExpState  // Assumed struct
 	PrivateNameStack         []PrivateName // Assumed struct
 }
+
+func (pp *Parser) initialContext() []*TokContext {
+	return []*TokContext{ContextTypes[BRACKET_STATEMENT]}
+}
+
+func (pp *Parser) currentContext() *TokContext {
+	return pp.Context[len(pp.Context)-1]
+}
+
+func (pp *Parser) braceIsBlock(prevType Token) bool {
+	parent := pp.currentContext().Identifier
+	isExpr := pp.currentContext().IsExpr
+
+	if parent == FUNCTION_EXPRESSION || parent == FUNCTION_STATEMENT {
+		return true
+	}
+
+	if prevType == TOKEN_COLON && (parent == BRACKET_STATEMENT || parent == BRACKET_EXPRESSION) {
+		return !isExpr
+	}
+
+	if prevType == TOKEN_RETURN || prevType == TOKEN_NAME && pp.ExprAllowed {
+		// return lineBreak.test(this.input.slice(this.lastTokEnd, this.start))
+	}
+
+	if prevType == TOKEN_ELSE || prevType == TOKEN_SEMI || prevType == TOKEN_EOF || prevType == TOKEN_PARENR || prevType == TOKEN_ARROW {
+
+		return true
+	}
+	if prevType == TOKEN_BRACEL {
+		return parent == BRACKET_STATEMENT
+	}
+	if prevType == TOKEN_VAR || prevType == TOKEN_CONST || prevType == TOKEN_NAME {
+
+		return false
+	}
+
+	return !pp.ExprAllowed
+}
+
+var pp = &Parser{}
