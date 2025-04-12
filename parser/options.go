@@ -110,23 +110,25 @@ func GetOptions(opts *Options) Options {
 	}
 
 	// Handle onComment array case
-	if array, ok := options.OnComment.([]interface{}); ok {
+	if array, ok := options.OnComment.([]*Comment); ok {
 		options.OnComment = pushComment(options, array)
 	}
 
 	return options
 }
 
-func pushComment(options Options, array []interface{}) func(bool, string, int, int, Location, Location) {
-	return func(block bool, text string, start, end int, startLoc, endLoc Location) {
-		comment := struct {
-			Type  string
-			Value string
-			Start int
-			End   int
-			Loc   *SourceLocation
-			Range *[2]int
-		}{
+type Comment struct {
+	Type  string
+	Value string
+	Start int
+	End   int
+	Loc   *SourceLocation
+	Range *[2]int
+}
+
+func pushComment(options Options, array []*Comment) func(bool, string, int, int, *Location, *Location) {
+	return func(block bool, text string, start, end int, startLoc, endLoc *Location) {
+		comment := &Comment{
 			Type:  "Line",
 			Value: text,
 			Start: start,

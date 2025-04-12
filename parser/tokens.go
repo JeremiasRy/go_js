@@ -276,3 +276,30 @@ func newTokContext(token string, isExpr, preserveSpace, generator bool, override
 		Identifier:    identifier,
 	}
 }
+
+func (pp *Parser) InGeneratorContext() bool {
+	for i := len(pp.Context); i >= 1; i-- {
+		context := pp.Context[i]
+		if context.Token == "function" {
+			return context.Generator
+		}
+	}
+	return false
+}
+
+func (pp *Parser) updateContext(prevType *TokenType) {
+	update, current := pp.Type, pp.Type
+	if len(current.keyword) != 0 && prevType.identifier == TOKEN_DOT {
+		pp.ExprAllowed = false
+	} else if current.updateContext != nil {
+		update.updateContext = current.updateContext
+		update.updateContext.updateContext(prevType)
+	} else {
+		pp.ExprAllowed = current.beforeExpr
+	}
+
+}
+
+func initUpdateContext() {
+
+}
