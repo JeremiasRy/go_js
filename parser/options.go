@@ -49,23 +49,18 @@ var warnedAboutEcmaVersion = false
 func GetOptions(opts *Options) Options {
 	options := Options{}
 
-	// Copy default values and override with provided options
 	if opts == nil {
 		options = DefaultOptions
 	} else {
 		options = DefaultOptions
-		// In Go, we'd typically use reflection or explicit field checks
-		// For simplicity, manually checking key fields
 		if opts.EcmaVersion != nil {
 			options.EcmaVersion = opts.EcmaVersion
 		}
 		if opts.SourceType != "" {
 			options.SourceType = opts.SourceType
 		}
-		// ... similar checks for other fields would go here
 	}
 
-	// Handle ecmaVersion special cases
 	switch v := options.EcmaVersion.(type) {
 	case string:
 		if v == "latest" {
@@ -82,34 +77,30 @@ func GetOptions(opts *Options) Options {
 		}
 	}
 
-	// Handle allowReserved default
 	if options.AllowReserved == nil {
 		ecmaVer, ok := options.EcmaVersion.(int)
 		if !ok {
 			options.AllowReserved = new(bool)
-			*options.AllowReserved = true // default case
+			*options.AllowReserved = true
 		} else {
 			val := ecmaVer < 5
 			options.AllowReserved = &val
 		}
 	}
 
-	// Handle allowHashBang default
-	if opts == nil || !opts.AllowHashBang { // Simplistic check
+	if opts == nil || !opts.AllowHashBang {
 		ecmaVer, ok := options.EcmaVersion.(int)
 		if ok && ecmaVer >= 14 {
 			options.AllowHashBang = true
 		}
 	}
 
-	// Handle onToken array case
 	if tokens, ok := options.OnToken.([]interface{}); ok {
 		options.OnToken = func(token interface{}) {
 			tokens = append(tokens, token)
 		}
 	}
 
-	// Handle onComment array case
 	if array, ok := options.OnComment.([]*Comment); ok {
 		options.OnComment = pushComment(options, array)
 	}

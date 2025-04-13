@@ -112,7 +112,7 @@ type TokenType struct {
 	identifier    Token
 }
 
-var Tokens = map[Token]*TokenType{
+var TokenTypes = map[Token]*TokenType{
 	// Basic token types
 	TOKEN_NUM:       newToken("num", "", map[string]bool{"startsExpr": true}, nil, TOKEN_NUM),
 	TOKEN_REGEXP:    newToken("regexp", "", map[string]bool{"startsExpr": true}, nil, TOKEN_REGEXP),
@@ -244,7 +244,7 @@ const (
 	FUNCTION_GENERATOR
 )
 
-var ContextTypes = map[TokenContextType]*TokContext{
+var TokenContexts = map[TokenContextType]*TokenContext{
 	BRACKET_STATEMENT:             newTokContext("{", false, false, false, nil, BRACKET_STATEMENT),
 	BRACKET_EXPRESSION:            newTokContext("{", true, false, false, nil, BRACKET_EXPRESSION),
 	BRACKET_TEMPLATE:              newTokContext("${", false, false, false, nil, BRACKET_TEMPLATE),
@@ -257,7 +257,7 @@ var ContextTypes = map[TokenContextType]*TokContext{
 	FUNCTION_GENERATOR:            newTokContext("function", false, false, true, nil, FUNCTION_GENERATOR),
 }
 
-type TokContext struct {
+type TokenContext struct {
 	Token         string
 	IsExpr        bool
 	PreserveSpace bool
@@ -266,8 +266,8 @@ type TokContext struct {
 	Identifier    TokenContextType
 }
 
-func newTokContext(token string, isExpr, preserveSpace, generator bool, override func(*Parser), identifier TokenContextType) *TokContext {
-	return &TokContext{
+func newTokContext(token string, isExpr, preserveSpace, generator bool, override func(*Parser), identifier TokenContextType) *TokenContext {
+	return &TokenContext{
 		Token:         token,
 		IsExpr:        isExpr,
 		PreserveSpace: preserveSpace,
@@ -297,9 +297,122 @@ func (pp *Parser) updateContext(prevType *TokenType) {
 	} else {
 		pp.ExprAllowed = current.beforeExpr
 	}
-
 }
 
-func initUpdateContext() {
+func (pp *Parser) overrideContext(tokenCtx *TokenContext) {
+	if pp.currentContext().Identifier != tokenCtx.Identifier {
+		pp.Context[len(pp.Context)-1] = tokenCtx
+	}
+}
 
+func (pp *Parser) initAllUpdateContext() {
+	TokenTypes[TOKEN_PARENR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if len(pp.Context) == 1 {
+			pp.ExprAllowed = true
+			return
+		}
+
+		out := pp.Context[len(pp.Context)-1]
+		pp.Context = pp.Context[:len(pp.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && pp.currentContext().Token == "function" {
+			out = pp.Context[len(pp.Context)-1]
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		}
+		pp.ExprAllowed = !out.IsExpr
+	}}
+
+	TokenTypes[TOKEN_BRACER].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if len(pp.Context) == 1 {
+			pp.ExprAllowed = true
+			return
+		}
+
+		out := pp.Context[len(pp.Context)-1]
+		pp.Context = pp.Context[:len(pp.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && pp.currentContext().Token == "function" {
+			out = pp.Context[len(pp.Context)-1]
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		}
+		pp.ExprAllowed = !out.IsExpr
+	}}
+
+	TokenTypes[TOKEN_BRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if pp.braceIsBlock(token.identifier) {
+			pp.Context = append(pp.Context, TokenContexts[BRACKET_STATEMENT])
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[BRACKET_EXPRESSION])
+		}
+		pp.ExprAllowed = true
+
+	}}
+
+	TokenTypes[TOKEN_DOLLARBRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		pp.Context = append(pp.Context, TokenContexts[BRACKET_TEMPLATE])
+		pp.ExprAllowed = true
+	}}
+
+	TokenTypes[TOKEN_PARENL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		statementParens := token.identifier == TOKEN_IF || token.identifier == TOKEN_FOR || token.identifier == TOKEN_WITH || token.identifier == TOKEN_WHILE
+
+		if statementParens {
+
+			pp.Context = append(pp.Context, TokenContexts[PAREN_STATEMENT])
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[PAREN_EXPRESSION])
+		}
+		pp.ExprAllowed = true
+	}}
+
+	TokenTypes[TOKEN_INCDEC].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		// no factor
+	}}
+
+	TokenTypes[TOKEN_FUNCTION].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		prevType := token.identifier
+
+		if token.beforeExpr && prevType == TOKEN_ELSE && !(prevType == TOKEN_SEMI && pp.currentContext().Identifier == PAREN_STATEMENT) && !(prevType == TOKEN_RETURN /*&& lineBreak.test(this.input.slice(this.lastTokEnd, this.start)))*/) && !((prevType == TOKEN_COLON || prevType == TOKEN_BRACEL) && pp.currentContext().Identifier == BRACKET_STATEMENT) {
+			pp.Context = append(pp.Context, TokenContexts[FUNCTION_EXPRESSION])
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[FUNCTION_STATEMENT])
+		}
+	}}
+
+	TokenTypes[TOKEN_COLON].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if pp.currentContext().Token == "function" {
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		}
+		pp.ExprAllowed = true
+	}}
+
+	TokenTypes[TOKEN_BACKQUOTE].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if pp.currentContext().Identifier == QUOTE_TEMPLATE {
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[QUOTE_TEMPLATE])
+		}
+	}}
+
+	TokenTypes[TOKEN_STAR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if token.identifier == TOKEN_FUNCTION {
+			idx := len(pp.Context) - 1
+
+			if pp.Context[idx].Identifier == FUNCTION_EXPRESSION {
+				pp.Context[idx] = TokenContexts[FUNCTION_EXPRESSION_GENERATOR]
+			} else {
+				pp.Context[idx] = TokenContexts[FUNCTION_GENERATOR]
+			}
+			pp.ExprAllowed = true
+		}
+	}}
+
+	TokenTypes[TOKEN_NAME].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		allowed := false
+
+		if pp.Options.EcmaVersion.(int) >= 6 && token.identifier != TOKEN_DOT {
+			if pp.Value == "of" && !pp.ExprAllowed || pp.Value == "yield" || pp.InGeneratorContext() {
+				allowed = true
+			}
+		}
+		pp.ExprAllowed = allowed
+	}}
 }
