@@ -52,6 +52,8 @@ type Parser struct {
 	PrivateNameStack         []PrivateName
 }
 
+// TOKEN RELATED CODE
+
 // Move to next token
 func (pp *Parser) next(ignoreEscapeSequenceInKeyword bool) {
 	if !ignoreEscapeSequenceInKeyword && len(pp.Type.keyword) != 0 && pp.ContainsEsc {
@@ -67,14 +69,6 @@ func (pp *Parser) next(ignoreEscapeSequenceInKeyword bool) {
 	pp.LastTokEndLoc = pp.StartLoc
 	pp.LastTokStartLoc = pp.StartLoc
 	pp.nextToken()
-}
-
-func (pp *Parser) initialContext() []*TokenContext {
-	return []*TokenContext{TokenContexts[BRACKET_STATEMENT]}
-}
-
-func (pp *Parser) currentContext() *TokenContext {
-	return pp.Context[len(pp.Context)-1]
 }
 
 func (pp *Parser) nextToken() {
@@ -318,6 +312,8 @@ func (pp *Parser) skipSpace() {
 	panic("unimplemented")
 }
 
+// #### SCOPE RELATED CODE
+
 func (pp *Parser) braceIsBlock(prevType Token) bool {
 	parent := pp.currentContext().Identifier
 	isExpr := pp.currentContext().IsExpr
@@ -411,6 +407,8 @@ func (pp *Parser) declareName(name string, bindingType Flags, pos Location) {
 	}
 }
 
+// #### NODE RELATED CODE
+
 func (pp *Parser) startNode() *Node {
 	return NewNode(pp, pp.Start, pp.StartLoc.Start)
 }
@@ -450,4 +448,155 @@ TODO ->
 	  return newNode
 	}
 */
+
+// #### CONTEXT RELATED CODE
+
+func (pp *Parser) initialContext() []*TokenContext {
+	return []*TokenContext{TokenContexts[BRACKET_STATEMENT]}
+}
+
+func (pp *Parser) currentContext() *TokenContext {
+	return pp.Context[len(pp.Context)-1]
+}
+
+func (pp *Parser) inGeneratorContext() bool {
+	for i := len(pp.Context); i >= 1; i-- {
+		context := pp.Context[i]
+		if context.Token == "function" {
+			return context.Generator
+		}
+	}
+	return false
+}
+
+func (pp *Parser) updateContext(prevType *TokenType) {
+	update, current := pp.Type, pp.Type
+	if len(current.keyword) != 0 && prevType.identifier == TOKEN_DOT {
+		pp.ExprAllowed = false
+	} else if current.updateContext != nil {
+		update.updateContext = current.updateContext
+		update.updateContext.updateContext(prevType)
+	} else {
+		pp.ExprAllowed = current.beforeExpr
+	}
+}
+
+func (pp *Parser) overrideContext(tokenCtx *TokenContext) {
+	if pp.currentContext().Identifier != tokenCtx.Identifier {
+		pp.Context[len(pp.Context)-1] = tokenCtx
+	}
+}
+
+func (pp *Parser) initAllUpdateContext() {
+	TokenTypes[TOKEN_PARENR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if len(pp.Context) == 1 {
+			pp.ExprAllowed = true
+			return
+		}
+
+		out := pp.Context[len(pp.Context)-1]
+		pp.Context = pp.Context[:len(pp.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && pp.currentContext().Token == "function" {
+			out = pp.Context[len(pp.Context)-1]
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		}
+		pp.ExprAllowed = !out.IsExpr
+	}}
+
+	TokenTypes[TOKEN_BRACER].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if len(pp.Context) == 1 {
+			pp.ExprAllowed = true
+			return
+		}
+
+		out := pp.Context[len(pp.Context)-1]
+		pp.Context = pp.Context[:len(pp.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && pp.currentContext().Token == "function" {
+			out = pp.Context[len(pp.Context)-1]
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		}
+		pp.ExprAllowed = !out.IsExpr
+	}}
+
+	TokenTypes[TOKEN_BRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if pp.braceIsBlock(token.identifier) {
+			pp.Context = append(pp.Context, TokenContexts[BRACKET_STATEMENT])
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[BRACKET_EXPRESSION])
+		}
+		pp.ExprAllowed = true
+
+	}}
+
+	TokenTypes[TOKEN_DOLLARBRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		pp.Context = append(pp.Context, TokenContexts[BRACKET_TEMPLATE])
+		pp.ExprAllowed = true
+	}}
+
+	TokenTypes[TOKEN_PARENL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		statementParens := token.identifier == TOKEN_IF || token.identifier == TOKEN_FOR || token.identifier == TOKEN_WITH || token.identifier == TOKEN_WHILE
+
+		if statementParens {
+
+			pp.Context = append(pp.Context, TokenContexts[PAREN_STATEMENT])
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[PAREN_EXPRESSION])
+		}
+		pp.ExprAllowed = true
+	}}
+
+	TokenTypes[TOKEN_INCDEC].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		// no factor
+	}}
+
+	TokenTypes[TOKEN_FUNCTION].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		prevType := token.identifier
+
+		if token.beforeExpr && prevType == TOKEN_ELSE && !(prevType == TOKEN_SEMI && pp.currentContext().Identifier == PAREN_STATEMENT) && !(prevType == TOKEN_RETURN /*&& lineBreak.test(this.input.slice(this.lastTokEnd, this.start)))*/) && !((prevType == TOKEN_COLON || prevType == TOKEN_BRACEL) && pp.currentContext().Identifier == BRACKET_STATEMENT) {
+			pp.Context = append(pp.Context, TokenContexts[FUNCTION_EXPRESSION])
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[FUNCTION_STATEMENT])
+		}
+	}}
+
+	TokenTypes[TOKEN_COLON].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if pp.currentContext().Token == "function" {
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		}
+		pp.ExprAllowed = true
+	}}
+
+	TokenTypes[TOKEN_BACKQUOTE].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if pp.currentContext().Identifier == QUOTE_TEMPLATE {
+			pp.Context = pp.Context[:len(pp.Context)-1]
+		} else {
+			pp.Context = append(pp.Context, TokenContexts[QUOTE_TEMPLATE])
+		}
+	}}
+
+	TokenTypes[TOKEN_STAR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		if token.identifier == TOKEN_FUNCTION {
+			idx := len(pp.Context) - 1
+
+			if pp.Context[idx].Identifier == FUNCTION_EXPRESSION {
+				pp.Context[idx] = TokenContexts[FUNCTION_EXPRESSION_GENERATOR]
+			} else {
+				pp.Context[idx] = TokenContexts[FUNCTION_GENERATOR]
+			}
+			pp.ExprAllowed = true
+		}
+	}}
+
+	TokenTypes[TOKEN_NAME].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
+		allowed := false
+
+		if pp.Options.EcmaVersion.(int) >= 6 && token.identifier != TOKEN_DOT {
+			if pp.Value == "of" && !pp.ExprAllowed || pp.Value == "yield" || pp.inGeneratorContext() {
+				allowed = true
+			}
+		}
+		pp.ExprAllowed = allowed
+	}}
+}
+
 var pp = &Parser{}
