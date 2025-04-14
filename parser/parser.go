@@ -1,6 +1,9 @@
 package parser
 
-import "unicode/utf8"
+import (
+	"slices"
+	"unicode/utf8"
+)
 
 type Label struct {
 	Kind string
@@ -66,6 +69,14 @@ func (pp *Parser) next(ignoreEscapeSequenceInKeyword bool) {
 	pp.nextToken()
 }
 
+func (pp *Parser) initialContext() []*TokenContext {
+	return []*TokenContext{TokenContexts[BRACKET_STATEMENT]}
+}
+
+func (pp *Parser) currentContext() *TokenContext {
+	return pp.Context[len(pp.Context)-1]
+}
+
 func (pp *Parser) nextToken() {
 	context := pp.currentContext()
 	if context == nil || context.PreserveSpace {
@@ -78,7 +89,7 @@ func (pp *Parser) nextToken() {
 	}
 
 	if pp.Pos >= len(pp.Input) {
-		pp.finishToken()
+		pp.finishToken(TokenTypes[TOKEN_EOF])
 		return
 	}
 
@@ -120,95 +131,182 @@ func (pp *Parser) fullCharCodeAtPos() rune {
 	return (code<<10 + next - 0x35FDC00)
 }
 
-func (pp *Parser) getTokenFromCode(code rune) {
+func (pp *Parser) readToken(code rune) {
+	if IsIdentifierStart(code, pp.Options.EcmaVersion.(int) >= 6) || code == 92 {
+		pp.readWord()
+		return
+	}
 
+	pp.getTokenFromCode(code)
 }
 
-/*
-pp.getTokenFromCode = function (code) {
-  switch (code) {
-    // The interpretation of a dot depends on whether it is followed
-    // by a digit or another two dots.
-    case 46: // '.'
-      return this.readToken_dot()
-
-    // Punctuation tokens.
-    case 40: ++this.pos; return this.finishToken(tt.parenL)
-    case 41: ++this.pos; return this.finishToken(tt.parenR)
-    case 59: ++this.pos; return this.finishToken(tt.semi)
-    case 44: ++this.pos; return this.finishToken(tt.comma)
-    case 91: ++this.pos; return this.finishToken(tt.bracketL)
-    case 93: ++this.pos; return this.finishToken(tt.bracketR)
-    case 123: ++this.pos; return this.finishToken(tt.braceL)
-    case 125: ++this.pos; return this.finishToken(tt.braceR)
-    case 58: ++this.pos; return this.finishToken(tt.colon)
-
-    case 96: // '`'
-      if (this.options.ecmaVersion < 6) break
-      ++this.pos
-      return this.finishToken(tt.backQuote)
-
-    case 48: // '0'
-      let next = this.input.charCodeAt(this.pos + 1)
-      if (next === 120 || next === 88) return this.readRadixNumber(16) // '0x', '0X' - hex number
-      if (this.options.ecmaVersion >= 6) {
-        if (next === 111 || next === 79) return this.readRadixNumber(8) // '0o', '0O' - octal number
-        if (next === 98 || next === 66) return this.readRadixNumber(2) // '0b', '0B' - binary number
-      }
-
-    // Anything else beginning with a digit is an integer, octal
-    // number, or float.
-    case 49: case 50: case 51: case 52: case 53: case 54: case 55: case 56: case 57: // 1-9
-      return this.readNumber(false)
-
-    // Quotes produce strings.
-    case 34: case 39: // '"', "'"
-      return this.readString(code)
-
-    // Operators are parsed inline in tiny state machines. '=' (61) is
-    // often referred to. `finishOp` simply skips the amount of
-    // characters it is given as second argument, and returns a token
-    // of the type given by its first argument.
-    case 47: // '/'
-      return this.readToken_slash()
-
-    case 37: case 42: // '%*'
-      return this.readToken_mult_modulo_exp(code)
-
-    case 124: case 38: // '|&'
-      return this.readToken_pipe_amp(code)
-
-    case 94: // '^'
-      return this.readToken_caret()
-
-    case 43: case 45: // '+-'
-      return this.readToken_plus_min(code)
-
-    case 60: case 62: // '<>'
-      return this.readToken_lt_gt(code)
-
-    case 61: case 33: // '=!'
-      return this.readToken_eq_excl(code)
-
-    case 63: // '?'
-      return this.readToken_question()
-
-    case 126: // '~'
-      return this.finishOp(tt.prefix, 1)
-
-    case 35: // '#'
-      return this.readToken_numberSign()
-  }
-
-  this.raise(this.pos, "Unexpected character '" + codePointToString(code) + "'")
-}
-*/
-
-func (pp *Parser) readToken(param any) {
+func (pp *Parser) readWord() {
 	panic("unimplemented")
 }
 
-func (pp *Parser) finishToken() {
+func (pp *Parser) getTokenFromCode(code rune) {
+	switch code {
+	case 46: // '.'
+		pp.readToken_dot()
+
+	case 40: // '('
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_PARENL])
+
+	case 41: // ')'
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_PARENR])
+
+	case 59: // ';'
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_SEMI])
+
+	case 44: // ','
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_COMMA])
+
+	case 91: // '['
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_BRACKETL])
+
+	case 93: // ']'
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_BRACKETR])
+
+	case 123: // '{'
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_BRACEL])
+
+	case 125: // '}'
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_BRACER])
+
+	case 58: // ':'
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_COLON])
+
+	case 96: // '`'
+		if pp.Options.EcmaVersion.(int) < 6 {
+			break
+		}
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_BACKQUOTE])
+
+	case 48: // '0'
+		next := pp.Input[pp.Pos+1]
+		if next == 120 || next == 88 { // 'x', 'X'
+			pp.readRadixNumber(16) // hex number
+			return
+		}
+		if pp.Options.EcmaVersion.(int) >= 6 {
+			if next == 111 || next == 79 { // 'o', 'O'
+				pp.readRadixNumber(8) // octal number
+				return
+			}
+			if next == 98 || next == 66 { // 'b', 'B'
+				pp.readRadixNumber(2) // binary number
+				return
+			}
+		}
+		pp.readNumber(false)
+
+	case 49, 50, 51, 52, 53, 54, 55, 56, 57: // '1'-'9'
+		pp.readNumber(false)
+
+	case 34, 39: // '"', "'"
+		pp.readString(code)
+
+	case 47: // '/'
+		pp.readToken_slash()
+
+	case 37, 42: // '%', '*'
+		pp.readToken_mult_modulo_exp(code)
+
+	case 124, 38: // '|', '&'
+		pp.readToken_pipe_amp(code)
+
+	case 94: // '^'
+		pp.readToken_caret()
+
+	case 43, 45: // '+', '-'
+		pp.readToken_plus_min(code)
+
+	case 60, 62: // '<', '>'
+		pp.readToken_lt_gt(code)
+
+	case 61, 33: // '=', '!'
+		pp.readToken_eq_excl(code)
+
+	case 63: // '?'
+		pp.readToken_question()
+
+	case 126: // '~'
+		pp.finishOp(TokenTypes[TOKEN_PREFIX], 1)
+
+	case 35: // '#'
+		pp.readToken_numberSign()
+	}
+
+	// pp.raise(pp.Pos, "Unexpected character '"+codePointToString(code)+"'")
+}
+
+func (pp *Parser) finishOp(token *TokenType, size int) {
+
+}
+
+func (pp *Parser) readToken_question() {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_eq_excl(code rune) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_lt_gt(code rune) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_plus_min(code rune) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_caret() {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_pipe_amp(code rune) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_mult_modulo_exp(code rune) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_slash() {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readString(code rune) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readNumber(false bool) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readRadixNumber(i int) {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_numberSign() {
+	panic("unimplemented")
+}
+
+func (pp *Parser) readToken_dot() {
+	panic("unimplemented")
+}
+
+func (pp *Parser) finishToken(tokenType *TokenType) {
 	panic("unimplemented")
 }
 
@@ -218,14 +316,6 @@ func (pp *Parser) currentPosition() *SourceLocation {
 
 func (pp *Parser) skipSpace() {
 	panic("unimplemented")
-}
-
-func (pp *Parser) initialContext() []*TokenContext {
-	return []*TokenContext{TokenContexts[BRACKET_STATEMENT]}
-}
-
-func (pp *Parser) currentContext() *TokenContext {
-	return pp.Context[len(pp.Context)-1]
 }
 
 func (pp *Parser) braceIsBlock(prevType Token) bool {
@@ -259,4 +349,105 @@ func (pp *Parser) braceIsBlock(prevType Token) bool {
 	return !pp.ExprAllowed
 }
 
+func (pp *Parser) enterScope(flags Flags) {
+	pp.ScopeStack = append(pp.ScopeStack, NewScope(flags))
+}
+
+func (pp *Parser) exitScope() {
+	pp.ScopeStack = pp.ScopeStack[:len(pp.ScopeStack)-1]
+}
+
+func (pp *Parser) currentScope() *Scope {
+	return pp.ScopeStack[len(pp.ScopeStack)-1]
+}
+
+func (pp *Parser) treatFunctionsAsVar() bool {
+	return pp.treatFunctionsAsVarInScope(pp.currentScope())
+}
+
+func (pp *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
+	return (scope.Flags&SCOPE_FUNCTION != 0) || (!pp.InModule && scope.Flags&SCOPE_TOP != 0)
+}
+
+func (pp *Parser) declareName(name string, bindingType Flags, pos Location) {
+	redeclared := false
+
+	scope := pp.currentScope()
+	if bindingType == BIND_LEXICAL {
+		redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Functions, name) || slices.Contains(scope.Var, name)
+		scope.Lexical = append(scope.Lexical, name)
+		if pp.InModule && (scope.Flags&SCOPE_TOP != 0) {
+			delete(pp.UndefinedExports, name)
+		}
+	} else if bindingType == BIND_SIMPLE_CATCH {
+		scope.Lexical = append(scope.Lexical, name)
+	} else if bindingType == BIND_FUNCTION {
+		if pp.treatFunctionsAsVar() {
+			redeclared = slices.Contains(scope.Lexical, name)
+		} else {
+			redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Var, name)
+		}
+		scope.Functions = append(scope.Functions, name)
+	} else {
+		for _, scope := range pp.ScopeStack {
+			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !pp.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
+				redeclared = true
+				break
+			}
+
+			scope.Var = append(scope.Var, name)
+			if pp.InModule && (scope.Flags&SCOPE_TOP != 0) {
+				delete(pp.UndefinedExports, name)
+			}
+
+			if scope.Flags&SCOPE_VAR != 0 {
+				break
+			}
+		}
+	}
+
+	if redeclared {
+		// pp.raiseRecoverable(pos, `Identifier '${name}' has already been declared`)
+	}
+}
+
+func (pp *Parser) startNode() *Node {
+	return NewNode(pp, pp.Start, pp.StartLoc.Start)
+}
+
+func (pp *Parser) startNodeAt(pos int, loc *Location) *Node {
+	return NewNode(pp, pos, loc)
+}
+
+func (pp *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *SourceLocation) {
+	node.Type = finishType
+	node.End = pos
+	if pp.Options.Locations {
+		node.Loc.End = loc.End
+	}
+
+	if pp.Options.Ranges {
+		node.Range[1] = pos
+	}
+}
+
+func (pp *Parser) finishNode(node *Node, finishType NodeType) {
+	pp.finishNodeAt(node, finishType, pp.LastTokEnd, pp.LastTokEndLoc)
+}
+
+/*
+I think I can skip this?
+
+	pp.finishNodeAt = function(node, type, pos, loc) {
+	  return finishNodeAt.call(this, node, type, pos, loc)
+	}
+
+TODO ->
+
+	pp.copyNode = function(node) {
+	  let newNode = new Node(this, node.start, this.startLoc)
+	  for (let prop in node) newNode[prop] = node[prop]
+	  return newNode
+	}
+*/
 var pp = &Parser{}
