@@ -26,7 +26,7 @@ type Parser struct {
 	Pos                      int
 	LineStart                int
 	CurLine                  int
-	Type                     TokenType
+	Type                     *TokenType
 	Value                    any
 	Start                    int
 	End                      int
@@ -83,7 +83,7 @@ func (pp *Parser) nextToken() {
 	}
 
 	if pp.Pos >= len(pp.Input) {
-		pp.finishToken(TokenTypes[TOKEN_EOF])
+		pp.finishToken(TokenTypes[TOKEN_EOF], nil)
 		return
 	}
 
@@ -145,46 +145,46 @@ func (pp *Parser) getTokenFromCode(code rune) {
 
 	case 40: // '('
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_PARENL])
+		pp.finishToken(TokenTypes[TOKEN_PARENL], nil)
 
 	case 41: // ')'
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_PARENR])
+		pp.finishToken(TokenTypes[TOKEN_PARENR], nil)
 
 	case 59: // ';'
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_SEMI])
+		pp.finishToken(TokenTypes[TOKEN_SEMI], nil)
 
 	case 44: // ','
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_COMMA])
+		pp.finishToken(TokenTypes[TOKEN_COMMA], nil)
 
 	case 91: // '['
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACKETL])
+		pp.finishToken(TokenTypes[TOKEN_BRACKETL], nil)
 
 	case 93: // ']'
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACKETR])
+		pp.finishToken(TokenTypes[TOKEN_BRACKETR], nil)
 
 	case 123: // '{'
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACEL])
+		pp.finishToken(TokenTypes[TOKEN_BRACEL], nil)
 
 	case 125: // '}'
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACER])
+		pp.finishToken(TokenTypes[TOKEN_BRACER], nil)
 
 	case 58: // ':'
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_COLON])
+		pp.finishToken(TokenTypes[TOKEN_COLON], nil)
 
 	case 96: // '`'
 		if pp.Options.EcmaVersion.(int) < 6 {
 			break
 		}
 		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BACKQUOTE])
+		pp.finishToken(TokenTypes[TOKEN_BACKQUOTE], nil)
 
 	case 48: // '0'
 		next := pp.Input[pp.Pos+1]
@@ -245,7 +245,9 @@ func (pp *Parser) getTokenFromCode(code rune) {
 }
 
 func (pp *Parser) finishOp(token *TokenType, size int) {
-
+	str := pp.Input[pp.Pos : pp.Pos+size]
+	pp.Pos = pp.Pos + size
+	pp.finishToken(token, &str)
 }
 
 func (pp *Parser) readToken_question() {
@@ -261,22 +263,127 @@ func (pp *Parser) readToken_lt_gt(code rune) {
 }
 
 func (pp *Parser) readToken_plus_min(code rune) {
-	panic("unimplemented")
+	next := rune(pp.Input[pp.Pos+1])
+	if next == code {
+		if next == 45 && !pp.InModule && pp.Input[pp.Pos+2] == 62 &&
+			(pp.LastTokEnd == 0 || lineBreak.Match([]byte(pp.Input[pp.LastTokEnd:pp.Pos]))) {
+			// A `-->` line comment
+			pp.skipLineComment(3)
+			pp.skipSpace()
+			pp.nextToken()
+			return
+		}
+		pp.finishOp(TokenTypes[TOKEN_INCDEC], 2)
+		return
+	}
+	if next == 61 {
+		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		return
+	}
+	pp.finishOp(TokenTypes[TOKEN_PLUSMIN], 1)
+}
+
+func (pp *Parser) skipLineComment(startSkip int) {
+	ch := pp.Input[pp.Pos+startSkip]
+	pp.Pos = pp.Pos + startSkip
+	for pp.Pos < len(pp.Input) && !isNewLine(rune(ch)) {
+		pp.Pos = pp.Pos + 1
+		ch = pp.Input[pp.Pos]
+	}
+
+	if pp.Options.OnComment != nil {
+		// TODO I don't really have onComment ported and might be that it never happens
+		/*
+			pp.Options.OnComment.(false, this.input.slice(start+startSkip, this.pos), start, this.pos,
+				startLoc, this.curPosition())
+		*/
+	}
 }
 
 func (pp *Parser) readToken_caret() {
-	panic("unimplemented")
+	next := pp.Input[pp.Pos+1]
+	if next == 61 {
+		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		return
+	}
+	pp.finishOp(TokenTypes[TOKEN_BITWISEXOR], 1)
 }
 
 func (pp *Parser) readToken_pipe_amp(code rune) {
-	panic("unimplemented")
+	next := rune(pp.Input[pp.Pos+1])
+	if next == code {
+		if pp.Options.EcmaVersion.(int) >= 12 {
+			next2 := pp.Input[pp.Pos+2]
+			if next2 == 61 {
+				pp.finishOp(TokenTypes[TOKEN_ASSIGN], 3)
+				return
+			}
+
+			if code == 124 {
+				pp.finishOp(TokenTypes[TOKEN_LOGICALOR], 2)
+				return
+			} else {
+				pp.finishOp(TokenTypes[TOKEN_LOGICALAND], 2)
+				return
+			}
+		}
+	}
+
+	if next == 61 {
+		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		return
+	}
+
+	if code == 124 {
+		pp.finishOp(TokenTypes[TOKEN_BITWISEOR], 1)
+		return
+	}
+
+	pp.finishOp(TokenTypes[TOKEN_BITWISEAND], 1)
 }
 
 func (pp *Parser) readToken_mult_modulo_exp(code rune) {
-	panic("unimplemented")
+	next := pp.Input[pp.Pos+1]
+	size := 1
+
+	var tokenType *TokenType
+
+	if code == 42 {
+		tokenType = TokenTypes[TOKEN_STAR]
+	} else {
+		tokenType = TokenTypes[TOKEN_MODULO]
+	}
+
+	// exponentiation operator ** and **=
+	if pp.Options.EcmaVersion.(int) >= 7 && code == 42 && next == 42 {
+		size = size + 1
+		tokenType = TokenTypes[TOKEN_STAR]
+		next = pp.Input[pp.Pos+2]
+	}
+
+	if next == 61 {
+		pp.finishOp(TokenTypes[TOKEN_ASSIGN], size+1)
+		return
+	}
+
+	pp.finishOp(tokenType, size)
 }
 
 func (pp *Parser) readToken_slash() {
+	next := pp.Input[pp.Pos+1]
+	if pp.ExprAllowed {
+		pp.Pos++
+		pp.readRegexp()
+		return
+	}
+	if next == 61 {
+		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		return
+	}
+	pp.finishOp(TokenTypes[TOKEN_SLASH], 1)
+}
+
+func (pp *Parser) readRegexp() {
 	panic("unimplemented")
 }
 
@@ -297,11 +404,33 @@ func (pp *Parser) readToken_numberSign() {
 }
 
 func (pp *Parser) readToken_dot() {
-	panic("unimplemented")
+	next := pp.Input[pp.Pos+1]
+	if next >= 48 && next <= 57 {
+		pp.readNumber(true)
+		return
+	}
+
+	next2 := pp.Input[pp.Pos+2]
+	if pp.Options.EcmaVersion.(int) >= 6 && next == 46 && next2 == 46 { // 46 = dot '.'
+		pp.Pos += 3
+		pp.finishToken(TokenTypes[TOKEN_ELLIPSIS], nil)
+		return
+	} else {
+		pp.Pos++
+		pp.finishToken(TokenTypes[TOKEN_DOT], nil)
+		return
+	}
 }
 
-func (pp *Parser) finishToken(tokenType *TokenType) {
-	panic("unimplemented")
+func (pp *Parser) finishToken(tokenType *TokenType, value *string) {
+	pp.End = pp.Pos
+	if pp.Options.Locations {
+		pp.EndLoc = pp.currentPosition()
+	}
+	prevType := tokenType
+	pp.Type = tokenType
+	pp.Value = value
+	pp.updateContext(prevType)
 }
 
 func (pp *Parser) currentPosition() *SourceLocation {
@@ -597,6 +726,10 @@ func (pp *Parser) initAllUpdateContext() {
 		}
 		pp.ExprAllowed = allowed
 	}}
+}
+
+func isNewLine(code rune) bool { // I dont really know how utf-8 translates to this utf-16? :/ I guess I'll see when the bugs start popping out
+	return code == 10 || code == 13 || code == 0x2028 || code == 0x2029
 }
 
 var pp = &Parser{}
