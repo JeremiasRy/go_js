@@ -1,7 +1,9 @@
 package parser
 
 import (
+	"regexp"
 	"slices"
+	"strings"
 	"unicode/utf8"
 )
 
@@ -15,15 +17,15 @@ type PrivateName struct {
 }
 
 type Parser struct {
-	Options                  Options
+	options                  Options
 	SourceFile               *string
 	Keywords                 any
 	ReservedWords            any
 	ReservedWordsStrict      any
 	ReservedWordsStrictBind  any
-	Input                    string
+	input                    string
 	ContainsEsc              bool
-	Pos                      int
+	pos                      int
 	LineStart                int
 	CurLine                  int
 	Type                     *TokenType
@@ -55,52 +57,52 @@ type Parser struct {
 // TOKEN RELATED CODE
 
 // Move to next token
-func (pp *Parser) next(ignoreEscapeSequenceInKeyword bool) {
-	if !ignoreEscapeSequenceInKeyword && len(pp.Type.keyword) != 0 && pp.ContainsEsc {
+func (this *Parser) next(ignoreEscapeSequenceInKeyword bool) {
+	if !ignoreEscapeSequenceInKeyword && len(this.Type.keyword) != 0 && this.ContainsEsc {
 		// this.raiseRecoverable(this.start, "Escape sequence in keyword " + this.type.keyword)
 	}
 
-	if pp.Options.OnToken != nil {
+	if this.options.OnToken != nil {
 		// TODO? Maybe? I dont need this?
 	}
 
-	pp.LastTokEnd = pp.End
-	pp.LastTokStart = pp.Start
-	pp.LastTokEndLoc = pp.StartLoc
-	pp.LastTokStartLoc = pp.StartLoc
-	pp.nextToken()
+	this.LastTokEnd = this.End
+	this.LastTokStart = this.Start
+	this.LastTokEndLoc = this.StartLoc
+	this.LastTokStartLoc = this.StartLoc
+	this.nextToken()
 }
 
-func (pp *Parser) nextToken() {
-	context := pp.currentContext()
+func (this *Parser) nextToken() {
+	context := this.currentContext()
 	if context == nil || context.PreserveSpace {
-		pp.skipSpace()
+		this.skipSpace()
 	}
 
-	pp.Start = pp.Pos
-	if pp.Options.Locations {
-		pp.StartLoc = pp.currentPosition()
+	this.Start = this.pos
+	if this.options.Locations {
+		this.StartLoc = this.currentPosition()
 	}
 
-	if pp.Pos >= len(pp.Input) {
-		pp.finishToken(TokenTypes[TOKEN_EOF], nil)
+	if this.pos >= len(this.input) {
+		this.finishToken(TokenTypes[TOKEN_EOF], nil)
 		return
 	}
 
 	if context.Override != nil {
-		context.Override(pp)
+		context.Override(this)
 		return
 	} else {
-		pp.readToken(pp.fullCharCodeAtPos())
+		this.readToken(this.fullCharCodeAtPos())
 	}
 }
 
-func (pp *Parser) fullCharCodeAtPos() rune {
-	if pp.Pos < 0 || pp.Pos >= len(pp.Input) {
+func (this *Parser) fullCharCodeAtPos() rune {
+	if this.pos < 0 || this.pos >= len(this.input) {
 		return 0 // error handling...
 	}
 
-	r, size := utf8.DecodeRuneInString(pp.Input[pp.Pos:])
+	r, size := utf8.DecodeRuneInString(this.input[this.pos:])
 	if r == utf8.RuneError {
 		return 0 //  error handling...
 	}
@@ -111,11 +113,11 @@ func (pp *Parser) fullCharCodeAtPos() rune {
 		return code
 	}
 
-	if pp.Pos+size >= len(pp.Input) {
+	if this.pos+size >= len(this.input) {
 		return code
 	}
 
-	nextRune, _ := utf8.DecodeRuneInString(pp.Input[pp.Pos+size:])
+	nextRune, _ := utf8.DecodeRuneInString(this.input[this.pos+size:])
 	next := int32(nextRune)
 
 	if next <= 0xDBFF || next >= 0xE000 {
@@ -125,225 +127,290 @@ func (pp *Parser) fullCharCodeAtPos() rune {
 	return (code<<10 + next - 0x35FDC00)
 }
 
-func (pp *Parser) readToken(code rune) {
-	if IsIdentifierStart(code, pp.Options.EcmaVersion.(int) >= 6) || code == 92 {
-		pp.readWord()
+func (this *Parser) readToken(code rune) {
+	if IsIdentifierStart(code, this.options.ecmaVersion.(int) >= 6) || code == 92 {
+		this.readWord()
 		return
 	}
 
-	pp.getTokenFromCode(code)
+	this.getTokenFromCode(code)
 }
 
-func (pp *Parser) readWord() {
-	panic("unimplemented")
-}
-
-func (pp *Parser) getTokenFromCode(code rune) {
+func (this *Parser) getTokenFromCode(code rune) {
 	switch code {
 	case 46: // '.'
-		pp.readToken_dot()
+		this.readToken_dot()
 
 	case 40: // '('
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_PARENL], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_PARENL], nil)
 
 	case 41: // ')'
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_PARENR], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_PARENR], nil)
 
 	case 59: // ';'
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_SEMI], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_SEMI], nil)
 
 	case 44: // ','
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_COMMA], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_COMMA], nil)
 
 	case 91: // '['
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACKETL], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_BRACKETL], nil)
 
 	case 93: // ']'
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACKETR], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_BRACKETR], nil)
 
 	case 123: // '{'
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACEL], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_BRACEL], nil)
 
 	case 125: // '}'
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BRACER], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_BRACER], nil)
 
 	case 58: // ':'
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_COLON], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_COLON], nil)
 
 	case 96: // '`'
-		if pp.Options.EcmaVersion.(int) < 6 {
+		if this.options.ecmaVersion.(int) < 6 {
 			break
 		}
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_BACKQUOTE], nil)
+		this.pos++
+		this.finishToken(TokenTypes[TOKEN_BACKQUOTE], nil)
 
 	case 48: // '0'
-		next := pp.Input[pp.Pos+1]
+		next := this.input[this.pos+1]
 		if next == 120 || next == 88 { // 'x', 'X'
-			pp.readRadixNumber(16) // hex number
+			this.readRadixNumber(16) // hex number
 			return
 		}
-		if pp.Options.EcmaVersion.(int) >= 6 {
+		if this.options.ecmaVersion.(int) >= 6 {
 			if next == 111 || next == 79 { // 'o', 'O'
-				pp.readRadixNumber(8) // octal number
+				this.readRadixNumber(8) // octal number
 				return
 			}
 			if next == 98 || next == 66 { // 'b', 'B'
-				pp.readRadixNumber(2) // binary number
+				this.readRadixNumber(2) // binary number
 				return
 			}
 		}
-		pp.readNumber(false)
+		this.readNumber(false)
 
 	case 49, 50, 51, 52, 53, 54, 55, 56, 57: // '1'-'9'
-		pp.readNumber(false)
+		this.readNumber(false)
 
 	case 34, 39: // '"', "'"
-		pp.readString(code)
+		this.readString(code)
 
 	case 47: // '/'
-		pp.readToken_slash()
+		this.readToken_slash()
 
 	case 37, 42: // '%', '*'
-		pp.readToken_mult_modulo_exp(code)
+		this.readToken_mult_modulo_exp(code)
 
 	case 124, 38: // '|', '&'
-		pp.readToken_pipe_amp(code)
+		this.readToken_pipe_amp(code)
 
 	case 94: // '^'
-		pp.readToken_caret()
+		this.readToken_caret()
 
 	case 43, 45: // '+', '-'
-		pp.readToken_plus_min(code)
+		this.readToken_plus_min(code)
 
 	case 60, 62: // '<', '>'
-		pp.readToken_lt_gt(code)
+		this.readToken_lt_gt(code)
 
 	case 61, 33: // '=', '!'
-		pp.readToken_eq_excl(code)
+		this.readToken_eq_excl(code)
 
 	case 63: // '?'
-		pp.readToken_question()
+		this.readToken_question()
 
 	case 126: // '~'
-		pp.finishOp(TokenTypes[TOKEN_PREFIX], 1)
+		this.finishOp(TokenTypes[TOKEN_PREFIX], 1)
 
 	case 35: // '#'
-		pp.readToken_numberSign()
+		this.readToken_numberSign()
 	}
 
-	// pp.raise(pp.Pos, "Unexpected character '"+codePointToString(code)+"'")
+	// this.raise(this.Pos, "Unexpected character '"+codePointToString(code)+"'")
 }
 
-func (pp *Parser) finishOp(token *TokenType, size int) {
-	str := pp.Input[pp.Pos : pp.Pos+size]
-	pp.Pos = pp.Pos + size
-	pp.finishToken(token, &str)
+func (this *Parser) finishOp(token *TokenType, size int) {
+	str := this.input[this.pos : this.pos+size]
+	this.pos = this.pos + size
+	this.finishToken(token, &str)
 }
 
-func (pp *Parser) readToken_question() {
-	panic("unimplemented")
-}
-
-func (pp *Parser) readToken_eq_excl(code rune) {
-	panic("unimplemented")
-}
-
-func (pp *Parser) readToken_lt_gt(code rune) {
-	panic("unimplemented")
-}
-
-func (pp *Parser) readToken_plus_min(code rune) {
-	next := rune(pp.Input[pp.Pos+1])
-	if next == code {
-		if next == 45 && !pp.InModule && pp.Input[pp.Pos+2] == 62 &&
-			(pp.LastTokEnd == 0 || lineBreak.Match([]byte(pp.Input[pp.LastTokEnd:pp.Pos]))) {
-			// A `-->` line comment
-			pp.skipLineComment(3)
-			pp.skipSpace()
-			pp.nextToken()
+func (this *Parser) readToken_question() {
+	ecmaVersion := this.options.ecmaVersion.(int)
+	if ecmaVersion >= 11 {
+		next := this.input[this.pos+1]
+		if next == 46 {
+			next2 := this.input[this.pos+2]
+			if next2 < 48 || next2 > 57 {
+				this.finishOp(TokenTypes[TOKEN_QUESTIONDOT], 2)
+				return
+			}
+		}
+		if next == 63 {
+			if ecmaVersion >= 12 {
+				next2 := this.input[this.pos+2]
+				if next2 == 61 {
+					this.finishOp(TokenTypes[TOKEN_ASSIGN], 3)
+					return
+				}
+			}
+			this.finishOp(TokenTypes[TOKEN_COALESCE], 2)
 			return
 		}
-		pp.finishOp(TokenTypes[TOKEN_INCDEC], 2)
+	}
+	this.finishOp(TokenTypes[TOKEN_QUESTION], 1)
+}
+
+func (this *Parser) readToken_eq_excl(code rune) {
+	next := this.input[this.pos+1]
+	if next == 61 {
+
+		if this.input[this.pos+2] == 62 {
+			this.finishOp(TokenTypes[TOKEN_EQUALITY], 3)
+		} else {
+			this.finishOp(TokenTypes[TOKEN_EQUALITY], 2)
+		}
+		return
+	}
+	if code == 61 && next == 62 && this.options.ecmaVersion.(int) >= 6 { // '=>'
+		this.pos += 2
+		this.finishToken(TokenTypes[TOKEN_ARROW], nil)
+		return
+	}
+	if code == 61 {
+		this.finishOp(TokenTypes[TOKEN_EQUALITY], 1)
+		return
+	}
+
+	this.finishOp(TokenTypes[TOKEN_PREFIX], 1)
+}
+
+func (this *Parser) readToken_lt_gt(code rune) {
+	next := rune(this.input[this.pos+1])
+	size := 1
+	if next == code {
+		if code == 62 && this.input[this.pos+2] == 62 {
+			size = 3
+		} else {
+			size = 2
+		}
+
+		if this.input[this.pos+size] == 61 {
+			this.finishOp(TokenTypes[TOKEN_ASSIGN], size+1)
+			return
+		}
+		this.finishOp(TokenTypes[TOKEN_BITSHIFT], size)
+		return
+	}
+	if next == 33 && code == 60 && !this.InModule && this.input[this.pos+2] == 45 &&
+		this.input[this.pos+3] == 45 {
+		// `<!--`, an XML-style comment that should be interpreted as a line comment
+		this.skipLineComment(4)
+		this.skipSpace()
+		this.nextToken()
 		return
 	}
 	if next == 61 {
-		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
-		return
+		size = 2
 	}
-	pp.finishOp(TokenTypes[TOKEN_PLUSMIN], 1)
+	this.finishOp(TokenTypes[TOKEN_RELATIONAL], size)
 }
 
-func (pp *Parser) skipLineComment(startSkip int) {
-	ch := pp.Input[pp.Pos+startSkip]
-	pp.Pos = pp.Pos + startSkip
-	for pp.Pos < len(pp.Input) && !isNewLine(rune(ch)) {
-		pp.Pos = pp.Pos + 1
-		ch = pp.Input[pp.Pos]
+func (this *Parser) readToken_plus_min(code rune) {
+	next := rune(this.input[this.pos+1])
+	if next == code {
+		if next == 45 && !this.InModule && this.input[this.pos+2] == 62 &&
+			(this.LastTokEnd == 0 || lineBreak.Match([]byte(this.input[this.LastTokEnd:this.pos]))) {
+			// A `-->` line comment
+			this.skipLineComment(3)
+			this.skipSpace()
+			this.nextToken()
+			return
+		}
+		this.finishOp(TokenTypes[TOKEN_INCDEC], 2)
+		return
+	}
+	if next == 61 {
+		this.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		return
+	}
+	this.finishOp(TokenTypes[TOKEN_PLUSMIN], 1)
+}
+
+func (this *Parser) skipLineComment(startSkip int) {
+	ch := this.input[this.pos+startSkip]
+	this.pos = this.pos + startSkip
+	for this.pos < len(this.input) && !isNewLine(rune(ch)) {
+		this.pos = this.pos + 1
+		ch = this.input[this.pos]
 	}
 
-	if pp.Options.OnComment != nil {
+	if this.options.OnComment != nil {
 		// TODO I don't really have onComment ported and might be that it never happens
 		/*
-			pp.Options.OnComment.(false, this.input.slice(start+startSkip, this.pos), start, this.pos,
+			this.Options.OnComment.(false, this.input.slice(start+startSkip, this.pos), start, this.pos,
 				startLoc, this.curPosition())
 		*/
 	}
 }
 
-func (pp *Parser) readToken_caret() {
-	next := pp.Input[pp.Pos+1]
+func (this *Parser) readToken_caret() {
+	next := this.input[this.pos+1]
 	if next == 61 {
-		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		this.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
 		return
 	}
-	pp.finishOp(TokenTypes[TOKEN_BITWISEXOR], 1)
+	this.finishOp(TokenTypes[TOKEN_BITWISEXOR], 1)
 }
 
-func (pp *Parser) readToken_pipe_amp(code rune) {
-	next := rune(pp.Input[pp.Pos+1])
+func (this *Parser) readToken_pipe_amp(code rune) {
+	next := rune(this.input[this.pos+1])
 	if next == code {
-		if pp.Options.EcmaVersion.(int) >= 12 {
-			next2 := pp.Input[pp.Pos+2]
+		if this.options.ecmaVersion.(int) >= 12 {
+			next2 := this.input[this.pos+2]
 			if next2 == 61 {
-				pp.finishOp(TokenTypes[TOKEN_ASSIGN], 3)
+				this.finishOp(TokenTypes[TOKEN_ASSIGN], 3)
 				return
 			}
 
 			if code == 124 {
-				pp.finishOp(TokenTypes[TOKEN_LOGICALOR], 2)
+				this.finishOp(TokenTypes[TOKEN_LOGICALOR], 2)
 				return
 			} else {
-				pp.finishOp(TokenTypes[TOKEN_LOGICALAND], 2)
+				this.finishOp(TokenTypes[TOKEN_LOGICALAND], 2)
 				return
 			}
 		}
 	}
 
 	if next == 61 {
-		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		this.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
 		return
 	}
 
 	if code == 124 {
-		pp.finishOp(TokenTypes[TOKEN_BITWISEOR], 1)
+		this.finishOp(TokenTypes[TOKEN_BITWISEOR], 1)
 		return
 	}
 
-	pp.finishOp(TokenTypes[TOKEN_BITWISEAND], 1)
+	this.finishOp(TokenTypes[TOKEN_BITWISEAND], 1)
 }
 
-func (pp *Parser) readToken_mult_modulo_exp(code rune) {
-	next := pp.Input[pp.Pos+1]
+func (this *Parser) readToken_mult_modulo_exp(code rune) {
+	next := this.input[this.pos+1]
 	size := 1
 
 	var tokenType *TokenType
@@ -355,97 +422,244 @@ func (pp *Parser) readToken_mult_modulo_exp(code rune) {
 	}
 
 	// exponentiation operator ** and **=
-	if pp.Options.EcmaVersion.(int) >= 7 && code == 42 && next == 42 {
+	if this.options.ecmaVersion.(int) >= 7 && code == 42 && next == 42 {
 		size = size + 1
 		tokenType = TokenTypes[TOKEN_STAR]
-		next = pp.Input[pp.Pos+2]
+		next = this.input[this.pos+2]
 	}
 
 	if next == 61 {
-		pp.finishOp(TokenTypes[TOKEN_ASSIGN], size+1)
+		this.finishOp(TokenTypes[TOKEN_ASSIGN], size+1)
 		return
 	}
 
-	pp.finishOp(tokenType, size)
+	this.finishOp(tokenType, size)
 }
 
-func (pp *Parser) readToken_slash() {
-	next := pp.Input[pp.Pos+1]
-	if pp.ExprAllowed {
-		pp.Pos++
-		pp.readRegexp()
+func (this *Parser) readToken_slash() {
+	next := this.input[this.pos+1]
+	if this.ExprAllowed {
+		this.pos++
+		this.readRegexp()
 		return
 	}
 	if next == 61 {
-		pp.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
+		this.finishOp(TokenTypes[TOKEN_ASSIGN], 2)
 		return
 	}
-	pp.finishOp(TokenTypes[TOKEN_SLASH], 1)
+	this.finishOp(TokenTypes[TOKEN_SLASH], 1)
 }
 
-func (pp *Parser) readRegexp() {
-	panic("unimplemented")
-}
+func (this *Parser) readRegexp() {
+	escaped, inClass, start := this.pos == 0, this.pos == 0, this.pos
+	for {
+		if this.pos >= len(this.input) {
+			// this.raise(start, "Unterminated regular expression")
+			break
+		}
+		ch := this.input[this.pos]
+		if lineBreak.Match([]byte{ch}) {
+			// this.raise(start, "Unterminated regular expression")
+			break
+		}
 
-func (pp *Parser) readString(code rune) {
-	panic("unimplemented")
-}
+		if !escaped {
+			if ch == '[' {
+				inClass = true
+			} else if ch == ']' && inClass {
+				inClass = false
+			} else if ch == '/' && !inClass {
+				break
+			}
+			escaped = ch == '\\'
+		} else {
+			escaped = false
+		}
 
-func (pp *Parser) readNumber(false bool) {
-	panic("unimplemented")
-}
-
-func (pp *Parser) readRadixNumber(i int) {
-	panic("unimplemented")
-}
-
-func (pp *Parser) readToken_numberSign() {
-	panic("unimplemented")
-}
-
-func (pp *Parser) readToken_dot() {
-	next := pp.Input[pp.Pos+1]
-	if next >= 48 && next <= 57 {
-		pp.readNumber(true)
-		return
+		this.pos = this.pos + 1
 	}
 
-	next2 := pp.Input[pp.Pos+2]
-	if pp.Options.EcmaVersion.(int) >= 6 && next == 46 && next2 == 46 { // 46 = dot '.'
-		pp.Pos += 3
-		pp.finishToken(TokenTypes[TOKEN_ELLIPSIS], nil)
-		return
+	pattern := this.input[start:this.pos]
+	this.pos = this.pos + 1
+	flagsStart := this.pos
+	flags := this.readWord1()
+	if this.ContainsEsc {
+		this.unexpected(flagsStart)
+	}
+
+	// Validate pattern
+	var state *RegExpState
+	if this.RegexpState != nil {
+		state = this.RegexpState
 	} else {
-		pp.Pos++
-		pp.finishToken(TokenTypes[TOKEN_DOT], nil)
-		return
+		this.RegexpState = this.NewRegExpState()
+		state = this.RegexpState
 	}
+
+	state.reset(start, pattern, flags)
+	this.validateRegExpFlags(state)
+	this.validateRegExpPattern(state)
+
+	// Create Literal#value property value.
+
+	value := &regexp.Regexp{} // new RegExp(pattern, flags)
+
+	this.finishToken(TokenTypes[TOKEN_REGEXP], struct {
+		pattern string
+		flags   string
+		value   *regexp.Regexp
+	}{
+		pattern: pattern,
+		flags:   flags,
+		value:   value,
+	})
 }
 
-func (pp *Parser) finishToken(tokenType *TokenType, value *string) {
-	pp.End = pp.Pos
-	if pp.Options.Locations {
-		pp.EndLoc = pp.currentPosition()
+func (this *Parser) validateRegExpPattern(state *RegExpState) {
+	panic("unimplemented")
+}
+
+func (this *Parser) validateRegExpFlags(state *RegExpState) {
+	panic("unimplemented")
+}
+
+func (this *Parser) unexpected(flagsStart int) {
+	panic("unimplemented")
+}
+
+func (this *Parser) readString(code rune) {
+	panic("unimplemented")
+}
+
+func (this *Parser) readNumber(false bool) {
+	panic("unimplemented")
+}
+
+func (this *Parser) readRadixNumber(i int) {
+	panic("unimplemented")
+}
+
+func (this *Parser) readToken_numberSign() {
+	ecmaVersion := this.options.ecmaVersion.(int)
+	code := rune(35) // '#'
+	if ecmaVersion >= 13 {
+		this.pos = this.pos + 1
+		code = this.fullCharCodeAtPos()
+		if IsIdentifierStart(code, true) || code == 92 /* '\' */ {
+
+			this.finishToken(TokenTypes[TOKEN_PRIVATEID], this.readWord1())
+			return
+		}
+	}
+
+	// TODO -> this.raise(this.pos, "Unexpected character '"+codePointToString(code)+"'")
+}
+
+func (this *Parser) readWord() {
+	word := this.readWord1()
+	t := TokenTypes[TOKEN_NAME]
+
+	if tt, found := keywords[word]; found {
+		t = TokenTypes[tt]
+	}
+
+	this.finishToken(t, word)
+}
+
+func (this *Parser) readWord1() string {
+	this.ContainsEsc = false
+	word, first, chunkStart := "", true, this.pos
+
+	astral := this.options.ecmaVersion.(int) >= 6
+
+	for this.pos < len(this.input) {
+		ch := this.fullCharCodeAtPos()
+		if isIdentifierChar(ch, astral) {
+			if ch <= 0xffff {
+				this.pos = this.pos + 1
+			} else {
+				this.pos = this.pos + 2
+			}
+		} else if ch == 92 { // "\"
+			this.ContainsEsc = true
+			word = this.input[chunkStart:this.pos]
+			escStart := this.pos
+			this.pos = this.pos + 1
+			if this.input[this.pos] != 117 { // "u"
+				this.invalidStringToken(this.pos, "Expecting Unicode escape sequence \\uXXXX")
+				// return?
+			}
+
+			this.pos = this.pos + 1
+			esc := this.readCodePoint()
+
+			/*
+				sorcery:
+
+				if (!(first ? isIdentifierStart : isIdentifierChar)(esc, astral))
+				  this.invalidStringToken(escStart, "Invalid Unicode escape")
+
+			*/
+			word = strings.Join([]string{word, CodePointToString(esc)}, "")
+			chunkStart = this.pos
+		} else {
+			break
+		}
+		first = false
+	}
+	return strings.Join([]string{word, this.input[chunkStart:this.pos]}, "")
+}
+
+func (this *Parser) invalidStringToken(pos int, s string) {
+	panic("unimplemented")
+}
+
+func (this *Parser) readCodePoint() int {
+	panic("unimplemented")
+}
+
+func (this *Parser) readToken_dot() {
+	next := this.input[this.pos+1]
+	if next >= 48 && next <= 57 {
+		this.readNumber(true)
+		return
+	}
+
+	next2 := this.input[this.pos+2]
+	if this.options.ecmaVersion.(int) >= 6 && next == 46 && next2 == 46 { // 46 = dot '.'
+		this.pos += 3
+		this.finishToken(TokenTypes[TOKEN_ELLIPSIS], nil)
+		return
+	}
+	this.pos++
+	this.finishToken(TokenTypes[TOKEN_DOT], nil)
+
+}
+
+func (this *Parser) finishToken(tokenType *TokenType, value any) {
+	this.End = this.pos
+	if this.options.Locations {
+		this.EndLoc = this.currentPosition()
 	}
 	prevType := tokenType
-	pp.Type = tokenType
-	pp.Value = value
-	pp.updateContext(prevType)
+	this.Type = tokenType
+	this.Value = value
+	this.updateContext(prevType)
 }
 
-func (pp *Parser) currentPosition() *SourceLocation {
+func (this *Parser) currentPosition() *SourceLocation {
 	panic("unimplemented")
 }
 
-func (pp *Parser) skipSpace() {
+func (this *Parser) skipSpace() {
 	panic("unimplemented")
 }
 
 // #### SCOPE RELATED CODE
 
-func (pp *Parser) braceIsBlock(prevType Token) bool {
-	parent := pp.currentContext().Identifier
-	isExpr := pp.currentContext().IsExpr
+func (this *Parser) braceIsBlock(prevType Token) bool {
+	parent := this.currentContext().Identifier
+	isExpr := this.currentContext().IsExpr
 
 	if parent == FUNCTION_EXPRESSION || parent == FUNCTION_STATEMENT {
 		return true
@@ -455,7 +669,7 @@ func (pp *Parser) braceIsBlock(prevType Token) bool {
 		return !isExpr
 	}
 
-	if prevType == TOKEN_RETURN || prevType == TOKEN_NAME && pp.ExprAllowed {
+	if prevType == TOKEN_RETURN || prevType == TOKEN_NAME && this.ExprAllowed {
 		// return lineBreak.test(this.input.slice(this.lastTokEnd, this.start))
 	}
 
@@ -471,58 +685,58 @@ func (pp *Parser) braceIsBlock(prevType Token) bool {
 		return false
 	}
 
-	return !pp.ExprAllowed
+	return !this.ExprAllowed
 }
 
-func (pp *Parser) enterScope(flags Flags) {
-	pp.ScopeStack = append(pp.ScopeStack, NewScope(flags))
+func (this *Parser) enterScope(flags Flags) {
+	this.ScopeStack = append(this.ScopeStack, NewScope(flags))
 }
 
-func (pp *Parser) exitScope() {
-	pp.ScopeStack = pp.ScopeStack[:len(pp.ScopeStack)-1]
+func (this *Parser) exitScope() {
+	this.ScopeStack = this.ScopeStack[:len(this.ScopeStack)-1]
 }
 
-func (pp *Parser) currentScope() *Scope {
-	return pp.ScopeStack[len(pp.ScopeStack)-1]
+func (this *Parser) currentScope() *Scope {
+	return this.ScopeStack[len(this.ScopeStack)-1]
 }
 
-func (pp *Parser) treatFunctionsAsVar() bool {
-	return pp.treatFunctionsAsVarInScope(pp.currentScope())
+func (this *Parser) treatFunctionsAsVar() bool {
+	return this.treatFunctionsAsVarInScope(this.currentScope())
 }
 
-func (pp *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
-	return (scope.Flags&SCOPE_FUNCTION != 0) || (!pp.InModule && scope.Flags&SCOPE_TOP != 0)
+func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
+	return (scope.Flags&SCOPE_FUNCTION != 0) || (!this.InModule && scope.Flags&SCOPE_TOP != 0)
 }
 
-func (pp *Parser) declareName(name string, bindingType Flags, pos Location) {
+func (this *Parser) declareName(name string, bindingType Flags, pos Location) {
 	redeclared := false
 
-	scope := pp.currentScope()
+	scope := this.currentScope()
 	if bindingType == BIND_LEXICAL {
 		redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Functions, name) || slices.Contains(scope.Var, name)
 		scope.Lexical = append(scope.Lexical, name)
-		if pp.InModule && (scope.Flags&SCOPE_TOP != 0) {
-			delete(pp.UndefinedExports, name)
+		if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
+			delete(this.UndefinedExports, name)
 		}
 	} else if bindingType == BIND_SIMPLE_CATCH {
 		scope.Lexical = append(scope.Lexical, name)
 	} else if bindingType == BIND_FUNCTION {
-		if pp.treatFunctionsAsVar() {
+		if this.treatFunctionsAsVar() {
 			redeclared = slices.Contains(scope.Lexical, name)
 		} else {
 			redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Var, name)
 		}
 		scope.Functions = append(scope.Functions, name)
 	} else {
-		for _, scope := range pp.ScopeStack {
-			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !pp.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
+		for _, scope := range this.ScopeStack {
+			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !this.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
 				redeclared = true
 				break
 			}
 
 			scope.Var = append(scope.Var, name)
-			if pp.InModule && (scope.Flags&SCOPE_TOP != 0) {
-				delete(pp.UndefinedExports, name)
+			if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
+				delete(this.UndefinedExports, name)
 			}
 
 			if scope.Flags&SCOPE_VAR != 0 {
@@ -532,46 +746,46 @@ func (pp *Parser) declareName(name string, bindingType Flags, pos Location) {
 	}
 
 	if redeclared {
-		// pp.raiseRecoverable(pos, `Identifier '${name}' has already been declared`)
+		// this.raiseRecoverable(pos, `Identifier '${name}' has already been declared`)
 	}
 }
 
 // #### NODE RELATED CODE
 
-func (pp *Parser) startNode() *Node {
-	return NewNode(pp, pp.Start, pp.StartLoc.Start)
+func (this *Parser) startNode() *Node {
+	return NewNode(this, this.Start, this.StartLoc.Start)
 }
 
-func (pp *Parser) startNodeAt(pos int, loc *Location) *Node {
-	return NewNode(pp, pos, loc)
+func (this *Parser) startNodeAt(pos int, loc *Location) *Node {
+	return NewNode(this, pos, loc)
 }
 
-func (pp *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *SourceLocation) {
+func (this *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *SourceLocation) {
 	node.Type = finishType
 	node.End = pos
-	if pp.Options.Locations {
+	if this.options.Locations {
 		node.Loc.End = loc.End
 	}
 
-	if pp.Options.Ranges {
+	if this.options.Ranges {
 		node.Range[1] = pos
 	}
 }
 
-func (pp *Parser) finishNode(node *Node, finishType NodeType) {
-	pp.finishNodeAt(node, finishType, pp.LastTokEnd, pp.LastTokEndLoc)
+func (this *Parser) finishNode(node *Node, finishType NodeType) {
+	this.finishNodeAt(node, finishType, this.LastTokEnd, this.LastTokEndLoc)
 }
 
 /*
 I think I can skip this?
 
-	pp.finishNodeAt = function(node, type, pos, loc) {
+	this.finishNodeAt = function(node, type, pos, loc) {
 	  return finishNodeAt.call(this, node, type, pos, loc)
 	}
 
 TODO ->
 
-	pp.copyNode = function(node) {
+	this.copyNode = function(node) {
 	  let newNode = new Node(this, node.start, this.startLoc)
 	  for (let prop in node) newNode[prop] = node[prop]
 	  return newNode
@@ -580,17 +794,17 @@ TODO ->
 
 // #### CONTEXT RELATED CODE
 
-func (pp *Parser) initialContext() []*TokenContext {
+func (this *Parser) initialContext() []*TokenContext {
 	return []*TokenContext{TokenContexts[BRACKET_STATEMENT]}
 }
 
-func (pp *Parser) currentContext() *TokenContext {
-	return pp.Context[len(pp.Context)-1]
+func (this *Parser) currentContext() *TokenContext {
+	return this.Context[len(this.Context)-1]
 }
 
-func (pp *Parser) inGeneratorContext() bool {
-	for i := len(pp.Context); i >= 1; i-- {
-		context := pp.Context[i]
+func (this *Parser) inGeneratorContext() bool {
+	for i := len(this.Context); i >= 1; i-- {
+		context := this.Context[i]
 		if context.Token == "function" {
 			return context.Generator
 		}
@@ -598,68 +812,68 @@ func (pp *Parser) inGeneratorContext() bool {
 	return false
 }
 
-func (pp *Parser) updateContext(prevType *TokenType) {
-	update, current := pp.Type, pp.Type
+func (this *Parser) updateContext(prevType *TokenType) {
+	update, current := this.Type, this.Type
 	if len(current.keyword) != 0 && prevType.identifier == TOKEN_DOT {
-		pp.ExprAllowed = false
+		this.ExprAllowed = false
 	} else if current.updateContext != nil {
 		update.updateContext = current.updateContext
 		update.updateContext.updateContext(prevType)
 	} else {
-		pp.ExprAllowed = current.beforeExpr
+		this.ExprAllowed = current.beforeExpr
 	}
 }
 
-func (pp *Parser) overrideContext(tokenCtx *TokenContext) {
-	if pp.currentContext().Identifier != tokenCtx.Identifier {
-		pp.Context[len(pp.Context)-1] = tokenCtx
+func (this *Parser) overrideContext(tokenCtx *TokenContext) {
+	if this.currentContext().Identifier != tokenCtx.Identifier {
+		this.Context[len(this.Context)-1] = tokenCtx
 	}
 }
 
-func (pp *Parser) initAllUpdateContext() {
+func (this *Parser) initAllUpdateContext() {
 	TokenTypes[TOKEN_PARENR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if len(pp.Context) == 1 {
-			pp.ExprAllowed = true
+		if len(this.Context) == 1 {
+			this.ExprAllowed = true
 			return
 		}
 
-		out := pp.Context[len(pp.Context)-1]
-		pp.Context = pp.Context[:len(pp.Context)-1]
-		if out.Identifier == BRACKET_STATEMENT && pp.currentContext().Token == "function" {
-			out = pp.Context[len(pp.Context)-1]
-			pp.Context = pp.Context[:len(pp.Context)-1]
+		out := this.Context[len(this.Context)-1]
+		this.Context = this.Context[:len(this.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && this.currentContext().Token == "function" {
+			out = this.Context[len(this.Context)-1]
+			this.Context = this.Context[:len(this.Context)-1]
 		}
-		pp.ExprAllowed = !out.IsExpr
+		this.ExprAllowed = !out.IsExpr
 	}}
 
 	TokenTypes[TOKEN_BRACER].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if len(pp.Context) == 1 {
-			pp.ExprAllowed = true
+		if len(this.Context) == 1 {
+			this.ExprAllowed = true
 			return
 		}
 
-		out := pp.Context[len(pp.Context)-1]
-		pp.Context = pp.Context[:len(pp.Context)-1]
-		if out.Identifier == BRACKET_STATEMENT && pp.currentContext().Token == "function" {
-			out = pp.Context[len(pp.Context)-1]
-			pp.Context = pp.Context[:len(pp.Context)-1]
+		out := this.Context[len(this.Context)-1]
+		this.Context = this.Context[:len(this.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && this.currentContext().Token == "function" {
+			out = this.Context[len(this.Context)-1]
+			this.Context = this.Context[:len(this.Context)-1]
 		}
-		pp.ExprAllowed = !out.IsExpr
+		this.ExprAllowed = !out.IsExpr
 	}}
 
 	TokenTypes[TOKEN_BRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if pp.braceIsBlock(token.identifier) {
-			pp.Context = append(pp.Context, TokenContexts[BRACKET_STATEMENT])
+		if this.braceIsBlock(token.identifier) {
+			this.Context = append(this.Context, TokenContexts[BRACKET_STATEMENT])
 		} else {
-			pp.Context = append(pp.Context, TokenContexts[BRACKET_EXPRESSION])
+			this.Context = append(this.Context, TokenContexts[BRACKET_EXPRESSION])
 		}
-		pp.ExprAllowed = true
+		this.ExprAllowed = true
 
 	}}
 
 	TokenTypes[TOKEN_DOLLARBRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		pp.Context = append(pp.Context, TokenContexts[BRACKET_TEMPLATE])
-		pp.ExprAllowed = true
+		this.Context = append(this.Context, TokenContexts[BRACKET_TEMPLATE])
+		this.ExprAllowed = true
 	}}
 
 	TokenTypes[TOKEN_PARENL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
@@ -667,11 +881,11 @@ func (pp *Parser) initAllUpdateContext() {
 
 		if statementParens {
 
-			pp.Context = append(pp.Context, TokenContexts[PAREN_STATEMENT])
+			this.Context = append(this.Context, TokenContexts[PAREN_STATEMENT])
 		} else {
-			pp.Context = append(pp.Context, TokenContexts[PAREN_EXPRESSION])
+			this.Context = append(this.Context, TokenContexts[PAREN_EXPRESSION])
 		}
-		pp.ExprAllowed = true
+		this.ExprAllowed = true
 	}}
 
 	TokenTypes[TOKEN_INCDEC].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
@@ -681,50 +895,50 @@ func (pp *Parser) initAllUpdateContext() {
 	TokenTypes[TOKEN_FUNCTION].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
 		prevType := token.identifier
 
-		if token.beforeExpr && prevType == TOKEN_ELSE && !(prevType == TOKEN_SEMI && pp.currentContext().Identifier == PAREN_STATEMENT) && !(prevType == TOKEN_RETURN /*&& lineBreak.test(this.input.slice(this.lastTokEnd, this.start)))*/) && !((prevType == TOKEN_COLON || prevType == TOKEN_BRACEL) && pp.currentContext().Identifier == BRACKET_STATEMENT) {
-			pp.Context = append(pp.Context, TokenContexts[FUNCTION_EXPRESSION])
+		if token.beforeExpr && prevType == TOKEN_ELSE && !(prevType == TOKEN_SEMI && this.currentContext().Identifier == PAREN_STATEMENT) && !(prevType == TOKEN_RETURN /*&& lineBreak.test(this.input.slice(this.lastTokEnd, this.start)))*/) && !((prevType == TOKEN_COLON || prevType == TOKEN_BRACEL) && this.currentContext().Identifier == BRACKET_STATEMENT) {
+			this.Context = append(this.Context, TokenContexts[FUNCTION_EXPRESSION])
 		} else {
-			pp.Context = append(pp.Context, TokenContexts[FUNCTION_STATEMENT])
+			this.Context = append(this.Context, TokenContexts[FUNCTION_STATEMENT])
 		}
 	}}
 
 	TokenTypes[TOKEN_COLON].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if pp.currentContext().Token == "function" {
-			pp.Context = pp.Context[:len(pp.Context)-1]
+		if this.currentContext().Token == "function" {
+			this.Context = this.Context[:len(this.Context)-1]
 		}
-		pp.ExprAllowed = true
+		this.ExprAllowed = true
 	}}
 
 	TokenTypes[TOKEN_BACKQUOTE].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if pp.currentContext().Identifier == QUOTE_TEMPLATE {
-			pp.Context = pp.Context[:len(pp.Context)-1]
+		if this.currentContext().Identifier == QUOTE_TEMPLATE {
+			this.Context = this.Context[:len(this.Context)-1]
 		} else {
-			pp.Context = append(pp.Context, TokenContexts[QUOTE_TEMPLATE])
+			this.Context = append(this.Context, TokenContexts[QUOTE_TEMPLATE])
 		}
 	}}
 
 	TokenTypes[TOKEN_STAR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
 		if token.identifier == TOKEN_FUNCTION {
-			idx := len(pp.Context) - 1
+			idx := len(this.Context) - 1
 
-			if pp.Context[idx].Identifier == FUNCTION_EXPRESSION {
-				pp.Context[idx] = TokenContexts[FUNCTION_EXPRESSION_GENERATOR]
+			if this.Context[idx].Identifier == FUNCTION_EXPRESSION {
+				this.Context[idx] = TokenContexts[FUNCTION_EXPRESSION_GENERATOR]
 			} else {
-				pp.Context[idx] = TokenContexts[FUNCTION_GENERATOR]
+				this.Context[idx] = TokenContexts[FUNCTION_GENERATOR]
 			}
-			pp.ExprAllowed = true
+			this.ExprAllowed = true
 		}
 	}}
 
 	TokenTypes[TOKEN_NAME].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
 		allowed := false
 
-		if pp.Options.EcmaVersion.(int) >= 6 && token.identifier != TOKEN_DOT {
-			if pp.Value == "of" && !pp.ExprAllowed || pp.Value == "yield" || pp.inGeneratorContext() {
+		if this.options.ecmaVersion.(int) >= 6 && token.identifier != TOKEN_DOT {
+			if this.Value == "of" && !this.ExprAllowed || this.Value == "yield" || this.inGeneratorContext() {
 				allowed = true
 			}
 		}
-		pp.ExprAllowed = allowed
+		this.ExprAllowed = allowed
 	}}
 }
 

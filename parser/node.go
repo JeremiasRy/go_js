@@ -285,15 +285,15 @@ func NewNode(parser *Parser, pos int, loc *Location) *Node {
 		End:   0,
 	}
 
-	if parser.Options.Locations {
+	if parser.options.Locations {
 		node.Loc = NewSourceLocation(parser, loc, nil)
 	}
 
-	if parser.Options.DirectSourceFile != nil {
-		node.SourceFile = parser.Options.DirectSourceFile
+	if parser.options.DirectSourceFile != nil {
+		node.SourceFile = parser.options.DirectSourceFile
 	}
 
-	if parser.Options.Ranges {
+	if parser.options.Ranges {
 		node.Range = [2]int{pos, 0}
 	}
 	return node

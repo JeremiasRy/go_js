@@ -90,6 +90,11 @@ const (
 	TOKEN_DELETE
 )
 
+// this needs to be filled
+var keywords = map[string]Token{
+	"break": TOKEN_BREAK,
+}
+
 type Binop struct {
 	prec uint
 }

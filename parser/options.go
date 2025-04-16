@@ -1,7 +1,7 @@
 package parser
 
 type Options struct {
-	EcmaVersion                 interface{}
+	ecmaVersion                 interface{}
 	SourceType                  string
 	OnInsertedSemicolon         interface{}
 	OnTrailingComma             interface{}
@@ -23,7 +23,7 @@ type Options struct {
 }
 
 var DefaultOptions = Options{
-	EcmaVersion:                 nil,
+	ecmaVersion:                 nil,
 	SourceType:                  "script",
 	OnInsertedSemicolon:         nil,
 	OnTrailingComma:             nil,
@@ -53,32 +53,32 @@ func GetOptions(opts *Options) Options {
 		options = DefaultOptions
 	} else {
 		options = DefaultOptions
-		if opts.EcmaVersion != nil {
-			options.EcmaVersion = opts.EcmaVersion
+		if opts.ecmaVersion != nil {
+			options.ecmaVersion = opts.ecmaVersion
 		}
 		if opts.SourceType != "" {
 			options.SourceType = opts.SourceType
 		}
 	}
 
-	switch v := options.EcmaVersion.(type) {
+	switch v := options.ecmaVersion.(type) {
 	case string:
 		if v == "latest" {
-			options.EcmaVersion = 1e8
+			options.ecmaVersion = 1e8
 		}
 	case nil:
 		if !warnedAboutEcmaVersion {
 			warnedAboutEcmaVersion = true
-			options.EcmaVersion = 11
+			options.ecmaVersion = 11
 		}
 	case int:
 		if v >= 2015 {
-			options.EcmaVersion = v - 2009
+			options.ecmaVersion = v - 2009
 		}
 	}
 
 	if options.AllowReserved == nil {
-		ecmaVer, ok := options.EcmaVersion.(int)
+		ecmaVer, ok := options.ecmaVersion.(int)
 		if !ok {
 			options.AllowReserved = new(bool)
 			*options.AllowReserved = true
@@ -89,7 +89,7 @@ func GetOptions(opts *Options) Options {
 	}
 
 	if opts == nil || !opts.AllowHashBang {
-		ecmaVer, ok := options.EcmaVersion.(int)
+		ecmaVer, ok := options.ecmaVersion.(int)
 		if ok && ecmaVer >= 14 {
 			options.AllowHashBang = true
 		}
