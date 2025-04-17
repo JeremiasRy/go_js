@@ -129,7 +129,7 @@ func pushComment(options Options, array []*Comment) func(bool, string, int, int,
 			comment.Type = "Block"
 		}
 		if options.Locations {
-			comment.Loc = NewSourceLocation(pp, startLoc, endLoc)
+			comment.Loc = NewSourceLocation(Pp, startLoc, endLoc)
 		}
 		if options.Ranges {
 			comment.Range = &[2]int{start, end}

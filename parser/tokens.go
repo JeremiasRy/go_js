@@ -90,11 +90,6 @@ const (
 	TOKEN_DELETE
 )
 
-// this needs to be filled
-var keywords = map[string]Token{
-	"break": TOKEN_BREAK,
-}
-
 type Binop struct {
 	prec uint
 }
@@ -117,7 +112,7 @@ type TokenType struct {
 	identifier    Token
 }
 
-var TokenTypes = map[Token]*TokenType{
+var tokenTypes = map[Token]*TokenType{
 	// Basic token types
 	TOKEN_NUM:       newToken("num", "", map[string]bool{"startsExpr": true}, nil, TOKEN_NUM),
 	TOKEN_REGEXP:    newToken("regexp", "", map[string]bool{"startsExpr": true}, nil, TOKEN_REGEXP),
@@ -204,6 +199,44 @@ var TokenTypes = map[Token]*TokenType{
 	TOKEN_DELETE:     newToken("delete", "delete", map[string]bool{"beforeExpr": true, "prefix": true, "startsExpr": true}, nil, TOKEN_DELETE),
 }
 
+var keywords = map[string]*TokenType{
+	"break":      tokenTypes[TOKEN_BREAK],
+	"case":       tokenTypes[TOKEN_CASE],
+	"catch":      tokenTypes[TOKEN_CATCH],
+	"continue":   tokenTypes[TOKEN_CONTINUE],
+	"debugger":   tokenTypes[TOKEN_DEBUGGER],
+	"default":    tokenTypes[TOKEN_DEFAULT],
+	"do":         tokenTypes[TOKEN_DO],
+	"else":       tokenTypes[TOKEN_ELSE],
+	"finally":    tokenTypes[TOKEN_FINALLY],
+	"for":        tokenTypes[TOKEN_FOR],
+	"function":   tokenTypes[TOKEN_FUNCTION],
+	"if":         tokenTypes[TOKEN_IF],
+	"return":     tokenTypes[TOKEN_RETURN],
+	"switch":     tokenTypes[TOKEN_SWITCH],
+	"throw":      tokenTypes[TOKEN_THROW],
+	"try":        tokenTypes[TOKEN_TRY],
+	"var":        tokenTypes[TOKEN_VAR],
+	"const":      tokenTypes[TOKEN_CONST],
+	"while":      tokenTypes[TOKEN_WHILE],
+	"with":       tokenTypes[TOKEN_WITH],
+	"new":        tokenTypes[TOKEN_NEW],
+	"this":       tokenTypes[TOKEN_THIS],
+	"super":      tokenTypes[TOKEN_SUPER],
+	"class":      tokenTypes[TOKEN_CLASS],
+	"extends":    tokenTypes[TOKEN_EXTENDS],
+	"export":     tokenTypes[TOKEN_EXPORT],
+	"import":     tokenTypes[TOKEN_IMPORT],
+	"null":       tokenTypes[TOKEN_NULL],
+	"true":       tokenTypes[TOKEN_TRUE],
+	"false":      tokenTypes[TOKEN_FALSE],
+	"in":         tokenTypes[TOKEN_IN],
+	"instanceof": tokenTypes[TOKEN_INSTANCEOF],
+	"typeof":     tokenTypes[TOKEN_TYPEOF],
+	"void":       tokenTypes[TOKEN_VOID],
+	"delete":     tokenTypes[TOKEN_DELETE],
+}
+
 func newToken(label string, keyword string, overrides map[string]bool, binop *Binop, identifier Token) *TokenType {
 	defaults := map[string]bool{
 		"beforeExpr": false,
@@ -255,7 +288,7 @@ var TokenContexts = map[TokenContextType]*TokenContext{
 	BRACKET_TEMPLATE:              newTokContext("${", false, false, false, nil, BRACKET_TEMPLATE),
 	PAREN_STATEMENT:               newTokContext("(", false, false, false, nil, PAREN_STATEMENT),
 	PAREN_EXPRESSION:              newTokContext("(", true, false, false, nil, PAREN_EXPRESSION),
-	QUOTE_TEMPLATE:                newTokContext("`", true, true, false, func(p *Parser) { /* JS impl had this: p.tryReadTemplateToken()*/ }, QUOTE_TEMPLATE),
+	QUOTE_TEMPLATE:                newTokContext("`", true, true, false, func(p *Parser) { p.tryReadTemplateToken() }, QUOTE_TEMPLATE),
 	FUNCTION_STATEMENT:            newTokContext("function", false, false, false, nil, FUNCTION_STATEMENT),
 	FUNCTION_EXPRESSION:           newTokContext("function", true, false, false, nil, FUNCTION_EXPRESSION),
 	FUNCTION_EXPRESSION_GENERATOR: newTokContext("function", true, false, true, nil, FUNCTION_EXPRESSION_GENERATOR),

@@ -56,7 +56,7 @@ func IsInAstralSet(code rune, set []rune) bool {
 	return false
 }
 
-func isIdentifierChar(code int32, astral bool) bool {
+func IsIdentifierChar(code int32, astral bool) bool {
 	if code < 48 {
 		return code == 36
 	}
@@ -234,6 +234,10 @@ func buildUnicodeData(ecmaVersion int) {
 	d.NonBinary.Scx = d.NonBinary.ScriptExtensions
 
 	UnicodeData[ecmaVersion] = d
+}
+
+func isNewLine(code rune) bool { // I dont really know how utf-8 translates to this utf-16? :/ I guess I'll see when the bugs start popping out
+	return code == 10 || code == 13 || code == 0x2028 || code == 0x2029
 }
 
 // init populates UnicodeData for ECMAScript versions 9 through 14.
