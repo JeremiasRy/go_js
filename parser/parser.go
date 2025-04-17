@@ -1117,7 +1117,6 @@ Loop:
 		case 32:
 		case 160: // ' '
 			this.pos = this.pos + size
-			break
 		case 13:
 			if this.input[this.pos+size] == 10 {
 				this.pos = this.pos + size
