@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"bytes"
+	"errors"
 	"math"
 	"regexp"
 	"slices"
@@ -96,35 +98,35 @@ func (this *Parser) nextToken() {
 		context.Override(this)
 		return
 	} else {
-		ch, _ := this.fullCharCodeAtPos()
+		ch, _, _ := this.fullCharCodeAtPos()
 		this.readToken(ch)
 	}
 }
 
-func (this *Parser) fullCharCodeAtPos() (code rune, size int) {
+func (this *Parser) fullCharCodeAtPos() (code rune, size int, err error) {
 	if this.pos < 0 || this.pos >= len(this.input) {
-		this.raise(this.pos, "Invalid position")
-		return 0, 0
+
+		return 0, 0, this.raise(this.pos, "Invalid position")
 	}
 	r, size := utf8.DecodeRune(this.input[this.pos:])
 	if r == utf8.RuneError {
-		this.raise(this.pos, "Invalid UTF-8 sequence")
-		return 0, size
+
+		return 0, size, this.raise(this.pos, "Invalid UTF-8 sequence")
 	}
 	if r <= 0xD7FF || r >= 0xDC00 {
-		return r, size
+		return r, size, nil
 	}
 	if this.pos+size >= len(this.input) {
-		return r, size
+		return r, size, nil
 	}
 	next, nextSize := utf8.DecodeRune(this.input[this.pos+size:])
 	if next == utf8.RuneError {
-		return r, size
+		return r, size, nil
 	}
 	if next <= 0xDBFF || next >= 0xE000 {
-		return r, size
+		return r, size, nil
 	}
-	return (r<<10 + next - 0x35FDC00), size + nextSize
+	return (r<<10 + next - 0x35FDC00), size + nextSize, nil
 }
 
 func (this *Parser) readToken(code rune) {
@@ -136,7 +138,7 @@ func (this *Parser) readToken(code rune) {
 	this.getTokenFromCode(code)
 }
 
-func (this *Parser) getTokenFromCode(code rune) {
+func (this *Parser) getTokenFromCode(code rune) error {
 	switch code {
 	case 46: // '.'
 		this.readToken_dot()
@@ -187,29 +189,28 @@ func (this *Parser) getTokenFromCode(code rune) {
 	case 48: // '0'
 		next := this.input[this.pos+1]
 		if next == 120 || next == 88 { // 'x', 'X'
-			this.readRadixNumber(16) // hex number
-			return
+			return this.readRadixNumber(16) // hex number
+
 		}
 		if this.options.ecmaVersion.(int) >= 6 {
 			if next == 111 || next == 79 { // 'o', 'O'
-				this.readRadixNumber(8) // octal number
-				return
+				return this.readRadixNumber(8) // octal number
+
 			}
 			if next == 98 || next == 66 { // 'b', 'B'
-				this.readRadixNumber(2) // binary number
-				return
+				return this.readRadixNumber(2) // binary number
 			}
 		}
-		this.readNumber(false)
+		return this.readNumber(false)
 
 	case 49, 50, 51, 52, 53, 54, 55, 56, 57: // '1'-'9'
-		this.readNumber(false)
+		return this.readNumber(false)
 
 	case 34, 39: // '"', "'"
-		this.readString(code)
+		return this.readString(code)
 
 	case 47: // '/'
-		this.readToken_slash()
+		return this.readToken_slash()
 
 	case 37, 42: // '%', '*'
 		this.readToken_mult_modulo_exp(code)
@@ -236,10 +237,9 @@ func (this *Parser) getTokenFromCode(code rune) {
 		this.finishOp(tokenTypes[TOKEN_PREFIX], 1)
 
 	case 35: // '#'
-		this.readToken_numberSign()
+		return this.readToken_numberSign()
 	}
-
-	// this.raise(this.Pos, "Unexpected character '"+codePointToString(code)+"'")
+	return this.raise(this.pos, "Unexpected character '"+CodePointToString(code)+"'")
 }
 
 func (this *Parser) finishOp(token *TokenType, size int) {
@@ -436,31 +436,30 @@ func (this *Parser) readToken_mult_modulo_exp(code rune) {
 	this.finishOp(tokenType, size)
 }
 
-func (this *Parser) readToken_slash() {
+func (this *Parser) readToken_slash() error {
 	next := this.input[this.pos+1]
 	if this.ExprAllowed {
 		this.pos++
-		this.readRegexp()
-		return
+		return this.readRegexp()
 	}
 	if next == 61 {
 		this.finishOp(tokenTypes[TOKEN_ASSIGN], 2)
-		return
+		return nil
 	}
 	this.finishOp(tokenTypes[TOKEN_SLASH], 1)
+	return nil
 }
 
-func (this *Parser) readRegexp() {
+func (this *Parser) readRegexp() error {
 	escaped, inClass, start := this.pos == 0, this.pos == 0, this.pos
 	for {
 		if this.pos >= len(this.input) {
-			// this.raise(start, "Unterminated regular expression")
-			break
+			return this.raise(start, "Unterminated regular expression")
+
 		}
 		ch := this.input[this.pos]
 		if lineBreak.Match([]byte{ch}) {
-			// this.raise(start, "Unterminated regular expression")
-			break
+			return this.raise(start, "Unterminated regular expression")
 		}
 
 		if !escaped {
@@ -482,9 +481,12 @@ func (this *Parser) readRegexp() {
 	pattern := this.input[start:this.pos]
 	this.pos = this.pos + 1
 	flagsStart := this.pos
-	flags := this.readWord1()
+	flags, err := this.readWord1()
+	if err != nil {
+		return this.raise(this.pos, "Failed to read regExp flags")
+	}
 	if this.ContainsEsc {
-		this.unexpected(flagsStart)
+		return this.unexpected(&flagsStart)
 	}
 
 	// Validate pattern
@@ -513,6 +515,7 @@ func (this *Parser) readRegexp() {
 		flags:   flags,
 		value:   value,
 	})
+	return nil
 }
 
 func (this *Parser) validateRegExpPattern(state *RegExpState) {
@@ -523,29 +526,26 @@ func (this *Parser) validateRegExpFlags(state *RegExpState) {
 	panic("unimplemented")
 }
 
-func (this *Parser) unexpected(flagsStart int) {
-	panic("unimplemented")
-}
-
-func (this *Parser) readString(quote rune) {
+func (this *Parser) readString(quote rune) error {
 	this.pos = this.pos + 1
 	out, chunkStart := []byte{}, this.pos
 	for {
 		if this.pos >= len(this.input) {
-			this.raise(this.Start, "Unterminated string constant")
+			return this.raise(this.Start, "Unterminated string constant")
 		}
-		ch, size := this.fullCharCodeAtPos()
+		ch, size, _ := this.fullCharCodeAtPos()
 		if ch == quote {
 			break
 		}
 		if ch == 92 { // '\'
 			out = append(out, this.input[chunkStart:this.pos]...)
-			out = append(out, this.readEscapedChar(false)...)
+			escapedChar, _ := this.readEscapedChar(false)
+			out = append(out, []byte(escapedChar)...)
 			chunkStart = this.pos
 		} else if ch == 0x2028 || ch == 0x2029 {
 			if this.options.ecmaVersion.(int) < 10 {
-				this.raise(this.Start, "Unterminated string constant")
-				return
+				return this.raise(this.Start, "Unterminated string constant")
+
 			}
 			this.pos = this.pos + 1
 			if this.options.Locations {
@@ -554,8 +554,7 @@ func (this *Parser) readString(quote rune) {
 			}
 		} else {
 			if isNewLine(rune(ch)) {
-				this.raise(this.Start, "Unterminated string constant")
-				return
+				return this.raise(this.Start, "Unterminated string constant")
 			}
 			this.pos = this.pos + size
 		}
@@ -563,29 +562,30 @@ func (this *Parser) readString(quote rune) {
 	out = append(out, this.input[chunkStart:this.pos]...)
 	this.pos = this.pos + 1
 	this.finishToken(tokenTypes[TOKEN_STRING], out)
-	return
+	return nil
 }
 
-func (this *Parser) readNumber(startsWithDot bool) {
+func (this *Parser) readNumber(startsWithDot bool) error {
 	start := this.pos
-	if !startsWithDot && this.readInt(10, nil, true) == nil {
-		this.raise(start, "Invalid number")
+	_, err := this.readInt(10, nil, true)
+	if !startsWithDot && err != nil {
+		return this.raise(start, "Invalid number")
 	}
 	octal := this.pos-start >= 2 && this.input[start] == 48
 	if octal && this.Strict {
-		this.raise(start, "Invalid number")
+		return this.raise(start, "Invalid number")
 	}
 	next := this.input[this.pos]
 	if !octal && !startsWithDot && this.options.ecmaVersion.(int) >= 11 && next == 110 {
 		val := stringToBigInt(this.input[start:this.pos])
 		this.pos = this.pos + 1
-		ch, _ := this.fullCharCodeAtPos()
+		ch, _, _ := this.fullCharCodeAtPos()
 		if IsIdentifierStart(ch, false) {
-			this.raise(this.pos, "Identifier directly after number")
-			return
+			return this.raise(this.pos, "Identifier directly after number")
+
 		}
 		this.finishToken(tokenTypes[TOKEN_NUM], val)
-		return
+		return nil
 	}
 	regExp := regexp.MustCompile("[89]")
 	if octal && regExp.Match(this.input[start:this.pos]) {
@@ -603,19 +603,20 @@ func (this *Parser) readNumber(startsWithDot bool) {
 			this.pos = this.pos + 1
 		}
 
-		if this.readInt(10, nil, false) == nil {
-			this.raise(start, "Invalid number")
-			return
+		_, err := this.readInt(10, nil, false)
+		if err != nil {
+			return this.raise(start, "Invalid number")
 		}
 	}
-	ch, _ := this.fullCharCodeAtPos()
+	ch, _, _ := this.fullCharCodeAtPos()
 	if IsIdentifierStart(ch, false) {
-		this.raise(this.pos, "Identifier directly after number")
-		return
+		return this.raise(this.pos, "Identifier directly after number")
+
 	}
 
 	val := stringToNumber(this.input[start:this.pos], octal)
 	this.finishToken(tokenTypes[TOKEN_NUM], val)
+	return nil
 }
 
 func stringToNumber(b []byte, octal bool) float64 {
@@ -630,63 +631,67 @@ func stringToNumber(b []byte, octal bool) float64 {
 	num, _ := strconv.ParseFloat(numToConvert, 64)
 	return num
 }
-func stringToBigInt(b []byte) *int {
+func stringToBigInt(b []byte) int {
 	panic("unimplemented")
 }
 
-func (this *Parser) readRadixNumber(radix int) {
+func (this *Parser) readRadixNumber(radix int) error {
 	start := this.pos
 	this.pos += 2 // 0x
-	val := this.readInt(radix, nil, false)
-	if val == nil {
-		this.raise(this.Start+2, string("Expected number in radix ")+strconv.Itoa(radix))
-		return
+	val, err := this.readInt(radix, nil, false)
+	if err != nil {
+		return this.raise(this.Start+2, string("Expected number in radix ")+strconv.Itoa(radix))
 	}
-	ch, _ := this.fullCharCodeAtPos()
+	ch, _, _ := this.fullCharCodeAtPos()
 	if this.options.ecmaVersion.(int) >= 11 && this.input[this.pos] == 110 {
 		val = stringToBigInt(this.input[start:this.pos])
 		this.pos = this.pos + 1
 	} else if IsIdentifierStart(ch, false) {
-		this.raise(this.pos, "Identifier directly after number")
-		return
+		return this.raise(this.pos, "Identifier directly after number")
 	}
 	this.finishToken(tokenTypes[TOKEN_NUM], val)
+	return nil
 }
 
-func (this *Parser) readToken_numberSign() {
+func (this *Parser) readToken_numberSign() error {
 	ecmaVersion := this.options.ecmaVersion.(int)
 	code := rune(35) // '#'
 	if ecmaVersion >= 13 {
 		this.pos = this.pos + 1
-		quote, _ := this.fullCharCodeAtPos()
+		quote, _, _ := this.fullCharCodeAtPos()
 		if IsIdentifierStart(quote, true) || quote == 92 /* '\' */ {
 
-			this.finishToken(tokenTypes[TOKEN_PRIVATEID], this.readWord1())
-			return
+			str, err := this.readWord1()
+			if err != nil {
+				return this.raise(this.pos, "Failed to read string")
+			}
+			this.finishToken(tokenTypes[TOKEN_PRIVATEID], str)
+			return nil
 		}
 	}
 
-	this.raise(this.pos, "Unexpected character '"+CodePointToString(int(code))+"'")
+	return this.raise(this.pos, "Unexpected character '"+CodePointToString(code)+"'")
 }
 
-func (this *Parser) tryReadTemplateToken() {
+func (this *Parser) tryReadTemplateToken() error {
 	this.InTemplateElement = true
 
-	success := this.readTmplToken()
+	err := this.readTmplToken()
 
-	if !success {
+	if err != nil {
 		this.readInvalidTemplateToken()
 	}
 
 	this.InTemplateElement = false
+	return err
 }
 
-func (this *Parser) readInvalidTemplateToken() {
+func (this *Parser) readInvalidTemplateToken() error {
 	for this.pos < len(this.input) {
-		ch, size := this.fullCharCodeAtPos()
-		if ch == 0 { // Error from fullCharCodeAtPos
-			this.raise(this.pos, "Invalid character in template")
-			return
+		ch, size, err := this.fullCharCodeAtPos()
+		if err != nil { // Error from fullCharCodeAtPos
+			return this.raise(this.pos, "Invalid character in template: "+err.Error())
+
 		}
 		switch ch {
 		case '\\':
@@ -696,13 +701,13 @@ func (this *Parser) readInvalidTemplateToken() {
 				next, _ := utf8.DecodeRune(this.input[this.pos+size:])
 				if next == '{' {
 					this.finishToken(tokenTypes[TOKEN_INVALIDTEMPLATE], this.input[this.Start:this.pos])
-					return
+					return nil
 				}
 			}
 			this.pos += size
 		case '`':
 			this.finishToken(tokenTypes[TOKEN_INVALIDTEMPLATE], this.input[this.Start:this.pos])
-			return
+			return nil
 		case '\r':
 			this.pos += size
 			if this.pos < len(this.input) {
@@ -721,16 +726,15 @@ func (this *Parser) readInvalidTemplateToken() {
 			this.pos += size
 		}
 	}
-	this.raise(this.Start, "Unterminated template")
+	return this.raise(this.Start, "Unterminated template")
 }
 
-func (this *Parser) readTmplToken() bool {
+func (this *Parser) readTmplToken() error {
 	out := []byte{}
 	chunkStart := this.pos
 	for {
 		if this.pos >= len(this.input) {
-			this.raise(this.Start, "Unterminated template")
-			return false
+			return this.raise(this.Start, "Unterminated template")
 		}
 		ch := this.input[this.pos]
 		if ch == 96 || ch == 36 && this.input[this.pos+1] == 123 { // '`', '${'
@@ -738,22 +742,23 @@ func (this *Parser) readTmplToken() bool {
 				if ch == 36 {
 					this.pos += 2
 					this.finishToken(tokenTypes[TOKEN_DOLLARBRACEL], nil)
-					return false
+					return nil
 				} else {
 					this.pos = this.pos + 1
 					this.finishToken(tokenTypes[TOKEN_BACKQUOTE], nil)
-					return false
+					return nil
 				}
 			}
 			out = append(out, this.input[chunkStart:this.pos]...)
 
 			this.finishToken(tokenTypes[TOKEN_TEMPLATE], out)
-			return true
+			return nil
 		}
 
 		if ch == 92 { // '\'
 			out = append(out, this.input[chunkStart:this.pos]...)
-			out = append(out, this.readEscapedChar(true)...)
+			escaped, _ := this.readEscapedChar(true)
+			out = append(out, []byte(escaped)...)
 			chunkStart = this.pos
 		} else if isNewLine(rune(ch)) {
 			out = append(out, this.input[chunkStart:this.pos]...)
@@ -778,42 +783,62 @@ func (this *Parser) readTmplToken() bool {
 		}
 	}
 }
+func (this *Parser) unexpected(pos *int) error {
+	if pos != nil {
+		return this.raise(*pos, "Unexpected token")
+	} else {
+		return this.raise(this.Start, "Unexpected token")
+	}
+}
+func (this *Parser) raise(pos int, message string) error {
+	loc := getLineInfo(this.input, pos)
+	line := strconv.Itoa(loc.Line)
+	column := strconv.Itoa(loc.Column)
+	message += strings.Join([]string{" (", line, ":", column, ")"}, "")
 
-func (this *Parser) raise(start int, s string) {
-	panic("unimplemented")
+	if this.SourceFile != nil {
+		message += strings.Join([]string{" in ", *this.SourceFile}, "")
+	}
+
+	return errors.New(message)
 }
 
-func (this *Parser) readEscapedChar(inTemplate bool) string {
+func (this *Parser) raiseRecoverable(pos int, message string) error {
+	return this.raise(pos, message)
+}
+
+func (this *Parser) readEscapedChar(inTemplate bool) (string, error) {
 	if this.pos >= len(this.input) {
-		this.invalidStringToken(this.pos, "Unexpected end of input after backslash")
-		return ""
+		return "", this.invalidStringToken(this.pos, "Unexpected end of input after backslash")
 	}
 	this.pos++ // Skip backslash
 	r, size := utf8.DecodeRune(this.input[this.pos:])
 	if r == utf8.RuneError {
-		this.invalidStringToken(this.pos, "Invalid UTF-8 sequence")
-		return ""
+
+		return "", this.invalidStringToken(this.pos, "Invalid UTF-8 sequence")
 	}
 	this.pos += size
 	ch := int(r)
 
 	switch ch {
 	case 'n':
-		return "\n"
+		return "\n", nil
 	case 'r':
-		return "\r"
+		return "\r", nil
 	case 'x':
-		return string(this.readHexChar(2))
+		hexCh, err := this.readHexChar(2)
+		return string(hexCh), err
 	case 'u':
-		return CodePointToString(this.readCodePoint())
+		code, err := this.readCodePoint()
+		return CodePointToString(code), err
 	case 't':
-		return "\t"
+		return "\t", nil
 	case 'b':
-		return "\b"
+		return "\b", nil
 	case 'v':
-		return "\u000b"
+		return "\u000b", nil
 	case 'f':
-		return "\f"
+		return "\f", nil
 	case '\r':
 		if this.pos < len(this.input) && this.input[this.pos] == '\n' {
 			this.pos++
@@ -824,15 +849,15 @@ func (this *Parser) readEscapedChar(inTemplate bool) string {
 			this.LineStart = this.pos
 			this.CurLine++
 		}
-		return ""
+		return "", nil
 	case '8', '9':
 		if this.Strict {
-			this.invalidStringToken(this.pos-1, "Invalid escape sequence")
+			return "", this.invalidStringToken(this.pos-1, "Invalid escape sequence")
 		}
 		if inTemplate {
-			this.invalidStringToken(this.pos-1, "Invalid escape sequence in template string")
+			return "", this.invalidStringToken(this.pos-1, "Invalid escape sequence in template string")
 		}
-		return string(rune(ch))
+		return string(rune(ch)), nil
 	default:
 		if ch >= '0' && ch <= '7' {
 			// Octal escape: read up to 3 digits
@@ -848,8 +873,8 @@ func (this *Parser) readEscapedChar(inTemplate bool) string {
 			}
 			octal, err := strconv.ParseInt(octalStr, 8, 64)
 			if err != nil {
-				this.invalidStringToken(startPos, "Invalid octal escape sequence")
-				return ""
+
+				return "", this.invalidStringToken(startPos, "Invalid octal escape sequence")
 			}
 			if octal > 255 {
 				octalStr = octalStr[:len(octalStr)-1]
@@ -866,24 +891,27 @@ func (this *Parser) readEscapedChar(inTemplate bool) string {
 				if inTemplate {
 					msg = "Octal literal in template string"
 				}
-				this.invalidStringToken(startPos, msg)
-				return ""
+
+				return "", this.invalidStringToken(startPos, msg)
 			}
-			return string(rune(octal))
+			return string(rune(octal)), nil
 		}
 		if isNewLine(rune(ch)) {
 			if this.options.Locations {
 				this.LineStart = this.pos
 				this.CurLine++
 			}
-			return ""
+			return "", nil
 		}
-		return string(rune(ch))
+		return string(rune(ch)), nil
 	}
 }
 
-func (this *Parser) readWord() {
-	word := this.readWord1()
+func (this *Parser) readWord() error {
+	word, err := this.readWord1()
+	if err != nil {
+		return this.raise(this.pos, "We have failed")
+	}
 	t := tokenTypes[TOKEN_NAME]
 
 	if tt, found := keywords[word]; found {
@@ -891,16 +919,17 @@ func (this *Parser) readWord() {
 	}
 
 	this.finishToken(t, word)
+	return nil
 }
 
-func (this *Parser) readWord1() string {
+func (this *Parser) readWord1() (string, error) {
 	this.ContainsEsc = false
 	word, first, chunkStart := []byte{}, true, this.pos
 
 	astral := this.options.ecmaVersion.(int) >= 6
 
 	for this.pos < len(this.input) {
-		ch, size := this.fullCharCodeAtPos()
+		ch, size, _ := this.fullCharCodeAtPos()
 		if IsIdentifierChar(ch, astral) {
 			if ch <= 0xffff {
 				this.pos = this.pos + size
@@ -913,22 +942,22 @@ func (this *Parser) readWord1() string {
 			escStart := this.pos
 			this.pos = this.pos + size
 			if this.input[this.pos] != 117 { // "u"
-				this.invalidStringToken(this.pos, "Expecting Unicode escape sequence \\uXXXX")
-				return ""
+
+				return "", this.invalidStringToken(this.pos, "Expecting Unicode escape sequence \\uXXXX")
 			}
 
 			this.pos = this.pos + 1
-			esc := this.readCodePoint()
+			esc, _ := this.readCodePoint()
 
 			if first {
 				if !IsIdentifierStart(rune(esc), astral) {
-					this.invalidStringToken(escStart, "Invalid Unicode escape")
-					return ""
+
+					return "", this.invalidStringToken(escStart, "Invalid Unicode escape")
 				}
 			} else {
 				if !IsIdentifierChar(rune(esc), astral) {
-					this.invalidStringToken(escStart, "Invalid Unicode escape")
-					return ""
+
+					return "", this.invalidStringToken(escStart, "Invalid Unicode escape")
 				}
 			}
 
@@ -939,47 +968,51 @@ func (this *Parser) readWord1() string {
 		}
 		first = false
 	}
-	return string(append(word, this.input[chunkStart:this.pos]...))
+	return string(append(word, this.input[chunkStart:this.pos]...)), nil
 }
 
-func (this *Parser) invalidStringToken(pos int, err string) {
-	panic("unimplemented")
+func (this *Parser) invalidStringToken(pos int, message string) error {
+	if this.InTemplateElement && this.options.ecmaVersion.(int) >= 9 {
+		return this.raise(pos, "Invalid template literal")
+	} else {
+		return this.raise(pos, message)
+	}
 }
 
-func (this *Parser) readCodePoint() int {
+func (this *Parser) readCodePoint() (rune, error) {
 	ch := this.input[this.pos]
-	code := 0
+	code := rune(0)
 
 	if ch == 123 { // '{'
 		if this.options.ecmaVersion.(int) < 6 {
-			// this.unexpected()
-			// return with err
+			return 0, this.unexpected(nil)
 		}
 		codePos := this.pos + 1
 		this.pos = this.pos + 1
-		code = this.readHexChar(len(this.input[this.pos:]) + strings.Index(string(this.input[this.pos:]), "}") - this.pos)
+		hexCh, _ := this.readHexChar(len(this.input[this.pos:]) + strings.Index(string(this.input[this.pos:]), "}") - this.pos)
+		code = hexCh
 		this.pos = this.pos + 1
 		if code > 0x10FFFF {
-			this.invalidStringToken(codePos, "Code point out of bounds")
-			// return with err
+			return 0, this.invalidStringToken(codePos, "Code point out of bounds")
 		}
 	} else {
-		code = this.readHexChar(4)
+		hexCh, _ := this.readHexChar(4)
+		code = hexCh
 	}
-	return code
+	return code, nil
 
 }
 
-func (this *Parser) readHexChar(len int) int {
+func (this *Parser) readHexChar(len int) (rune, error) {
 	codePos := this.pos
-	n := this.readInt(16, &len, false)
-	if n != nil {
-		this.invalidStringToken(codePos, "Bad character escape sequence")
+	n, err := this.readInt(16, &len, false)
+	if err != nil {
+		return 0, this.invalidStringToken(codePos, "Bad character escape sequence")
 	}
-	return *n
+	return rune(n), nil
 }
 
-func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral bool) *int {
+func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral bool) (int, error) {
 	// `len` is used for character escape sequences. In that case, disallow separators.
 	allowSeparators := this.options.ecmaVersion.(int) >= 12 && len == nil
 
@@ -1004,16 +1037,13 @@ func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral 
 
 		if allowSeparators && code == 95 {
 			if isLegacyOctalNumericLiteral {
-				this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed in legacy octal numeric literals")
-				return nil
+				return 0, this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed in legacy octal numeric literals")
 			}
 			if lastCode == 95 {
-				this.raiseRecoverable(this.pos-1, "Numeric separator must be exactly one underscore")
-				return nil
+				return 0, this.raiseRecoverable(this.pos-1, "Numeric separator must be exactly one underscore")
 			}
 			if i == 0 {
-				this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed at the first of digits")
-				return nil
+				return 0, this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed at the first of digits")
 			}
 			lastCode = code
 			continue
@@ -1036,35 +1066,31 @@ func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral 
 	}
 
 	if allowSeparators && lastCode == 95 {
-		this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed at the last of digits")
-		return nil
+		return 0, this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed at the last of digits")
+
 	}
 	if this.pos == start || len != nil && this.pos-start != *len {
-		return nil
+		return 0, this.raiseRecoverable(this.pos-1, "Error ? I dont know")
 	}
 
-	return &total
+	return total, nil
 }
 
-func (this *Parser) raiseRecoverable(pos int, s string) {
-	panic("unimplemented")
-}
-
-func (this *Parser) readToken_dot() {
+func (this *Parser) readToken_dot() error {
 	next := this.input[this.pos+1]
 	if next >= 48 && next <= 57 {
-		this.readNumber(true)
-		return
+		return this.readNumber(true)
 	}
 
 	next2 := this.input[this.pos+2]
 	if this.options.ecmaVersion.(int) >= 6 && next == 46 && next2 == 46 { // 46 = dot '.'
 		this.pos += 3
 		this.finishToken(tokenTypes[TOKEN_ELLIPSIS], nil)
-		return
+		return nil
 	}
 	this.pos++
 	this.finishToken(tokenTypes[TOKEN_DOT], nil)
+	return nil
 
 }
 
@@ -1080,11 +1106,59 @@ func (this *Parser) finishToken(tokenType *TokenType, value any) {
 }
 
 func (this *Parser) currentPosition() *Location {
-	panic("unimplemented")
+	return &Location{Line: this.CurLine, Column: this.pos - this.LineStart}
 }
 
-func (this *Parser) skipSpace() {
-	panic("unimplemented")
+func (this *Parser) skipSpace() error {
+Loop:
+	for this.pos < len(this.input) {
+		ch, size, _ := this.fullCharCodeAtPos()
+		switch ch {
+		case 32:
+		case 160: // ' '
+			this.pos = this.pos + size
+			break
+		case 13:
+			if this.input[this.pos+size] == 10 {
+				this.pos = this.pos + size
+			}
+		case 10:
+		case 8232:
+		case 8233:
+			this.pos = this.pos + size
+			if this.options.Locations {
+				this.CurLine = this.CurLine + 1
+				this.LineStart = this.pos
+			}
+		case 47: // '/'
+			switch this.input[this.pos+1] {
+			case 42: // '*'
+				return this.skipBlockComment()
+			case 47:
+				this.skipLineComment(2)
+			default:
+				break Loop
+			}
+		default:
+			if ch > 8 && ch < 14 || ch >= 5760 && nonASCIIwhitespace.Match(utf8.AppendRune([]byte{}, ch)) {
+				this.pos = this.pos + size
+			} else {
+				break Loop
+			}
+		}
+	}
+	return nil
+}
+
+func (this *Parser) skipBlockComment() error {
+	start := this.pos
+	this.pos += 2 // Skip "/*"
+	end := bytes.Index(this.input[this.pos:], []byte("*/"))
+	if end == -1 {
+		return this.raise(start, "Unterminated comment")
+	}
+	this.pos += end + 2 // Move past "*/"
+	return nil
 }
 
 // #### SCOPE RELATED CODE

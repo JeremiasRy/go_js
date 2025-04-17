@@ -28,3 +28,15 @@ func NewLocation(line, column int) *Location {
 		Column: column,
 	}
 }
+
+func getLineInfo(input []byte, offset int) *Location {
+	line, cur := 1, 0
+	for {
+		nextBreak := nextLineBreak(input, cur, offset)
+		if nextBreak < 0 {
+			return &Location{Line: line, Column: offset - cur}
+		}
+		line++
+		cur = nextBreak
+	}
+}
