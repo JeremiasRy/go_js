@@ -276,15 +276,21 @@ func (this *Parser) readToken_question() {
 
 func (this *Parser) readToken_eq_excl(code rune) {
 	next := this.input[this.pos+1]
-	if next == 61 {
 
-		if this.input[this.pos+2] == 62 {
-			this.finishOp(tokenTypes[TOKEN_EQUALITY], 3)
-		} else {
-			this.finishOp(tokenTypes[TOKEN_EQUALITY], 2)
-		}
+	if code == 61 && next == 62 && this.options.ecmaVersion.(int) >= 6 {
+		this.pos += 2
+		this.finishToken(tokenTypes[TOKEN_ARROW], nil)
 		return
 	}
+	if next == 61 {
+		size := 2
+		if this.input[this.pos+2] == 61 {
+			size = 3 // === or !==
+		}
+		this.finishOp(tokenTypes[TOKEN_EQUALITY], size)
+		return
+	}
+
 	if code == 61 && next == 62 && this.options.ecmaVersion.(int) >= 6 { // '=>'
 		this.pos += 2
 		this.finishToken(tokenTypes[TOKEN_ARROW], nil)
@@ -528,6 +534,7 @@ func (this *Parser) validateRegExpFlags(state *RegExpState) {
 
 func (this *Parser) readString(quote rune) error {
 	this.pos = this.pos + 1
+	// Potential improvement: Use bytes.Buffer
 	out, chunkStart := []byte{}, this.pos
 	for {
 		if this.pos >= len(this.input) {
@@ -730,6 +737,7 @@ func (this *Parser) readInvalidTemplateToken() error {
 }
 
 func (this *Parser) readTmplToken() error {
+	// Potential improvement: use bytes.Buffer
 	out := []byte{}
 	chunkStart := this.pos
 	for {
@@ -1012,9 +1020,9 @@ func (this *Parser) readHexChar(len int) (rune, error) {
 	return rune(n), nil
 }
 
-func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral bool) (int, error) {
+func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiteral bool) (int, error) {
 	// `len` is used for character escape sequences. In that case, disallow separators.
-	allowSeparators := this.options.ecmaVersion.(int) >= 12 && len == nil
+	allowSeparators := this.options.ecmaVersion.(int) >= 12 && length == nil
 
 	// `maybeLegacyOctalNumericLiteral` is true if it doesn't have prefix (0x,0o,0b)
 	// and isn't fraction part nor exponent part. In that case, if the first digit
@@ -1024,13 +1032,16 @@ func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral 
 	start, total, lastCode := this.pos, 0, 0
 	e := 0
 
-	if len == nil {
+	if length == nil {
 		e = int(math.Inf(1))
 	} else {
-		e = *len
+		e = *length
 	}
 
 	for i := 0; i < e; i = i + 1 {
+		if this.pos >= len(this.input) {
+			return 0, this.raiseRecoverable(this.pos, "Unexpected end of input")
+		}
 		code := int(this.input[this.pos])
 		val := 0
 		this.pos = this.pos + 1
@@ -1069,7 +1080,7 @@ func (this *Parser) readInt(radix int, len *int, maybeLegacyOctalNumericLiteral 
 		return 0, this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed at the last of digits")
 
 	}
-	if this.pos == start || len != nil && this.pos-start != *len {
+	if this.pos == start || length != nil && this.pos-start != *length {
 		return 0, this.raiseRecoverable(this.pos-1, "Error ? I dont know")
 	}
 
