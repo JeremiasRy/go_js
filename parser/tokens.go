@@ -91,7 +91,7 @@ const (
 )
 
 type Binop struct {
-	prec uint
+	prec int
 }
 
 type UpdateContext struct {

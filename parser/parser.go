@@ -1120,6 +1120,8 @@ func (this *Parser) currentPosition() *Location {
 	return &Location{Line: this.CurLine, Column: this.pos - this.LineStart}
 }
 
+// #### WHITESPACE
+
 func (this *Parser) skipSpace() error {
 Loop:
 	for this.pos < len(this.input) {
@@ -1224,7 +1226,7 @@ func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
 	return (scope.Flags&SCOPE_FUNCTION != 0) || (!this.InModule && scope.Flags&SCOPE_TOP != 0)
 }
 
-func (this *Parser) declareName(name string, bindingType Flags, pos Location) {
+func (this *Parser) declareName(name string, bindingType Flags, pos int) {
 	redeclared := false
 
 	scope := this.currentScope()
@@ -1288,8 +1290,9 @@ func (this *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *
 	}
 }
 
-func (this *Parser) finishNode(node *Node, finishType NodeType) {
+func (this *Parser) finishNode(node *Node, finishType NodeType) *Node {
 	this.finishNodeAt(node, finishType, this.LastTokEnd, this.LastTokEndLoc)
+	return node
 }
 
 /*
@@ -1307,6 +1310,401 @@ TODO ->
 	  return newNode
 	}
 */
+
+// EXPRESION PARSING
+func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestructuringErrors *DestructuringErrors) error {
+	if this.options.ecmaVersion.(int) >= 9 && prop.Type == NODE_SPREAD_ELEMENT {
+		return nil
+	}
+
+	if this.options.ecmaVersion.(int) >= 6 && ((prop.Computed != nil && *prop.Computed) || (prop.Method != nil && *prop.Method) || (prop.Shorthand != nil && *prop.Shorthand)) {
+		return nil
+	}
+
+	key := prop.Key
+	var name string
+
+	switch key.Type {
+	case NODE_IDENTIFIER:
+		name = *key.Name
+	case NODE_LITERAL:
+		if val, ok := key.Value.(string); ok {
+			name = val
+		} else {
+			panic("Node was incorrectly typed expected string value from NODE_LITERAL")
+		}
+	default:
+		return nil
+	}
+
+	kind := prop.PropertyKind
+
+	if this.options.ecmaVersion.(int) >= 6 {
+		if name == "__proto__" && *kind == INIT {
+			if propHash.proto {
+				if refDestructuringErrors != nil {
+					if refDestructuringErrors.doubleProto < 0 {
+						refDestructuringErrors.doubleProto = key.Start
+					}
+				} else {
+					return this.raiseRecoverable(key.Start, "Redefinition of __proto__ property")
+				}
+			}
+			propHash.proto = true
+		}
+		return nil
+	}
+
+	name = "$" + name
+	if other, found := propHash.m[name]; found {
+		redefinition := false
+		if *kind == INIT {
+			redefinition = this.Strict && other[INIT] || other[GET] || other[SET]
+		} else {
+			redefinition = other[INIT] || other[*kind]
+		}
+		if redefinition {
+			this.raiseRecoverable(key.Start, "Redefinition of property")
+		}
+	} else {
+		newInfo := map[PropertyKind]bool{
+			INIT: false,
+			GET:  false,
+			SET:  false,
+		}
+		newInfo[*kind] = true
+		propHash.m[name] = newInfo
+	}
+
+	return nil
+}
+
+func (this *Parser) parseExpression(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := this.Start, this.StartLoc
+	expr, err := this.parseMaybeAssign(forInit, refDestructuringErrors)
+
+	if err != nil {
+		return nil, err
+	}
+	if this.Type.identifier == TOKEN_COMMA {
+		node := this.startNodeAt(startPos, startLoc)
+		node.Expressions = []*Node{expr}
+
+		for this.eat(TOKEN_COMMA) {
+			maybeAssign, err := this.parseMaybeAssign(forInit, refDestructuringErrors)
+			if err != nil {
+				return nil, err
+			}
+			node.Expressions = append(node.Expressions, maybeAssign)
+		}
+
+		return this.finishNode(node, NODE_SEQUENCE_EXPRESSION), nil
+	}
+	return expr, nil
+}
+
+func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	if this.isContextual("yield") {
+		if this.inGeneratorContext() {
+			return this.parseYield(forInit), nil
+		} else {
+			// The tokenizer will assume an expression is allowed after
+			// `yield`, but this isn't that kind of yield
+			this.ExprAllowed = false
+		}
+	}
+
+	ownDestructuringErrors, oldParenAssign, oldTrailingComma, oldDoubleProto := false, -1, -1, -1
+	if refDestructuringErrors != nil {
+		oldParenAssign = refDestructuringErrors.parenthesizedAssign
+		oldTrailingComma = refDestructuringErrors.trailingComma
+		oldDoubleProto = refDestructuringErrors.doubleProto
+		refDestructuringErrors.parenthesizedAssign = -1
+		refDestructuringErrors.trailingComma = -1
+	} else {
+		refDestructuringErrors = NewDestructuringErrors()
+		ownDestructuringErrors = true
+	}
+
+	startPos, startLoc := this.Start, this.StartLoc
+
+	if this.Type.identifier == TOKEN_PARENL || this.Type.identifier == TOKEN_NAME {
+		this.PotentialArrowAt = this.Start
+		this.PotentialArrowInForAwait = forInit == "await"
+	}
+	left, err := this.parseMaybeConditional(forInit, refDestructuringErrors)
+
+	if err != nil {
+		return nil, err
+	}
+
+	/* what ??
+	 if afterLeftParse {
+		left = afterLeftParse.call(this, left, startPos, startLoc)
+	 }
+	*/
+
+	if this.Type.isAssign {
+		node := this.startNodeAt(startPos, startLoc)
+		node.AssignmentOperator = this.Value.(*AssignmentOperator)
+		if this.Type.identifier == TOKEN_EQ {
+			left = this.toAssignable(left, false, refDestructuringErrors)
+		}
+
+		if !ownDestructuringErrors {
+			refDestructuringErrors.parenthesizedAssign = -1
+			refDestructuringErrors.trailingComma = -1
+			refDestructuringErrors.doubleProto = -1
+		}
+		if refDestructuringErrors.shorthandAssign >= left.Start {
+			refDestructuringErrors.shorthandAssign = -1 // reset because shorthand default was used correctly
+		}
+
+		if this.Type.identifier == TOKEN_EQ {
+			this.checkLValPattern(left)
+		} else {
+			this.checkLValSimple(left, 0, struct {
+				check bool
+				hash  map[string]bool
+			}{check: false, hash: map[string]bool{}})
+		}
+
+		node.Left = left
+		this.next(false)
+		node.Rigth, err = this.parseMaybeAssign(forInit, refDestructuringErrors)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if oldDoubleProto > -1 {
+			refDestructuringErrors.doubleProto = oldDoubleProto
+
+		}
+		return this.finishNode(node, NODE_ASSIGNMENT_EXPRESSION), nil
+	} else {
+		if ownDestructuringErrors {
+			_, err := this.checkExpressionErrors(refDestructuringErrors, true)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if oldParenAssign > -1 {
+		refDestructuringErrors.parenthesizedAssign = oldParenAssign
+	}
+	if oldTrailingComma > -1 {
+		refDestructuringErrors.trailingComma = oldTrailingComma
+	}
+	return left, nil
+}
+
+func (this *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringErrors, andThrow bool) (bool, error) {
+	if refDestructuringErrors == nil {
+		return false, nil
+	}
+	shorthandAssign, doubleProto := refDestructuringErrors.shorthandAssign, refDestructuringErrors.doubleProto
+	if !andThrow {
+		return shorthandAssign >= 0 || doubleProto >= 0, nil
+	}
+
+	if shorthandAssign >= 0 {
+		return true, this.raise(shorthandAssign, "Shorthand property assignments are valid only in destructuring patterns")
+	}
+
+	if doubleProto >= 0 {
+		return true, this.raiseRecoverable(doubleProto, "Redefinition of __proto__ property")
+	}
+	return false, nil
+}
+
+// send 0 for bindingType if not used in acorn
+func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes struct {
+	check bool
+	hash  map[string]bool
+}) error {
+	isBind := bindingType != BIND_NONE
+
+	switch expr.Type {
+	case NODE_IDENTIFIER:
+		if this.Strict /*&& this.reservedWordsStrictBind.test(expr.Name)*/ {
+			msg := ""
+			if isBind {
+				msg += "Binding "
+			} else {
+				msg += "Assigning to "
+			}
+
+			msg += *expr.Name
+			return this.raiseRecoverable(expr.Start, msg+" in strict mode")
+		}
+
+		if isBind {
+			if bindingType == BIND_LEXICAL && *expr.Name == "let" {
+				return this.raiseRecoverable(expr.Start, "let is disallowed as a lexically bound name")
+			}
+
+			if checkClashes.check {
+				if _, has := checkClashes.hash[*expr.Name]; has {
+					return this.raiseRecoverable(expr.Start, "Argument name clash")
+				}
+
+				checkClashes.hash[*expr.Name] = true
+			}
+			if bindingType != BIND_OUTSIDE {
+				this.declareName(*expr.Name, bindingType, expr.Start)
+			}
+		}
+
+	case NODE_CHAIN_EXPRESSION:
+		return this.raiseRecoverable(expr.Start, "Optional chaining cannot appear in left-hand side")
+
+	case NODE_MEMBER_EXPRESSION:
+		if isBind {
+			return this.raiseRecoverable(expr.Start, "Binding member expression")
+		}
+
+	case NODE_PARENTHESIZED_EXPRESSION:
+		if isBind {
+			return this.raiseRecoverable(expr.Start, "Binding parenthesized expression")
+		}
+		return this.checkLValSimple(expr.Expression, bindingType, checkClashes)
+
+	default:
+		msg := ""
+		if isBind {
+			msg += "Binding"
+		} else {
+			msg += "Assignin to"
+		}
+
+		this.raise(expr.Start, msg+" rvalue")
+	}
+	return nil
+}
+
+func (this *Parser) checkLValPattern(left any) {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseYield(forInit string) *Node {
+	panic("unimplemented")
+}
+
+func (this *Parser) isContextual(s string) bool {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseMaybeConditional(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := this.Start, this.StartLoc
+	expr, err := this.parseExprOps(forInit, refDestructuringErrors)
+	if err != nil {
+		return nil, err
+	}
+	exprErrors, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+	if exprErrors {
+		return expr, nil
+	}
+	if this.eat(TOKEN_QUESTION) {
+		node := this.startNodeAt(startPos, startLoc)
+		node.Test = expr
+		consequent, err := this.parseMaybeAssign("", nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Consequent = consequent
+		this.expect(TOKEN_COLON)
+
+		alternate, err := this.parseMaybeAssign(forInit, nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Alternate = alternate
+		return this.finishNode(node, NODE_CONDITIONAL_EXPRESSION), nil
+	}
+	return expr, nil
+}
+
+func (this *Parser) expect(token Token) {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseExprOps(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := this.Start, this.StartLoc
+	expr := this.parseMaybeUnary(refDestructuringErrors, false, false, forInit)
+	exprErrors, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+
+	if exprErrors {
+		return expr, nil
+	}
+	if expr.Start == startPos && expr.Type == NODE_ARROW_FUNCTION_EXPRESSION {
+		return expr, nil
+	} else {
+		expr, err := this.parseExprOp(expr, startPos, startLoc, -1, forInit)
+		return expr, err
+	}
+}
+
+func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Location, minPrec int, forInit string) (*Node, error) {
+	if this.Type.binop != nil && (len(forInit) == 0 || this.Type.identifier != TOKEN_IN) {
+		prec := this.Type.binop.prec
+		if this.Type.binop.prec > minPrec {
+			logical := this.Type.identifier == TOKEN_LOGICALOR || this.Type.identifier == TOKEN_LOGICALAND
+			coalesce := this.Type.identifier == TOKEN_COALESCE
+			if coalesce {
+				// Handle the precedence of `tt.coalesce` as equal to the range of logical expressions.
+				// In other words, `node.right` shouldn't contain logical expressions in order to check the mixed error.
+				prec = tokenTypes[TOKEN_LOGICALAND].binop.prec
+			}
+			if op, ok := this.Value.(BinaryOperator); ok {
+				this.next(false)
+				startPos, startLoc := this.Start, this.StartLoc
+				right, err := this.parseExprOp(this.parseMaybeUnary(nil, false, false, forInit), startPos, startLoc, prec, forInit)
+				node, _ := this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce) // We can add error handling here
+				if (logical && this.Type.identifier == TOKEN_COALESCE) || (coalesce && (this.Type.identifier == TOKEN_LOGICALOR || this.Type.identifier == TOKEN_LOGICALAND)) {
+					return nil, this.raiseRecoverable(this.Start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+				}
+				expr, err := this.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
+				return expr, err
+			} else {
+				panic("Node had invalid operator as Value, expected BinaryOperator")
+			}
+
+		}
+	}
+	return left, nil
+}
+
+func (this *Parser) buildBinary(startPos int, startLoc *Location, left *Node, right *Node, op BinaryOperator, logical bool) (*Node, error) {
+	if right.Type == NODE_PRIVATE_IDENTIFIER {
+		return nil, this.raise(right.Start, "Private identifier can only be left side of binary expression")
+	}
+	node := this.startNodeAt(startPos, startLoc)
+	node.Left = left
+	node.BinaryOperator = &op
+	node.Rigth = right
+	if logical {
+		return this.finishNode(node, NODE_LOGICAL_EXPRESSION), nil
+	}
+	return this.finishNode(node, NODE_BINARY_EXPRESSION), nil
+}
+
+func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors, false bool, param3 bool, forInit string) *Node {
+	panic("unimplemented")
+}
+
+func (this *Parser) toAssignable(param any, false bool, refDestructuringErrors *DestructuringErrors) *Node {
+	panic("unimplemented")
+}
+
+func (this *Parser) eat(token Token) bool {
+	if this.Type.identifier == token {
+		this.next(false)
+		return true
+	} else {
+		return false
+	}
+}
 
 // #### CONTEXT RELATED CODE
 

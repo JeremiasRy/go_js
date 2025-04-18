@@ -84,7 +84,7 @@ const (
 	NODE_AWAIT_EXPRESSION
 	NODE_CHAIN_EXPRESSION
 	NODE_IMPORT_EXPRESSION
-	NODE_PARENThesized_EXPRESSION
+	NODE_PARENTHESIZED_EXPRESSION
 	NODE_PROPERTY_DEFINITION
 	NODE_PRIVATE_IDENTIFIER
 	NODE_STATIC_BLOCK
@@ -196,7 +196,6 @@ type Node struct {
 	Loc        *SourceLocation
 	SourceFile *string
 
-	// All the node types below everythings
 	Name               *string
 	Value              any // string, bool, float64, *regexp.Regexp, *big.Int
 	Raw                *string
@@ -227,8 +226,6 @@ type Node struct {
 	Param              *Node   // Pattern
 	Init               *Node   // VariableDeclaration | Expression
 	Update             *Node   // Expression
-	ForInLeft          *Node   // VariableDeclaration | Pattern
-	ForInRight         *Node   // Expression
 	Declarations       []*Node // VariableDeclarator
 	DeclarationKind    *DeclarationKind
 	Elements           []*Node // Expression | SpreadElement
@@ -239,11 +236,12 @@ type Node struct {
 	Method             *bool
 	Shorthand          *bool
 	Computed           *bool
-	Operator           *UnaryOperator
+	UnaryOperator      *UnaryOperator
 	Prefix             *bool
 	UpdateOperator     *UpdateOperator
 	BinaryOperator     *BinaryOperator
 	Left               *Node // Expression | PrivateIdentifier
+	Rigth              *Node
 	AssignmentOperator *AssignmentOperator
 	LogicalOperator    *LogicalOperator
 	MemberProperty     *Node // Expression | PrivateIdentifier

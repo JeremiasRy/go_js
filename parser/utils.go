@@ -259,6 +259,35 @@ func nextLineBreak(code []byte, from, end int) int {
 	return -1
 }
 
+type PropertyInfo struct {
+	get  bool
+	set  bool
+	init bool
+}
+
+type PropertyHash struct {
+	proto bool
+	m     map[string]map[PropertyKind]bool
+}
+
+type DestructuringErrors struct {
+	shorthandAssign     int
+	trailingComma       int
+	parenthesizedAssign int
+	parenthesizedBind   int
+	doubleProto         int
+}
+
+func NewDestructuringErrors() *DestructuringErrors {
+	return &DestructuringErrors{
+		shorthandAssign:     -1,
+		trailingComma:       -1,
+		parenthesizedAssign: -1,
+		parenthesizedBind:   -1,
+		doubleProto:         -1,
+	}
+}
+
 // init populates UnicodeData for ECMAScript versions 9 through 14.
 func init() {
 	for _, ecmaVersion := range []int{9, 10, 11, 12, 13, 14} {
