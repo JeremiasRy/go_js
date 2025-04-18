@@ -34,9 +34,9 @@ type Parser struct {
 	CurLine                  int
 	Type                     *TokenType
 	Value                    any
-	Start                    int
+	start                    int
 	End                      int
-	StartLoc                 *Location
+	startLoc                 *Location
 	EndLoc                   *Location
 	LastTokStart             int
 	LastTokEnd               int
@@ -57,6 +57,7 @@ type Parser struct {
 	RegexpState              *RegExpState
 	PrivateNameStack         []PrivateName
 	InTemplateElement        bool
+	CanAwait                 bool
 }
 
 // TOKEN RELATED CODE
@@ -72,9 +73,9 @@ func (this *Parser) next(ignoreEscapeSequenceInKeyword bool) {
 	}
 
 	this.LastTokEnd = this.End
-	this.LastTokStart = this.Start
-	this.LastTokEndLoc = this.StartLoc
-	this.LastTokStartLoc = this.StartLoc
+	this.LastTokStart = this.start
+	this.LastTokEndLoc = this.startLoc
+	this.LastTokStartLoc = this.startLoc
 	this.nextToken()
 }
 
@@ -84,9 +85,9 @@ func (this *Parser) nextToken() {
 		this.skipSpace()
 	}
 
-	this.Start = this.pos
+	this.start = this.pos
 	if this.options.Locations {
-		this.StartLoc = this.currentPosition()
+		this.startLoc = this.currentPosition()
 	}
 
 	if this.pos >= len(this.input) {
@@ -538,7 +539,7 @@ func (this *Parser) readString(quote rune) error {
 	out, chunkStart := []byte{}, this.pos
 	for {
 		if this.pos >= len(this.input) {
-			return this.raise(this.Start, "Unterminated string constant")
+			return this.raise(this.start, "Unterminated string constant")
 		}
 		ch, size, _ := this.fullCharCodeAtPos()
 		if ch == quote {
@@ -551,7 +552,7 @@ func (this *Parser) readString(quote rune) error {
 			chunkStart = this.pos
 		} else if ch == 0x2028 || ch == 0x2029 {
 			if this.options.ecmaVersion.(int) < 10 {
-				return this.raise(this.Start, "Unterminated string constant")
+				return this.raise(this.start, "Unterminated string constant")
 
 			}
 			this.pos = this.pos + 1
@@ -561,7 +562,7 @@ func (this *Parser) readString(quote rune) error {
 			}
 		} else {
 			if isNewLine(rune(ch)) {
-				return this.raise(this.Start, "Unterminated string constant")
+				return this.raise(this.start, "Unterminated string constant")
 			}
 			this.pos = this.pos + size
 		}
@@ -647,7 +648,7 @@ func (this *Parser) readRadixNumber(radix int) error {
 	this.pos += 2 // 0x
 	val, err := this.readInt(radix, nil, false)
 	if err != nil {
-		return this.raise(this.Start+2, string("Expected number in radix ")+strconv.Itoa(radix))
+		return this.raise(this.start+2, string("Expected number in radix ")+strconv.Itoa(radix))
 	}
 	ch, _, _ := this.fullCharCodeAtPos()
 	if this.options.ecmaVersion.(int) >= 11 && this.input[this.pos] == 110 {
@@ -707,13 +708,13 @@ func (this *Parser) readInvalidTemplateToken() error {
 			if this.pos+size < len(this.input) {
 				next, _ := utf8.DecodeRune(this.input[this.pos+size:])
 				if next == '{' {
-					this.finishToken(tokenTypes[TOKEN_INVALIDTEMPLATE], this.input[this.Start:this.pos])
+					this.finishToken(tokenTypes[TOKEN_INVALIDTEMPLATE], this.input[this.start:this.pos])
 					return nil
 				}
 			}
 			this.pos += size
 		case '`':
-			this.finishToken(tokenTypes[TOKEN_INVALIDTEMPLATE], this.input[this.Start:this.pos])
+			this.finishToken(tokenTypes[TOKEN_INVALIDTEMPLATE], this.input[this.start:this.pos])
 			return nil
 		case '\r':
 			this.pos += size
@@ -733,7 +734,7 @@ func (this *Parser) readInvalidTemplateToken() error {
 			this.pos += size
 		}
 	}
-	return this.raise(this.Start, "Unterminated template")
+	return this.raise(this.start, "Unterminated template")
 }
 
 func (this *Parser) readTmplToken() error {
@@ -742,11 +743,11 @@ func (this *Parser) readTmplToken() error {
 	chunkStart := this.pos
 	for {
 		if this.pos >= len(this.input) {
-			return this.raise(this.Start, "Unterminated template")
+			return this.raise(this.start, "Unterminated template")
 		}
 		ch := this.input[this.pos]
 		if ch == 96 || ch == 36 && this.input[this.pos+1] == 123 { // '`', '${'
-			if this.pos == this.Start && this.Type.identifier == TOKEN_TEMPLATE || this.Type.identifier == TOKEN_INVALIDTEMPLATE {
+			if this.pos == this.start && this.Type.identifier == TOKEN_TEMPLATE || this.Type.identifier == TOKEN_INVALIDTEMPLATE {
 				if ch == 36 {
 					this.pos += 2
 					this.finishToken(tokenTypes[TOKEN_DOLLARBRACEL], nil)
@@ -795,7 +796,7 @@ func (this *Parser) unexpected(pos *int) error {
 	if pos != nil {
 		return this.raise(*pos, "Unexpected token")
 	} else {
-		return this.raise(this.Start, "Unexpected token")
+		return this.raise(this.start, "Unexpected token")
 	}
 }
 func (this *Parser) raise(pos int, message string) error {
@@ -1271,7 +1272,7 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) {
 // #### NODE RELATED CODE
 
 func (this *Parser) startNode() *Node {
-	return NewNode(this, this.Start, this.StartLoc)
+	return NewNode(this, this.start, this.startLoc)
 }
 
 func (this *Parser) startNodeAt(pos int, loc *Location) *Node {
@@ -1380,7 +1381,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 }
 
 func (this *Parser) parseExpression(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	startPos, startLoc := this.Start, this.StartLoc
+	startPos, startLoc := this.start, this.startLoc
 	expr, err := this.parseMaybeAssign(forInit, refDestructuringErrors)
 
 	if err != nil {
@@ -1406,7 +1407,11 @@ func (this *Parser) parseExpression(forInit string, refDestructuringErrors *Dest
 func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
 	if this.isContextual("yield") {
 		if this.inGeneratorContext() {
-			return this.parseYield(forInit), nil
+			yield, err := this.parseYield(forInit)
+			if err != nil {
+				return nil, err
+			}
+			return yield, nil
 		} else {
 			// The tokenizer will assume an expression is allowed after
 			// `yield`, but this isn't that kind of yield
@@ -1426,10 +1431,10 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 		ownDestructuringErrors = true
 	}
 
-	startPos, startLoc := this.Start, this.StartLoc
+	startPos, startLoc := this.start, this.startLoc
 
 	if this.Type.identifier == TOKEN_PARENL || this.Type.identifier == TOKEN_NAME {
-		this.PotentialArrowAt = this.Start
+		this.PotentialArrowAt = this.start
 		this.PotentialArrowInForAwait = forInit == "await"
 	}
 	left, err := this.parseMaybeConditional(forInit, refDestructuringErrors)
@@ -1461,7 +1466,10 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 		}
 
 		if this.Type.identifier == TOKEN_EQ {
-			this.checkLValPattern(left)
+			this.checkLValPattern(left, 0, struct {
+				check bool
+				hash  map[string]bool
+			}{check: false, hash: map[string]bool{}})
 		} else {
 			this.checkLValSimple(left, 0, struct {
 				check bool
@@ -1499,6 +1507,42 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 	return left, nil
 }
 
+func (this *Parser) parseMaybeConditional(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := this.start, this.startLoc
+	expr, err := this.parseExprOps(forInit, refDestructuringErrors)
+
+	if err != nil {
+		return nil, err
+	}
+
+	exprError, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+	if exprError {
+		return expr, nil
+	}
+	if this.eat(TOKEN_QUESTION) {
+		node := this.startNodeAt(startPos, startLoc)
+		node.Test = expr
+		maybeAssign, err := this.parseMaybeAssign("", nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Consequent = maybeAssign
+
+		errExpect := this.expect(TOKEN_COLON)
+		if errExpect != nil {
+			return nil, err
+		}
+
+		maybeAssignElse, errElse := this.parseMaybeAssign(forInit, nil)
+		if errElse != nil {
+			return nil, errElse
+		}
+		node.Alternate = maybeAssignElse
+		return this.finishNode(node, NODE_CONDITIONAL_EXPRESSION), nil
+	}
+	return expr, nil
+}
+
 func (this *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringErrors, andThrow bool) (bool, error) {
 	if refDestructuringErrors == nil {
 		return false, nil
@@ -1518,7 +1562,7 @@ func (this *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringE
 	return false, nil
 }
 
-// send 0 for bindingType if not used in acorn
+// send 0 for bindingType if not used in acorn function calls
 func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes struct {
 	check bool
 	hash  map[string]bool
@@ -1583,55 +1627,95 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 	return nil
 }
 
-func (this *Parser) checkLValPattern(left any) {
-	panic("unimplemented")
-}
+func (this *Parser) checkLValPattern(expr *Node, bindingType Flags, checkClashes struct {
+	check bool
+	hash  map[string]bool
+}) error {
+	switch expr.Type {
+	case NODE_OBJECT_PATTERN:
+		for _, prop := range expr.Properties {
+			return this.checkLValInnerPattern(prop, bindingType, checkClashes)
+		}
 
-func (this *Parser) parseYield(forInit string) *Node {
-	panic("unimplemented")
-}
-
-func (this *Parser) isContextual(s string) bool {
-	panic("unimplemented")
-}
-
-func (this *Parser) parseMaybeConditional(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	startPos, startLoc := this.Start, this.StartLoc
-	expr, err := this.parseExprOps(forInit, refDestructuringErrors)
-	if err != nil {
-		return nil, err
+	case NODE_ARRAY_PATTERN:
+		for _, elem := range expr.Elements {
+			if elem != nil {
+				return this.checkLValInnerPattern(elem, bindingType, checkClashes)
+			}
+		}
 	}
-	exprErrors, _ := this.checkExpressionErrors(refDestructuringErrors, false)
-	if exprErrors {
-		return expr, nil
+
+	return this.checkLValSimple(expr, bindingType, checkClashes)
+}
+
+func (this *Parser) checkLValInnerPattern(expr *Node, bindingType Flags, checkClashes struct {
+	check bool
+	hash  map[string]bool
+}) error {
+	switch expr.Type {
+	case NODE_PROPERTY:
+		// AssignmentProperty has type === "Property"
+		if expr, ok := expr.Value.(*Node); ok {
+			return this.checkLValInnerPattern(expr.Value.(*Node), bindingType, checkClashes)
+		}
+
+		return this.raise(this.pos, "Expression had invalid Value")
+
+	case NODE_ASSIGNMENT_PATTERN:
+		return this.checkLValPattern(expr.Left, bindingType, checkClashes)
+
+	case NODE_REST_ELEMENT:
+		return this.checkLValPattern(expr.Argument, bindingType, checkClashes)
 	}
-	if this.eat(TOKEN_QUESTION) {
-		node := this.startNodeAt(startPos, startLoc)
-		node.Test = expr
-		consequent, err := this.parseMaybeAssign("", nil)
+
+	return this.checkLValPattern(expr, bindingType, checkClashes)
+}
+
+func (this *Parser) parseYield(forInit string) (*Node, error) {
+	if this.YieldPos == 0 {
+		this.YieldPos = this.start
+	}
+
+	node := this.startNode()
+	this.next(false)
+	if this.Type.identifier == TOKEN_SEMI || this.canInsertSemicolon() || (this.Type.identifier != TOKEN_STAR && !this.Type.startsExpr) {
+		node.Delegate = false
+		node.Argument = nil
+	} else {
+		node.Delegate = this.eat(TOKEN_STAR)
+		maybeAssign, err := this.parseMaybeAssign(forInit, nil)
 		if err != nil {
 			return nil, err
 		}
-		node.Consequent = consequent
-		this.expect(TOKEN_COLON)
-
-		alternate, err := this.parseMaybeAssign(forInit, nil)
-		if err != nil {
-			return nil, err
-		}
-		node.Alternate = alternate
-		return this.finishNode(node, NODE_CONDITIONAL_EXPRESSION), nil
+		node.Argument = maybeAssign
 	}
-	return expr, nil
+	return this.finishNode(node, NODE_YIELD_EXPRESSION), nil
 }
 
-func (this *Parser) expect(token Token) {
+func (this *Parser) canInsertSemicolon() bool {
 	panic("unimplemented")
+}
+
+func (this *Parser) isContextual(name string) bool {
+	if value, ok := this.Value.(string); ok {
+		return this.Type.identifier == TOKEN_NAME && value == name && !this.ContainsEsc
+	}
+	return false
+}
+
+func (this *Parser) expect(token Token) error {
+	if this.eat(token) {
+		return nil
+	}
+	return this.unexpected(&this.pos)
 }
 
 func (this *Parser) parseExprOps(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	startPos, startLoc := this.Start, this.StartLoc
-	expr := this.parseMaybeUnary(refDestructuringErrors, false, false, forInit)
+	startPos, startLoc := this.start, this.startLoc
+	expr, err := this.parseMaybeUnary(refDestructuringErrors, false, false, forInit)
+	if err != nil {
+		return nil, err
+	}
 	exprErrors, _ := this.checkExpressionErrors(refDestructuringErrors, false)
 
 	if exprErrors {
@@ -1658,11 +1742,22 @@ func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Loca
 			}
 			if op, ok := this.Value.(BinaryOperator); ok {
 				this.next(false)
-				startPos, startLoc := this.Start, this.StartLoc
-				right, err := this.parseExprOp(this.parseMaybeUnary(nil, false, false, forInit), startPos, startLoc, prec, forInit)
-				node, _ := this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce) // We can add error handling here
+				startPos, startLoc := this.start, this.startLoc
+				unary, err := this.parseMaybeUnary(nil, false, false, forInit)
+				if err != nil {
+					return nil, err
+				}
+				right, err := this.parseExprOp(unary, startPos, startLoc, prec, forInit)
+
+				if err != nil {
+					return nil, err
+				}
+				node, err := this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce)
+				if err != nil {
+					return nil, err
+				}
 				if (logical && this.Type.identifier == TOKEN_COALESCE) || (coalesce && (this.Type.identifier == TOKEN_LOGICALOR || this.Type.identifier == TOKEN_LOGICALAND)) {
-					return nil, this.raiseRecoverable(this.Start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+					return nil, this.raiseRecoverable(this.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
 				}
 				expr, err := this.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
 				return expr, err
@@ -1689,7 +1784,131 @@ func (this *Parser) buildBinary(startPos int, startLoc *Location, left *Node, ri
 	return this.finishNode(node, NODE_BINARY_EXPRESSION), nil
 }
 
-func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors, false bool, param3 bool, forInit string) *Node {
+func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors, sawUnary bool, incDec bool, forInit string) (*Node, error) {
+	startPos, startLoc := this.start, this.startLoc
+	var expr *Node
+	var err error
+
+	if this.isContextual("await") && this.CanAwait {
+		expr, err = this.parseAwait(forInit)
+		sawUnary = true
+	} else if this.Type.prefix {
+		node, update := this.startNode(), this.Type.identifier == TOKEN_INCDEC
+		node.UnaryOperator = this.Value.(*UnaryOperator)
+		node.Prefix = true
+		this.next(false)
+		maybeUnary, err := this.parseMaybeUnary(nil, true, update, forInit)
+		if err != nil {
+			return nil, err
+		}
+
+		node.Argument = maybeUnary
+		_, err = this.checkExpressionErrors(refDestructuringErrors, true)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if update {
+			err := this.checkLValSimple(node.Argument, 0, struct {
+				check bool
+				hash  map[string]bool
+			}{check: false, hash: map[string]bool{}})
+			if err != nil {
+				return nil, err
+			}
+		} else if this.Strict && *node.UnaryOperator == UNARY_DELETE && isLocalVariableAccess(node.Argument) {
+			return nil, this.raiseRecoverable(node.Start, "Deleting local variable in strict mode")
+		} else if *node.UnaryOperator == UNARY_DELETE && isPrivateFieldAccess(node.Argument) {
+			return nil, this.raiseRecoverable(node.Start, "Private fields can not be deleted")
+		} else {
+			sawUnary = true
+		}
+
+		if update {
+			expr = this.finishNode(node, NODE_UPDATE_EXPRESSION)
+		} else {
+			expr = this.finishNode(node, NODE_UNARY_EXPRESSION)
+		}
+
+	} else if !sawUnary && this.Type.identifier == TOKEN_PRIVATEID {
+		if len(forInit) != 0 || len(this.PrivateNameStack) == 0 && this.options.CheckPrivateFields {
+			return nil, this.unexpected(&this.pos)
+		}
+		expr, err = this.parsePrivateIdent()
+		if err != nil {
+			return nil, err
+		}
+		// only could be private fields in 'in', such as #x in obj
+		if this.Type.identifier != TOKEN_IN {
+			return nil, this.unexpected(&this.pos)
+		}
+	} else {
+		expr, err = this.parseExprSubscripts(refDestructuringErrors, forInit)
+		if err != nil {
+			return nil, err
+		}
+		hasExprError, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+		if hasExprError {
+			return expr, nil
+		}
+
+		for this.Type.postfix && !this.canInsertSemicolon() {
+			node := this.startNodeAt(startPos, startLoc)
+			node.UpdateOperator = this.Value.(*UpdateOperator)
+			node.Prefix = false
+			node.Argument = expr
+			err := this.checkLValSimple(expr, 0, struct {
+				check bool
+				hash  map[string]bool
+			}{check: false, hash: map[string]bool{}})
+
+			if err != nil {
+				return nil, err
+			}
+			this.next(false)
+			expr = this.finishNode(node, NODE_UPDATE_EXPRESSION)
+		}
+	}
+
+	if !incDec && this.eat(TOKEN_STARSTAR) {
+		if sawUnary {
+
+			return nil, this.unexpected(&this.LastTokStart)
+		} else {
+			unary, err := this.parseMaybeUnary(nil, false, false, forInit)
+			if err != nil {
+				return nil, err
+			}
+
+			binOp, errBinop := this.buildBinary(startPos, startLoc, expr, unary, EXPONENTIATION, false)
+			if errBinop != nil {
+				return nil, errBinop
+			}
+			return binOp, nil
+		}
+	} else {
+		return expr, nil
+	}
+}
+
+func isPrivateFieldAccess(node *Node) bool {
+	panic("unimplemented")
+}
+
+func isLocalVariableAccess(node *Node) bool {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseAwait(forInit string) (*Node, error) {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseExprSubscripts(refDestructuringErrors *DestructuringErrors, forInit string) (*Node, error) {
+	panic("unimplemented")
+}
+
+func (this *Parser) parsePrivateIdent() (*Node, error) {
 	panic("unimplemented")
 }
 

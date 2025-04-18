@@ -211,6 +211,7 @@ type Node struct {
 	IsAsync            *bool
 	Expression         *Node // Expression | Literal
 	Directive          *string
+	Delegate           bool
 	Object             *Node   // Expression
 	Argument           *Node   // Expression
 	Label              *Node   // Identifier
@@ -237,7 +238,7 @@ type Node struct {
 	Shorthand          *bool
 	Computed           *bool
 	UnaryOperator      *UnaryOperator
-	Prefix             *bool
+	Prefix             bool
 	UpdateOperator     *UpdateOperator
 	BinaryOperator     *BinaryOperator
 	Left               *Node // Expression | PrivateIdentifier
