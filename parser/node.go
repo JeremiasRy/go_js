@@ -236,7 +236,7 @@ type Node struct {
 	PropertyKind       *PropertyKind
 	Method             *bool
 	Shorthand          *bool
-	Computed           *bool
+	Computed           bool
 	UnaryOperator      *UnaryOperator
 	Prefix             bool
 	UpdateOperator     *UpdateOperator
@@ -246,7 +246,7 @@ type Node struct {
 	AssignmentOperator *AssignmentOperator
 	LogicalOperator    *LogicalOperator
 	MemberProperty     *Node // Expression | PrivateIdentifier
-	Optional           *bool
+	Optional           bool
 	Callee             *Node   // Expression | Super
 	Arguments          []*Node // Expression | SpreadElement
 	Expressions        []*Node // Expression
