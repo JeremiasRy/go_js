@@ -55,3 +55,12 @@ func NewScope(flags Flags) *Scope {
 		Functions: []string{},
 	}
 }
+
+func (this *Parser) currentThisScope() *Scope {
+	for _, scope := range this.ScopeStack {
+		if scope.Flags&(SCOPE_VAR|SCOPE_CLASS_FIELD_INIT|SCOPE_CLASS_STATIC_BLOCK) != 0 && scope.Flags&SCOPE_ARROW != SCOPE_ARROW {
+			return scope
+		}
+	}
+	return nil
+}

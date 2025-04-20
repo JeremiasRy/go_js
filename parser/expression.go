@@ -20,7 +20,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 
 	switch key.Type {
 	case NODE_IDENTIFIER:
-		name = *key.Name
+		name = key.Name
 	case NODE_LITERAL:
 		if val, ok := key.Value.(string); ok {
 			name = val
@@ -256,7 +256,7 @@ func (this *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringE
 }
 
 func (this *Parser) parseSubscripts(base *Node, startPos int, startLoc *Location, noCalls bool, forInit string) (*Node, error) {
-	maybeAsyncArrow, optionalChained := this.getEcmaVersion() >= 8 && base.Type == NODE_IDENTIFIER && *base.Name == "async" &&
+	maybeAsyncArrow, optionalChained := this.getEcmaVersion() >= 8 && base.Type == NODE_IDENTIFIER && base.Name == "async" &&
 		this.LastTokEnd == base.End && !this.canInsertSemicolon() && base.End-base.Start == 5 &&
 		this.PotentialArrowAt == base.Start, false
 
@@ -759,7 +759,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 		if err != nil {
 			return nil, err
 		}
-		if this.getEcmaVersion() >= 8 && !containsEsc && *id.Name == "async" && !this.canInsertSemicolon() && this.eat(TOKEN_FUNCTION) {
+		if this.getEcmaVersion() >= 8 && !containsEsc && id.Name == "async" && !this.canInsertSemicolon() && this.eat(TOKEN_FUNCTION) {
 			this.overrideContext(TokenContexts[FUNCTION_EXPRESSION])
 			fun, err := this.parseFunction(this.startNodeAt(startPos, startLoc), 0, false, true, forInit)
 			return fun, err
@@ -771,7 +771,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 				return arrowExpr, err
 			}
 
-			if this.getEcmaVersion() >= 8 && *id.Name == "async" && this.Type.identifier == TOKEN_NAME && !containsEsc &&
+			if this.getEcmaVersion() >= 8 && id.Name == "async" && this.Type.identifier == TOKEN_NAME && !containsEsc &&
 				(!this.PotentialArrowInForAwait || this.Value != "of" || this.ContainsEsc) {
 				id, err = this.parseIdent(false)
 				if err != nil {
@@ -810,7 +810,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 			node.Value = this.Type.identifier == TOKEN_TRUE
 		}
 
-		node.Raw = &this.Type.keyword
+		node.Raw = this.Type.keyword
 		this.next(false)
 		return this.finishNode(node, NODE_LITERAL), nil
 
@@ -948,12 +948,12 @@ func (this *Parser) parseIdent(liberal bool) (*Node, error) {
 			start int
 			end   int
 			name  string
-		}{start: node.Start, end: node.End, name: *node.Name})
+		}{start: node.Start, end: node.End, name: node.Name})
 		if err != nil {
 			return nil, err
 		}
 
-		if *node.Name == "await" && !(this.AwaitIdentPos != 0) {
+		if node.Name == "await" && !(this.AwaitIdentPos != 0) {
 			this.AwaitIdentPos = node.Start
 		}
 
@@ -965,15 +965,15 @@ func (this *Parser) parseIdentNode() (*Node, error) {
 	node := this.startNode()
 	if this.Type.identifier == TOKEN_NAME {
 		if val, ok := this.Value.(string); ok {
-			node.Name = &val
+			node.Name = val
 		} else {
 			panic("Theres a situation with node having a wrong type of .Value")
 		}
 
 	} else if len(this.Type.keyword) != 0 {
-		node.Name = &this.Type.keyword
+		node.Name = this.Type.keyword
 
-		if (*node.Name == "class" || *node.Name == "function") &&
+		if (node.Name == "class" || node.Name == "function") &&
 			(this.LastTokEnd != this.LastTokStart+1 || this.input[this.LastTokStart] != 46) {
 			this.Context = this.Context[:len(this.Context)-1]
 		}
@@ -996,8 +996,8 @@ func (this *Parser) checkUnreserved(opts struct {
 	if this.InAsync && opts.name == "await" {
 		return this.raiseRecoverable(opts.start, "Cannot use 'await' as identifier inside an async function")
 	}
-
-	if !(this.currentThisScope().Flags&SCOPE_VAR == SCOPE_VAR) && opts.name == "arguments" {
+	curScope := this.currentThisScope()
+	if !(curScope != nil && curScope.Flags&SCOPE_VAR == SCOPE_VAR) && opts.name == "arguments" {
 		return this.raiseRecoverable(opts.start, "Cannot use 'arguments' in class field initializer")
 	}
 
@@ -1030,6 +1030,121 @@ func (this *Parser) checkUnreserved(opts struct {
 	return nil
 }
 
-func (this *Parser) currentThisScope() *Scope {
-	panic("unimplemented")
+func (this *Parser) parseExprImport(forNew bool) (*Node, error) {
+	node := this.startNode()
+
+	// Consume `import` as an identifier for `import.meta`.
+	// Because `this.parseIdent(true)` doesn't check escape sequences, it needs the check of `this.containsEsc`.
+	if this.ContainsEsc {
+		return nil, this.raiseRecoverable(this.start, "Escape sequence in keyword import")
+	}
+	this.next(false)
+
+	if this.Type.identifier == TOKEN_PARENL && !forNew {
+		dynImport, err := this.parseDynamicImport(node)
+		return dynImport, err
+	} else if this.Type.identifier == TOKEN_DOT {
+		var loc *Location
+
+		if node.Loc != nil && node.Loc.Start != nil {
+			loc = node.Loc.Start
+		}
+		meta := this.startNodeAt(node.Start, loc)
+		meta.Name = "import"
+		node.Meta = this.finishNode(meta, NODE_IDENTIFIER)
+		importMeta, err := this.parseImportMeta(node)
+		return importMeta, err
+	} else {
+		return nil, this.unexpected(nil)
+	}
+}
+
+func (this *Parser) parseImportMeta(node *Node) (*Node, error) {
+	this.next(false) // skip `.`
+
+	containsEsc := this.ContainsEsc
+	ident, err := this.parseIdent(true)
+
+	if err != nil {
+		return nil, err
+	}
+	node.Property = ident
+
+	if node.Property.Name != "meta" {
+		return nil, this.raiseRecoverable(node.Property.Start, "The only valid meta property for import is 'import.meta'")
+	}
+
+	if containsEsc {
+		return nil, this.raiseRecoverable(node.Start, "'import.meta' must not contain escaped characters")
+	}
+
+	if this.options.SourceType != "module" && !this.options.AllowImportExportEverywhere {
+		return nil, this.raiseRecoverable(node.Start, "Cannot use 'import.meta' outside a module")
+	}
+
+	return this.finishNode(node, NODE_META_PROPERTY), nil
+}
+
+func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
+	this.next(false) // skip `(`
+
+	// Parse node.source.
+	source, err := this.parseMaybeAssign("", nil)
+	if err != nil {
+		return nil, err
+	}
+	node.Source = source
+
+	if this.getEcmaVersion() >= 16 {
+		if !this.eat(TOKEN_PARENR) {
+			err := this.expect(TOKEN_COMMA)
+			if err != nil {
+				return nil, err
+			}
+
+			if !this.afterTrailingComma(TOKEN_PARENR, false) {
+				opts, err := this.parseMaybeAssign("", nil)
+				if err != nil {
+					return nil, err
+				}
+				node.Options = opts
+				if !this.eat(TOKEN_PARENR) {
+					err := this.expect(TOKEN_COMMA)
+					if err != nil {
+						return nil, err
+					}
+					if !this.afterTrailingComma(TOKEN_PARENR, false) {
+						this.unexpected(nil)
+					}
+				}
+			} else {
+				node.Options = nil
+			}
+		} else {
+			node.Options = nil
+		}
+	} else {
+		// Verify ending.
+		if !this.eat(TOKEN_PARENR) {
+			errorPos := this.start
+			if this.eat(TOKEN_COMMA) && this.eat(TOKEN_PARENR) {
+				return nil, this.raiseRecoverable(errorPos, "Trailing comma is not allowed in import()")
+			} else {
+				return nil, this.unexpected(&errorPos)
+			}
+		}
+	}
+
+	return this.finishNode(node, NODE_IMPORT_EXPRESSION), nil
+}
+
+func (this *Parser) parseLiteral(value any) (*Node, error) {
+	node := this.startNode()
+	node.Value = value
+	node.Raw = string(this.input[this.start:this.End])
+	if node.Raw[len(node.Raw)-1] == 110 { // big int stuff, maybe some day....
+		// node.bigint = node.raw.slice(0, -1).replace(/_/g, "")
+	}
+	this.next(false)
+	return this.finishNode(node, NODE_LITERAL), nil
 }

@@ -196,9 +196,9 @@ type Node struct {
 	Loc        *SourceLocation
 	SourceFile *string
 
-	Name               *string
+	Name               string
 	Value              any // string, bool, float64, *regexp.Regexp, *big.Int
-	Raw                *string
+	Raw                string
 	Regex              *Regex
 	Bigint             *string
 	Body               []*Node // Statement | ModuleDeclaration

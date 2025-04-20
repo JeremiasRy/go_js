@@ -9,7 +9,7 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 
 	switch expr.Type {
 	case NODE_IDENTIFIER:
-		if this.Strict && this.ReservedWordsStrictBind.Match([]byte(*expr.Name)) {
+		if this.Strict && this.ReservedWordsStrictBind.Match([]byte(expr.Name)) {
 			msg := ""
 			if isBind {
 				msg += "Binding "
@@ -17,24 +17,24 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 				msg += "Assigning to "
 			}
 
-			msg += *expr.Name
+			msg += expr.Name
 			return this.raiseRecoverable(expr.Start, msg+" in strict mode")
 		}
 
 		if isBind {
-			if bindingType == BIND_LEXICAL && *expr.Name == "let" {
+			if bindingType == BIND_LEXICAL && expr.Name == "let" {
 				return this.raiseRecoverable(expr.Start, "let is disallowed as a lexically bound name")
 			}
 
 			if checkClashes.check {
-				if _, has := checkClashes.hash[*expr.Name]; has {
+				if _, has := checkClashes.hash[expr.Name]; has {
 					return this.raiseRecoverable(expr.Start, "Argument name clash")
 				}
 
-				checkClashes.hash[*expr.Name] = true
+				checkClashes.hash[expr.Name] = true
 			}
 			if bindingType != BIND_OUTSIDE {
-				return this.declareName(*expr.Name, bindingType, expr.Start)
+				return this.declareName(expr.Name, bindingType, expr.Start)
 			}
 		}
 

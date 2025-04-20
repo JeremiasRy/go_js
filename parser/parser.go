@@ -237,10 +237,6 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 	return nil
 }
 
-func (p *Parser) parseExprImport(forNew bool) (*Node, error) {
-	panic("unimplemented")
-}
-
 func (p *Parser) parseNew() (*Node, error) {
 	panic("unimplemented")
 }
@@ -258,10 +254,6 @@ func (p *Parser) isSimpleAssignTarget(expr any) bool {
 }
 
 func (p *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit string) (*Node, error) {
-	panic("unimplemented")
-}
-
-func (p *Parser) parseLiteral(value any) (*Node, error) {
 	panic("unimplemented")
 }
 
