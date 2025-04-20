@@ -255,7 +255,7 @@ type Node struct {
 	Quasis             []*Node // TemplateElement
 	Tag                *Node   // Expression
 	Quasi              *Node   // TemplateLiteral
-	Tail               *bool
+	Tail               bool
 	TmplValue          *TemplateValue
 	SuperClass         *Node // Expression
 	ClassBody          *Node // ClassBody
@@ -297,3 +297,44 @@ func NewNode(parser *Parser, pos int, loc *Location) *Node {
 	}
 	return node
 }
+
+func (this *Parser) startNode() *Node {
+	return NewNode(this, this.start, this.startLoc)
+}
+
+func (this *Parser) startNodeAt(pos int, loc *Location) *Node {
+	return NewNode(this, pos, loc)
+}
+
+func (this *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Location) {
+	node.Type = finishType
+	node.End = pos
+	if this.options.Locations {
+		node.Loc.End = loc
+	}
+
+	if this.options.Ranges {
+		node.Range[1] = pos
+	}
+}
+
+func (this *Parser) finishNode(node *Node, finishType NodeType) *Node {
+	this.finishNodeAt(node, finishType, this.LastTokEnd, this.LastTokEndLoc)
+	return node
+}
+
+/*
+I think I can skip this?
+
+	this.finishNodeAt = function(node, type, pos, loc) {
+	  return finishNodeAt.call(this, node, type, pos, loc)
+	}
+
+TODO ->
+
+	this.copyNode = function(node) {
+	  let newNode = new Node(this, node.start, this.startLoc)
+	  for (let prop in node) newNode[prop] = node[prop]
+	  return newNode
+	}
+*/
