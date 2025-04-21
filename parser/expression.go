@@ -401,7 +401,18 @@ func isLocalVariableAccess(node *Node) bool {
 }
 
 func (this *Parser) parseAwait(forInit string) (*Node, error) {
-	panic("unimplemented")
+	if !(this.AwaitPos != 0) {
+		this.AwaitPos = this.start
+	}
+
+	node := this.startNode()
+	this.next(false)
+	maybeUnary, err := this.parseMaybeUnary(nil, true, false, forInit)
+	if err != nil {
+		return nil, err
+	}
+	node.Argument = maybeUnary
+	return this.finishNode(node, NODE_AWAIT_EXPRESSION), nil
 }
 
 func (this *Parser) parseExprSubscripts(refDestructuringErrors *DestructuringErrors, forInit string) (*Node, error) {
@@ -1743,13 +1754,15 @@ func (this *Parser) parseGetterSetter(prop *Node) error {
 			}
 		}
 	} else {
-		panic("prop.Value wa not *Node as we expected, we are in parseGetterSetter")
+		panic("prop.Value was not *Node as we expected, we are in parseGetterSetter")
 	}
 	return nil
 }
 
 func (this *Parser) isAsyncProp(prop *Node) bool {
-	panic("unimplemented")
+	return !prop.Computed && prop.Key.Type == NODE_IDENTIFIER && prop.Key.Name == "async" &&
+		(this.Type.identifier == TOKEN_NAME || this.Type.identifier == TOKEN_NUM || this.Type.identifier == TOKEN_STRING || this.Type.identifier == TOKEN_BRACKETL || len(this.Type.keyword) != 0 || (this.getEcmaVersion() >= 9 && this.Type.identifier == TOKEN_STAR)) &&
+		!lineBreak.Match(this.input[this.LastTokEnd:this.start])
 }
 
 func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
@@ -1762,6 +1775,10 @@ func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
 			}
 			prop.Key = maybeAssign
 			err = this.expect(TOKEN_BRACKETR)
+
+			if err != nil {
+				return nil, err
+			}
 			return prop.Key, nil
 		} else {
 			prop.Computed = false
@@ -1782,8 +1799,4 @@ func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
 		prop.Key = ident
 		return prop.Key, nil
 	}
-}
-
-func (p *Parser) isSimpleAssignTarget(expr any) bool {
-	panic("unimplemented")
 }

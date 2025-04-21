@@ -167,3 +167,11 @@ func (this *Parser) strictDirective(start int) bool {
 		}
 	}
 }
+
+func (this *Parser) isSimpleAssignTarget(expr *Node) bool {
+	if expr.Type == NODE_PARENTHESIZED_EXPRESSION {
+		return this.isSimpleAssignTarget(expr.Expression)
+	}
+
+	return expr.Type == NODE_IDENTIFIER || expr.Type == NODE_MEMBER_EXPRESSION
+}
