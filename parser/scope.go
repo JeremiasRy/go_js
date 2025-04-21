@@ -16,7 +16,7 @@ const (
 	SCOPE_VAR                      = SCOPE_TOP | SCOPE_FUNCTION | SCOPE_CLASS_STATIC_BLOCK
 )
 
-func FunctionFlags(async, generator bool) Flags {
+func functionFlags(async, generator bool) Flags {
 	flags := SCOPE_FUNCTION
 
 	if async {

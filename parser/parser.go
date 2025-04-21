@@ -15,8 +15,8 @@ type Label struct {
 }
 
 type PrivateName struct {
-	Declared bool
-	Used     bool
+	Declared []*Node
+	Used     []*Node
 }
 
 type Parser struct {
@@ -62,6 +62,7 @@ type Parser struct {
 	InAsync                  bool
 	InGenerator              bool
 	InClassStaticBlock       bool
+	AllowNewDotTarget        bool
 }
 
 func (p *Parser) getEcmaVersion() int {
@@ -237,39 +238,85 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 	return nil
 }
 
-func (p *Parser) parseNew() (*Node, error) {
-	panic("unimplemented")
-}
-
 func (p *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
 	panic("unimplemented")
 }
 
-func (p *Parser) parseObj(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod bool, forInit string) error {
+	isExpression := isArrowFunction && this.Type.identifier != TOKEN_BRACEL
+	oldStrict, useStrict := this.Strict, false
+
+	if isExpression {
+		maybeAssign, err := this.parseMaybeAssign(forInit, nil)
+		if err != nil {
+			return err
+		}
+		node.Body = maybeAssign
+		node.IsExpression = true
+		err = this.checkParams(node, false)
+		if err != nil {
+			return err
+		}
+	} else {
+		nonSimple := this.getEcmaVersion() >= 7 && !this.isSimpleParamList(node.Params)
+		if !oldStrict || nonSimple {
+			useStrict = this.strictDirective(this.End)
+			// If this is a strict mode function, verify that argument names
+			// are not repeated, and it does not try to bind the words `eval`
+			// or `arguments`.
+			if useStrict && nonSimple {
+				return this.raiseRecoverable(node.Start, "Illegal 'use strict' directive in function with non-simple parameter list")
+			}
+
+		}
+		// Start a new scope with regard to labels and the `inFunction`
+		// flag (restore them to their old value afterwards).
+		oldLabels := this.Labels
+		this.Labels = []Label{}
+		if useStrict {
+			this.Strict = true
+		}
+
+		// Add the params to varDeclaredNames to ensure that an error is thrown
+		// if a let/const declaration in the function clashes with one of the params.
+		err := this.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node.Params))
+
+		if err != nil {
+			return err
+		}
+		// Ensure the function name isn't a forbidden identifier in strict mode, e.g. 'eval'
+		if this.Strict && node.Id != nil {
+			err := this.checkLValSimple(node.Id, BIND_OUTSIDE, struct {
+				check bool
+				hash  map[string]bool
+			}{})
+
+			if err != nil {
+				return err
+			}
+		}
+		block, err := this.parseBlock(false, nil, useStrict && !oldStrict)
+		if err != nil {
+			return err
+		}
+		node.Body = block
+		node.IsExpression = false
+		this.adaptDirectivePrologue(node.Body.Body)
+		this.Labels = oldLabels
+	}
+	this.exitScope()
+	return nil
+}
+
+func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStrict bool) (*Node, error) {
 	panic("unimplemented")
 }
 
-func (p *Parser) isSimpleAssignTarget(expr any) bool {
-	panic("unimplemented")
-}
-
-func (p *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit string) (*Node, error) {
-	panic("unimplemented")
-}
-
-func (p *Parser) parseArrowExpression(node *Node, params []*Node, isAsync bool, forInit string) (*Node, error) {
+func (this *Parser) adaptDirectivePrologue(param any) {
 	panic("unimplemented")
 }
 
 func (p *Parser) parseFunction(node *Node, statement Flags, allowExpressionBody bool, isAsync bool, forInit string) (*Node, error) {
-	panic("unimplemented")
-}
-
-func (this *Parser) parsePrivateIdent() (*Node, error) {
-	panic("unimplemented")
-}
-
-func (this *Parser) toAssignable(param any, false bool, refDestructuringErrors *DestructuringErrors) *Node {
 	panic("unimplemented")
 }
 

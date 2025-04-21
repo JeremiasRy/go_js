@@ -1,5 +1,9 @@
 package parser
 
+import "regexp"
+
+var literal = regexp.MustCompile(`^(?:'((?:\\[^]|[^'\\])*?)'|\"((?:\\[^]|[^"\\])*?)")`)
+
 func (this *Parser) eat(token Token) bool {
 	if this.Type.identifier == token {
 		this.next(false)
@@ -90,4 +94,76 @@ func (this *Parser) afterTrailingComma(tokType Token, notNext bool) bool {
 		return true
 	}
 	return false
+}
+
+func (this *Parser) strictDirective(start int) bool {
+	if this.getEcmaVersion() < 5 {
+		return false
+	}
+
+	for {
+		loc := skipWhiteSpace.FindStringIndex(string(this.input[start:]))
+		if loc == nil {
+			loc = []int{0, 0}
+		}
+		start += loc[1]
+
+		match := literal.FindStringSubmatch(string(this.input[start:]))
+		if match == nil {
+			return false
+		}
+		var content string
+		if match[1] != "" {
+			content = match[1]
+		} else {
+			content = match[2]
+		}
+
+		if content == "use strict" {
+			spaceStart := start + len(match[0])
+			loc = skipWhiteSpace.FindStringIndex(string(this.input[spaceStart:]))
+			var spaceAfter string
+			var end int
+			if loc == nil {
+				spaceAfter = ""
+				end = spaceStart
+			} else {
+				spaceAfter = string(this.input[spaceStart : spaceStart+loc[1]])
+				end = spaceStart + loc[1]
+			}
+
+			var next byte
+			if end < len(this.input) {
+				next = this.input[end]
+			} else {
+				next = 0
+			}
+
+			if next == ';' || next == '}' {
+				return true
+			}
+
+			lineBreak := regexp.MustCompile(`\n|\r\n?|\u2028|\u2029`)
+			if lineBreak.MatchString(spaceAfter) {
+				quote := match[0][0]
+				if next == 0 || !regexp.MustCompile(`[(\[.`+string(quote)+`+\-/*%<>=,?\^&]`).MatchString(string(next)) {
+					if next != '!' || (end+1 < len(this.input) && this.input[end+1] != '=') {
+						return true
+					}
+				}
+			}
+		}
+
+		start += len(match[0])
+
+		loc = skipWhiteSpace.FindStringIndex(string(this.input[start:]))
+		if loc == nil {
+			loc = []int{0, 0}
+		}
+		start += loc[1]
+
+		if start < len(this.input) && this.input[start] == ';' {
+			start++
+		}
+	}
 }

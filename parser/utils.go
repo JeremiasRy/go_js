@@ -190,6 +190,8 @@ const ecma12ScriptValues = ecma11ScriptValues + " Chorasmian Chrs Diak Dives_Aku
 const ecma13ScriptValues = ecma12ScriptValues + " Cypro_Minoan Cpmn Old_Uyghur Ougr Tangsa Tnsa Toto Vithkuqi Vith"
 const ecma14ScriptValues = ecma13ScriptValues + " " + ScriptValuesAddedInUnicode
 
+var skipWhiteSpace = regexp.MustCompile(`(?:\s|\/\/.*|\/\*[^]*?\*\/)*`)
+
 // unicodeBinaryProperties maps ECMAScript versions to binary properties.
 var unicodeBinaryProperties = map[int]string{
 	9:  ecma9BinaryProperties,

@@ -5,13 +5,14 @@ import (
 	"strings"
 )
 
-// EXPRESION PARSING
+// EXPRESSION PARSING
+
 func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestructuringErrors *DestructuringErrors) error {
 	if this.getEcmaVersion() >= 9 && prop.Type == NODE_SPREAD_ELEMENT {
 		return nil
 	}
 
-	if this.getEcmaVersion() >= 6 && (prop.Computed || (prop.Method != nil && *prop.Method) || (prop.Shorthand != nil && *prop.Shorthand)) {
+	if this.getEcmaVersion() >= 6 && (prop.Computed || prop.IsMethod || prop.Shorthand) {
 		return nil
 	}
 
@@ -34,7 +35,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 	kind := prop.PropertyKind
 
 	if this.getEcmaVersion() >= 6 {
-		if name == "__proto__" && *kind == INIT {
+		if name == "__proto__" && kind == INIT {
 			if propHash.proto {
 				if refDestructuringErrors != nil {
 					if refDestructuringErrors.doubleProto < 0 {
@@ -52,10 +53,10 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 	name = "$" + name
 	if other, found := propHash.m[name]; found {
 		redefinition := false
-		if *kind == INIT {
+		if kind == INIT {
 			redefinition = this.Strict && other[INIT] || other[GET] || other[SET]
 		} else {
-			redefinition = other[INIT] || other[*kind]
+			redefinition = other[INIT] || other[kind]
 		}
 		if redefinition {
 			this.raiseRecoverable(key.Start, "Redefinition of property")
@@ -66,7 +67,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 			GET:  false,
 			SET:  false,
 		}
-		newInfo[*kind] = true
+		newInfo[kind] = true
 		propHash.m[name] = newInfo
 	}
 
@@ -146,7 +147,11 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 		node := this.startNodeAt(startPos, startLoc)
 		node.AssignmentOperator = this.Value.(*AssignmentOperator)
 		if this.Type.identifier == TOKEN_EQ {
-			left = this.toAssignable(left, false, refDestructuringErrors)
+			left, err = this.toAssignable(left, false, refDestructuringErrors)
+
+			if err != nil {
+				return nil, err
+			}
 		}
 
 		if !ownDestructuringErrors {
@@ -1143,8 +1148,642 @@ func (this *Parser) parseLiteral(value any) (*Node, error) {
 	node.Value = value
 	node.Raw = string(this.input[this.start:this.End])
 	if node.Raw[len(node.Raw)-1] == 110 { // big int stuff, maybe some day....
+		node.Bigint = strings.ReplaceAll(node.Raw[:len(node.Raw)-1], "_", "")
 		// node.bigint = node.raw.slice(0, -1).replace(/_/g, "")
 	}
 	this.next(false)
 	return this.finishNode(node, NODE_LITERAL), nil
+}
+
+func (this *Parser) parsePrivateIdent() (*Node, error) {
+	node := this.startNode()
+	if this.Type.identifier == TOKEN_PRIVATEID {
+		if val, ok := this.Value.(string); ok {
+			node.Name = val
+		} else {
+			panic("In parsePrivateIdent() this.Value was not string as expected")
+		}
+	} else {
+		return nil, this.unexpected(&this.pos)
+	}
+	this.next(false)
+	this.finishNode(node, NODE_PRIVATE_IDENTIFIER)
+
+	if this.options.CheckPrivateFields {
+		if len(this.PrivateNameStack) == 0 {
+			this.raise(node.Start, "Private field #"+node.Name+" must be declared in an enclosing class")
+		} else {
+			this.PrivateNameStack[len(this.PrivateNameStack)-1].Used = append(this.PrivateNameStack[len(this.PrivateNameStack)-1].Used, node)
+		}
+	}
+
+	return node, nil
+}
+
+func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit string) (*Node, error) {
+	startPos, startLoc, allowTrailingComma := this.start, this.startLoc, this.getEcmaVersion() >= 8
+	var val *Node
+	if this.getEcmaVersion() >= 6 {
+		this.next(false)
+
+		innerStartPos, innerStartLoc := this.start, this.startLoc
+		exprList, first, lastIsComma := []*Node{}, true, false
+		refDestructuringErrors, oldYieldPos, oldAwaitPos, spreadStart := NewDestructuringErrors(), this.YieldPos, this.AwaitPos, 0
+		this.YieldPos = 0
+		this.AwaitPos = 0
+		// Do not save awaitIdentPos to allow checking awaits nested in parameters
+		for this.Type.identifier != TOKEN_PARENR {
+
+			if first {
+				first = false
+			} else {
+				err := this.expect(TOKEN_COMMA)
+				if err != nil {
+					return nil, err
+				}
+			}
+
+			if allowTrailingComma && this.afterTrailingComma(TOKEN_PARENR, true) {
+				lastIsComma = true
+				break
+			} else if this.Type.identifier == TOKEN_ELLIPSIS {
+				spreadStart = this.start
+				restBinding, err := this.parseRestBinding()
+				if err != nil {
+					return nil, err
+				}
+
+				parenItem, err := this.parseParenItem(restBinding)
+
+				if err != nil {
+					return nil, err
+				}
+
+				exprList = append(exprList, parenItem)
+
+				if this.Type.identifier == TOKEN_COMMA {
+					return nil, this.raiseRecoverable(
+						this.start,
+						"Comma is not permitted after the rest element",
+					)
+				}
+				break
+			} else {
+				maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors)
+				// TODO: send in afterLeftParse func, exprList.push(this.parseMaybeAssign(false, refDestructuringErrors, this.parseParenItem))
+				if err != nil {
+					return nil, err
+				}
+				exprList = append(exprList, maybeAssign)
+			}
+		}
+		innerEndPos, innerEndLoc := this.LastTokEnd, this.LastTokEndLoc
+		err := this.expect(TOKEN_PARENR)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if canBeArrow && this.shouldParseArrow(exprList) && this.eat(TOKEN_ARROW) {
+			err := this.checkPatternErrors(refDestructuringErrors, false)
+			if err != nil {
+				return nil, err
+			}
+
+			err = this.checkYieldAwaitInDefaultParams()
+			if err != nil {
+				return nil, err
+			}
+
+			this.YieldPos = oldYieldPos
+			this.AwaitPos = oldAwaitPos
+			parenArrowList, err := this.parseParenArrowList(startPos, startLoc, exprList, forInit)
+			return parenArrowList, err
+		}
+
+		if len(exprList) != 0 || lastIsComma {
+			return nil, this.unexpected(&this.LastTokStart)
+		}
+
+		if spreadStart != 0 {
+			return nil, this.unexpected(&spreadStart)
+		}
+		_, err = this.checkExpressionErrors(refDestructuringErrors, true)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if oldYieldPos != 0 {
+			this.YieldPos = oldYieldPos
+		}
+
+		if oldAwaitPos != 0 {
+			this.AwaitPos = oldAwaitPos
+		}
+
+		if len(exprList) > 1 {
+			val = this.startNodeAt(innerStartPos, innerStartLoc)
+			val.Expressions = exprList
+			this.finishNodeAt(val, NODE_SEQUENCE_EXPRESSION, innerEndPos, innerEndLoc)
+		} else {
+			val = exprList[0]
+		}
+	} else {
+		parenExpr, err := this.parseParenExpression()
+
+		if err != nil {
+			return nil, err
+		}
+		val = parenExpr
+	}
+
+	if this.options.PreserveParens {
+		par := this.startNodeAt(startPos, startLoc)
+		par.Expression = val
+		return this.finishNode(par, NODE_PARENTHESIZED_EXPRESSION), nil
+	} else {
+		return val, nil
+	}
+}
+
+func (this *Parser) parseParenArrowList(startPos int, startLoc *Location, exprList []*Node, forInit string) (*Node, error) {
+	arrExpr, err := this.parseArrowExpression(this.startNodeAt(startPos, startLoc), exprList, false, forInit)
+	return arrExpr, err
+}
+
+func (this *Parser) shouldParseArrow(_ []*Node) bool {
+	return !this.canInsertSemicolon()
+}
+
+func (this *Parser) parseParenItem(item *Node) (*Node, error) {
+	return item, nil
+}
+
+func (this *Parser) parseParenExpression() (*Node, error) {
+	err := this.expect(TOKEN_PARENL)
+	if err != nil {
+		return nil, err
+	}
+	val, errParse := this.parseExpression("", nil)
+	if errParse != nil {
+		return nil, err
+	}
+	err = this.expect(TOKEN_PARENR)
+
+	if err != nil {
+		return nil, err
+	}
+	return val, nil
+}
+
+func (this *Parser) parseNew() (*Node, error) {
+	if this.ContainsEsc {
+		return nil, this.raiseRecoverable(this.start, "Escape sequence in keyword new")
+	}
+	node := this.startNode()
+	this.next(false)
+	if this.getEcmaVersion() >= 6 && this.Type.identifier == TOKEN_DOT {
+
+		var startLoc *Location
+
+		if node.Loc != nil {
+			startLoc = node.Loc.Start
+		}
+		meta := this.startNodeAt(node.Start, startLoc)
+		meta.Name = "new"
+		node.Meta = this.finishNode(meta, NODE_IDENTIFIER)
+		this.next(false)
+		containsEsc := this.ContainsEsc
+		id, err := this.parseIdent(true)
+		if err != nil {
+			return nil, err
+		}
+		node.Property = id
+		if node.Property.Name != "target" {
+			return nil, this.raiseRecoverable(node.Property.Start, "The only valid meta property for new is 'new.target'")
+		}
+
+		if containsEsc {
+			return nil, this.raiseRecoverable(node.Start, "'new.target' must not contain escaped characters")
+		}
+
+		if !this.AllowNewDotTarget {
+			return nil, this.raiseRecoverable(node.Start, "'new.target' can only be used in functions and class static block")
+		}
+
+		return this.finishNode(node, NODE_META_PROPERTY), nil
+	}
+	startPos, startLoc := this.start, this.startLoc
+	exprAtom, err := this.parseExprAtom(nil, "", true)
+	if err != nil {
+		return nil, err
+	}
+
+	subscript, errSubcript := this.parseSubscript(exprAtom, startPos, startLoc, true, false, false, "")
+
+	if errSubcript != nil {
+		return nil, errSubcript
+	}
+	node.Callee = subscript
+	if this.eat(TOKEN_PARENL) {
+		exprList, err := this.parseExprList(TOKEN_PARENR, this.getEcmaVersion() >= 8, false, nil)
+		if err != nil {
+			return nil, err
+		}
+
+		node.Arguments = exprList
+	} else {
+		node.Arguments = []*Node{}
+	}
+	return this.finishNode(node, NODE_NEW_EXPRESSION), nil
+}
+
+func (this *Parser) parseArrowExpression(node *Node, params []*Node, isAsync bool, forInit string) (*Node, error) {
+	oldYieldPos, oldAwaitPos, oldAwaitIdentPos := this.YieldPos, this.AwaitPos, this.AwaitIdentPos
+
+	this.enterScope(functionFlags(isAsync, false) | SCOPE_ARROW)
+	this.initFunction(node)
+
+	node.IsAsync = isAsync
+
+	this.YieldPos = 0
+	this.AwaitPos = 0
+	this.AwaitIdentPos = 0
+
+	listParams, err := this.toAssignableList(params, true)
+
+	if err != nil {
+		return nil, err
+	}
+	node.Params = listParams
+	this.parseFunctionBody(node, true, false, forInit)
+
+	this.YieldPos = oldYieldPos
+	this.AwaitPos = oldAwaitPos
+	this.AwaitIdentPos = oldAwaitIdentPos
+
+	return this.finishNode(node, NODE_ARROW_FUNCTION_EXPRESSION), nil
+}
+
+func (this *Parser) isSimpleParamList(params []*Node) bool {
+	for _, param := range params {
+		if param.Type != NODE_IDENTIFIER {
+			return false
+		}
+	}
+	return true
+}
+
+func (this *Parser) checkParams(node *Node, allowDuplicates bool) error {
+	// nameHash = Object.create(null), let's see if I got this right....
+	for _, param := range node.Params {
+		if allowDuplicates {
+			err := this.checkLValInnerPattern(param, BIND_VAR, struct {
+				check bool
+				hash  map[string]bool
+			}{})
+			if err != nil {
+				return err
+			}
+		} else {
+			err := this.checkLValInnerPattern(param, BIND_VAR, struct {
+				check bool
+				hash  map[string]bool
+			}{check: true, hash: map[string]bool{}})
+			if err != nil {
+				return err
+			}
+		}
+
+	}
+	return nil
+}
+
+func (this *Parser) initFunction(node *Node) {
+	node.Id = nil
+	if this.getEcmaVersion() >= 6 {
+		node.IsGenerator = false
+		node.IsExpression = false
+	}
+
+	if this.getEcmaVersion() >= 8 {
+		node.IsAsync = false
+	}
+}
+
+func (this *Parser) parseMethod(isGenerator bool, isAsync bool, allowDirectSuper bool) (*Node, error) {
+	node, oldYieldPos, oldAwaitPos, oldAwaitIdentPos := this.startNode(), this.YieldPos, this.AwaitPos, this.AwaitIdentPos
+
+	this.initFunction(node)
+	node.IsGenerator = isGenerator
+
+	node.IsAsync = isAsync
+
+	this.YieldPos = 0
+	this.AwaitPos = 0
+	this.AwaitIdentPos = 0
+
+	flags := functionFlags(isAsync, node.IsGenerator) | SCOPE_SUPER
+
+	if allowDirectSuper {
+		this.enterScope(flags | SCOPE_DIRECT_SUPER)
+	} else {
+		this.enterScope(flags)
+	}
+
+	err := this.expect(TOKEN_PARENL)
+	if err != nil {
+		return nil, err
+	}
+
+	bindingList, errBindingList := this.parseBindingList(TOKEN_PARENR, false, this.getEcmaVersion() >= 8, false)
+	if errBindingList != nil {
+		return nil, errBindingList
+	}
+	node.Params = bindingList
+	err = this.checkYieldAwaitInDefaultParams()
+	if err != nil {
+		return nil, err
+	}
+
+	err = this.parseFunctionBody(node, false, true, "")
+
+	if err != nil {
+		return nil, err
+	}
+
+	this.YieldPos = oldYieldPos
+	this.AwaitPos = oldAwaitPos
+	this.AwaitIdentPos = oldAwaitIdentPos
+	return this.finishNode(node, NODE_FUNCTION_EXPRESSION), nil
+}
+
+func (this *Parser) parseObj(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	node, first, propHash := this.startNode(), true, &PropertyHash{proto: false, m: map[string]map[PropertyKind]bool{}}
+	node.Properties = []*Node{}
+	this.next(false)
+	for !this.eat(TOKEN_BRACER) {
+		if !first {
+			err := this.expect(TOKEN_COMMA)
+			if err != nil {
+				return nil, err
+			}
+			if this.getEcmaVersion() >= 5 && this.afterTrailingComma(TOKEN_BRACER, false) {
+				break
+			}
+		} else {
+			first = false
+		}
+		prop, err := this.parseProperty(isPattern, refDestructuringErrors)
+		if err != nil {
+			return nil, err
+		}
+		if !isPattern {
+			err := this.checkPropClash(prop, propHash, refDestructuringErrors)
+			if err != nil {
+				return nil, err
+			}
+		}
+		node.Properties = append(node.Properties, prop)
+	}
+
+	if isPattern {
+		return this.finishNode(node, NODE_OBJECT_PATTERN), nil
+	}
+	return this.finishNode(node, NODE_OBJECT_EXPRESSION), nil
+}
+
+func (this *Parser) parseProperty(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	prop := this.startNode()
+	isGenerator, isAsync, startPos := false, false, 0
+	var startLoc *Location
+
+	if this.getEcmaVersion() >= 9 && this.eat(TOKEN_ELLIPSIS) {
+		if isPattern {
+			ident, err := this.parseIdent(false)
+			if err != nil {
+				return nil, err
+			}
+
+			prop.Argument = ident
+			if this.Type.identifier == TOKEN_COMMA {
+				return nil, this.raiseRecoverable(this.start, "Comma is not permitted after the rest element")
+			}
+			return this.finishNode(prop, NODE_REST_ELEMENT), nil
+		}
+		// Parse argument.
+		maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors)
+		if err != nil {
+			return nil, err
+		}
+		prop.Argument = maybeAssign
+		// To disallow trailing comma via `this.toAssignable()`.
+		if this.Type.identifier == TOKEN_COMMA && refDestructuringErrors != nil && refDestructuringErrors.trailingComma < 0 {
+			refDestructuringErrors.trailingComma = this.start
+		}
+		// Finish
+		return this.finishNode(prop, NODE_SPREAD_ELEMENT), nil
+	}
+	if this.getEcmaVersion() >= 6 {
+		prop.IsMethod = false
+		prop.Shorthand = false
+		if isPattern || refDestructuringErrors != nil {
+			startPos = this.start
+			startLoc = this.startLoc
+		}
+		if !isPattern {
+			isGenerator = this.eat(TOKEN_STAR)
+		}
+
+	}
+	containsEsc := this.ContainsEsc
+	_, err := this.parsePropertyName(prop)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if !isPattern && !containsEsc && this.getEcmaVersion() >= 8 && !isGenerator && this.isAsyncProp(prop) {
+		isAsync = true
+		isGenerator = this.getEcmaVersion() >= 9 && this.eat(TOKEN_STAR)
+		_, err := this.parsePropertyName(prop)
+
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		isAsync = false
+	}
+	err = this.parsePropertyValue(prop, isPattern, isGenerator, isAsync, startPos, startLoc, refDestructuringErrors, containsEsc)
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(prop, NODE_PROPERTY), nil
+}
+
+func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator bool, isAsync bool, startPos int, startLoc *Location, refDestructuringErrors *DestructuringErrors, containsEsc bool) error {
+	if (isGenerator || isAsync) && this.Type.identifier == TOKEN_COLON {
+		return this.unexpected(nil)
+	}
+
+	if this.eat(TOKEN_COLON) {
+		prop.PropertyKind = INIT
+		if isPattern {
+			val, err := this.parseMaybeDefault(this.start, this.startLoc, nil)
+			if err != nil {
+				return err
+			}
+			prop.Value = val
+		} else {
+			val, err := this.parseMaybeAssign("", refDestructuringErrors)
+			if err != nil {
+				return err
+			}
+			prop.Value = val
+		}
+	} else if this.getEcmaVersion() >= 6 && this.Type.identifier == TOKEN_PARENL {
+		if isPattern {
+			return this.unexpected(nil)
+		}
+		method, err := this.parseMethod(isGenerator, isAsync, false)
+		if err != nil {
+			return err
+		}
+		prop.IsMethod = true
+		prop.PropertyKind = INIT
+		prop.Value = method
+	} else if !isPattern && !containsEsc &&
+		this.getEcmaVersion() >= 5 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER &&
+		(prop.Key.Name == "get" || prop.Key.Name == "set") &&
+		(this.Type.identifier != TOKEN_COMMA && this.Type.identifier != TOKEN_BRACER && this.Type.identifier != TOKEN_EQ) {
+		if isGenerator || isAsync {
+			return this.unexpected(nil)
+		}
+		err := this.parseGetterSetter(prop)
+		if err != nil {
+			return err
+		}
+	} else if this.getEcmaVersion() >= 6 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER {
+		if isGenerator || isAsync {
+			return this.unexpected(nil)
+		}
+		err := this.checkUnreserved(struct {
+			start int
+			end   int
+			name  string
+		}{start: prop.Start, end: prop.End, name: prop.Name})
+		if err != nil {
+			return err
+		}
+		if prop.Key.Name == "await" && !(this.AwaitIdentPos != 0) {
+			this.AwaitIdentPos = startPos
+		}
+
+		if isPattern {
+			val, err := this.parseMaybeDefault(startPos, startLoc, this.copyNode(prop.Key))
+			if err != nil {
+				return err
+			}
+			prop.Value = val
+		} else if this.Type.identifier == TOKEN_EQ && refDestructuringErrors != nil {
+			if refDestructuringErrors.shorthandAssign < 0 {
+				refDestructuringErrors.shorthandAssign = this.start
+			}
+			val, err := this.parseMaybeDefault(startPos, startLoc, this.copyNode(prop.Key))
+			if err != nil {
+				return err
+			}
+			prop.Value = val
+		} else {
+			prop.Value = this.copyNode(prop.Key)
+		}
+		prop.PropertyKind = INIT
+		prop.Shorthand = true
+	} else {
+		return this.unexpected(nil)
+	}
+	return nil
+}
+
+func (this *Parser) parseGetterSetter(prop *Node) error {
+	kind := PROPERTY_KIND_NOT_INITIALIZED
+
+	switch prop.Key.Name {
+	case "set":
+		kind = SET
+	case "get":
+		kind = GET
+	}
+
+	this.parsePropertyName(prop)
+	method, err := this.parseMethod(false, false, false)
+	if err != nil {
+		return err
+	}
+	prop.Value = method
+	prop.PropertyKind = kind
+	paramCount := 0
+
+	if prop.PropertyKind == GET {
+		paramCount = 1
+	}
+
+	if val, ok := prop.Value.(*Node); ok {
+		if len(val.Params) != paramCount {
+			start := val.Start
+			if prop.PropertyKind == GET {
+				return this.raiseRecoverable(start, "getter should have no params")
+			} else {
+				return this.raiseRecoverable(start, "setter should have exactly one param")
+			}
+		} else {
+			if prop.PropertyKind == SET && val.Params[0].Type == NODE_REST_ELEMENT {
+				return this.raiseRecoverable(val.Params[0].Start, "Setter cannot use rest params")
+			}
+		}
+	} else {
+		panic("prop.Value wa not *Node as we expected, we are in parseGetterSetter")
+	}
+	return nil
+}
+
+func (this *Parser) isAsyncProp(prop *Node) bool {
+	panic("unimplemented")
+}
+
+func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
+	if this.getEcmaVersion() >= 6 {
+		if this.eat(TOKEN_BRACKETL) {
+			prop.Computed = true
+			maybeAssign, err := this.parseMaybeAssign("", nil)
+			if err != nil {
+				return nil, err
+			}
+			prop.Key = maybeAssign
+			err = this.expect(TOKEN_BRACKETR)
+			return prop.Key, nil
+		} else {
+			prop.Computed = false
+		}
+	}
+	if this.Type.identifier == TOKEN_NUM || this.Type.identifier == TOKEN_STRING {
+		exprAtom, err := this.parseExprAtom(nil, "", false)
+		if err != nil {
+			return nil, err
+		}
+		prop.Key = exprAtom
+		return prop.Key, nil
+	} else {
+		ident, err := this.parseIdent(this.options.AllowReserved)
+		if err != nil {
+			return nil, err
+		}
+		prop.Key = ident
+		return prop.Key, nil
+	}
+}
+
+func (p *Parser) isSimpleAssignTarget(expr any) bool {
+	panic("unimplemented")
 }
