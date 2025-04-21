@@ -238,10 +238,6 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 	return nil
 }
 
-func (p *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
-	panic("unimplemented")
-}
-
 func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod bool, forInit string) error {
 	isExpression := isArrowFunction && this.Type.identifier != TOKEN_BRACEL
 	oldStrict, useStrict := this.Strict, false
@@ -251,7 +247,7 @@ func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod
 		if err != nil {
 			return err
 		}
-		node.Body = maybeAssign
+		node.BodyNode = maybeAssign
 		node.IsExpression = true
 		err = this.checkParams(node, false)
 		if err != nil {
@@ -299,25 +295,13 @@ func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod
 		if err != nil {
 			return err
 		}
-		node.Body = block
+		node.BodyNode = block
 		node.IsExpression = false
-		this.adaptDirectivePrologue(node.Body.Body)
+		this.adaptDirectivePrologue(node.BodyNode.BodyNode)
 		this.Labels = oldLabels
 	}
 	this.exitScope()
 	return nil
-}
-
-func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStrict bool) (*Node, error) {
-	panic("unimplemented")
-}
-
-func (this *Parser) adaptDirectivePrologue(param any) {
-	panic("unimplemented")
-}
-
-func (p *Parser) parseFunction(node *Node, statement Flags, allowExpressionBody bool, isAsync bool, forInit string) (*Node, error) {
-	panic("unimplemented")
 }
 
 // #### CONTEXT RELATED CODE

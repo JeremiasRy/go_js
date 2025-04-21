@@ -208,11 +208,11 @@ type Node struct {
 	Raw                string
 	Regex              *Regex
 	Bigint             string
-	Body               *Node // Statement | ModuleDeclaration
+	Body               []*Node // Statement | ModuleDeclaration
+	BodyNode           *Node   // BlockStatement | Expression
 	SourceType         SourceType
 	Id                 *Node   // Identifier
 	Params             []*Node // Pattern
-	BodyNode           *Node   // BlockStatement | Expression
 	IsGenerator        bool
 	IsExpression       bool
 	IsAsync            bool
@@ -452,7 +452,7 @@ func (this *Parser) copyNode(node *Node) *Node {
 	}
 
 	// Copy single Node pointers
-	newNode.Body = this.copyNode(node.Body)
+	newNode.BodyNode = this.copyNode(node.BodyNode)
 	newNode.Id = this.copyNode(node.Id)
 	newNode.BodyNode = this.copyNode(node.BodyNode)
 	newNode.Expression = this.copyNode(node.Expression)
@@ -488,6 +488,11 @@ func (this *Parser) copyNode(node *Node) *Node {
 	newNode.Options = this.copyNode(node.Options)
 
 	// Copy Node slices
+	newNode.Body = make([]*Node, len(node.Body))
+	for i, param := range node.Body {
+		newNode.Body[i] = this.copyNode(param)
+	}
+
 	newNode.Params = make([]*Node, len(node.Params))
 	for i, param := range node.Params {
 		newNode.Params[i] = this.copyNode(param)
