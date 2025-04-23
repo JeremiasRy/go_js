@@ -390,15 +390,210 @@ func (this *Parser) parseFunctionStatement(node *Node, false bool, b bool) (*Nod
 }
 
 func (this *Parser) parseForStatement(node *Node) (*Node, error) {
+	this.next(false)
+	awaitAt := -1
+
+	if this.getEcmaVersion() >= 9 && this.canAwait() && this.eatContextual("await") {
+		awaitAt = this.LastTokStart
+	}
+
+	this.Labels = append(this.Labels, Label{Kind: "loop", Name: ""})
+
+	this.enterScope(0)
+	err := this.expect(TOKEN_PARENL)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if this.Type.identifier == TOKEN_SEMI {
+		if awaitAt > -1 {
+			return nil, this.unexpected(&awaitAt)
+		}
+		forStatement, err := this.parseFor(node, nil)
+		if err != nil {
+			return nil, err
+		}
+		return forStatement, nil
+	}
+
+	isLet := this.isLet("")
+	if this.Type.identifier == TOKEN_VAR || this.Type.identifier == TOKEN_CONST || isLet {
+		init := this.startNode()
+
+		kind := DECLARATION_KIND_NOT_INITIALIZED
+		if isLet {
+			kind = LET
+		} else {
+			if k, ok := this.Value.(DeclarationKind); ok {
+				kind = k
+			} else {
+				panic("parser.Value was snot declarationKind as we expected")
+			}
+		}
+		this.next(false)
+		varExpresssion, err := this.parseVar(init, true, kind)
+
+		if err != nil {
+			return nil, err
+		}
+
+		this.finishNode(init, NODE_VARIABLE_DECLARATION)
+
+		if (this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) && len(init.Declarations) == 1 {
+			if this.getEcmaVersion() >= 9 {
+				if this.Type.identifier == TOKEN_IN {
+					if awaitAt > -1 {
+						return nil, this.unexpected(&awaitAt)
+					}
+				} else {
+					node.Await = awaitAt > -1
+				}
+			}
+			forIn, err := this.parseForIn(node, init)
+
+			if err != nil {
+				return nil, err
+			}
+			return forIn, nil
+		}
+		if awaitAt > -1 {
+			return nil, this.unexpected(&awaitAt)
+		}
+
+		forStatement, err := this.parseFor(node, init)
+		if err != nil {
+			return nil, err
+		}
+		return forStatement, nil
+	}
+
+	startsWithLet, isForOf, containsEsc, refDestructuringErrors, initPos := this.isContextual("let"), false, this.ContainsEsc, NewDestructuringErrors(), this.start
+	var init *Node
+
+	if awaitAt > -1 {
+		exprSubscripts, err := this.parseExprSubscripts(refDestructuringErrors, "await")
+		if err != nil {
+			return nil, err
+		}
+
+		init = exprSubscripts
+	} else {
+		expr, err := this.parseExpression("true", refDestructuringErrors)
+		if err != nil {
+			return nil, err
+		}
+
+		init = expr
+	}
+
+	isForOf = this.getEcmaVersion() >= 6 && this.isContextual("of")
+	if this.Type.identifier == TOKEN_IN || isForOf {
+		if awaitAt > -1 { // implies `ecmaVersion >= 9` (see declaration of awaitAt)
+			if this.Type.identifier == TOKEN_IN {
+				return nil, this.unexpected(&awaitAt)
+			}
+			node.Await = true
+		} else if isForOf && this.getEcmaVersion() >= 8 {
+			if init.Start == initPos && !containsEsc && init.Type == NODE_IDENTIFIER && init.Name == "async" {
+				return nil, this.unexpected(nil)
+			} else if this.getEcmaVersion() >= 9 {
+				node.Await = false
+			}
+		}
+		if startsWithLet && isForOf {
+			return nil, this.raise(init.Start, "The left-hand side of a for-of loop may not start with 'let'.")
+		}
+		_, err := this.toAssignable(init, false, refDestructuringErrors)
+		if err != nil {
+			return nil, err
+		}
+		err = this.checkLValPattern(init, 0, struct {
+			check bool
+			hash  map[string]bool
+		}{check: false, hash: map[string]bool{}})
+
+		if err != nil {
+			return nil, err
+		}
+		forIn, err := this.parseForIn(node, init)
+
+		if err != nil {
+			return nil, err
+		}
+
+		return forIn, nil
+	} else {
+		_, err := this.checkExpressionErrors(refDestructuringErrors, true)
+
+		if err != nil {
+			return nil, err
+		}
+	}
+	if awaitAt > -1 {
+		return nil, this.unexpected(&awaitAt)
+	}
+
+	forStatement, err := this.parseFor(node, init)
+
+	if err != nil {
+		return nil, err
+	}
+	return forStatement, nil
+}
+
+func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
+	panic("unimplemented")
+}
+
+func (this *Parser) parseVar(init *Node, true bool, kind DeclarationKind) (*Node, error) {
+	panic("unimplemented")
+}
+
+func (this *Parser) eatContextual(s string) bool {
 	panic("unimplemented")
 }
 
 func (this *Parser) parseDoStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+	this.Labels = append(this.Labels, Label{Kind: "loop", Name: ""})
+	doStatement, err := this.parseStatement("do", false, map[string]*Node{})
+	if err != nil {
+		return nil, err
+	}
+	node.BodyNode = doStatement
+	this.Labels = this.Labels[:len(this.Labels)-1]
+	err = this.expect(TOKEN_WHILE)
+
+	if err != nil {
+		return nil, err
+	}
+
+	testParenExpression, err := this.parseParenExpression()
+
+	if err != nil {
+		return nil, err
+	}
+
+	node.Test = testParenExpression
+
+	if this.getEcmaVersion() >= 6 {
+		this.eat(TOKEN_SEMI)
+	} else {
+		this.semicolon()
+	}
+
+	return this.finishNode(node, NODE_DO_WHILE_STATEMENT), nil
 }
 
 func (this *Parser) parseDebuggerStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+	this.semicolon()
+	return this.finishNode(node, NODE_DEBUGGER_STATEMENT), nil
 }
 
 func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*Node, error) {

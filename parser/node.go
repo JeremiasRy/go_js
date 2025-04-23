@@ -256,7 +256,7 @@ type Node struct {
 	Callee             *Node   // Expression | Super
 	Arguments          []*Node // Expression | SpreadElement
 	Expressions        []*Node // Expression
-	Await              *bool
+	Await              bool
 	IsDelegate         *bool
 	Quasis             []*Node // TemplateElement
 	Tag                *Node   // Expression
@@ -382,11 +382,7 @@ func (this *Parser) copyNode(node *Node) *Node {
 		newNode.Directive = &directive
 	}
 
-	// Copy Await (*bool)
-	if node.Await != nil {
-		await := *node.Await
-		newNode.Await = &await
-	}
+	newNode.Await = node.Await
 
 	// Copy IsDelegate (*bool)
 	if node.IsDelegate != nil {
