@@ -1,5 +1,7 @@
 package parser
 
+import "slices"
+
 type Flags int
 
 const (
@@ -61,6 +63,63 @@ func (this *Parser) currentThisScope() *Scope {
 		if scope.Flags&(SCOPE_VAR|SCOPE_CLASS_FIELD_INIT|SCOPE_CLASS_STATIC_BLOCK) != 0 && scope.Flags&SCOPE_ARROW != SCOPE_ARROW {
 			return scope
 		}
+	}
+	return nil
+}
+
+func (p *Parser) currentVarScope() *Scope {
+	for _, scope := range p.ScopeStack {
+		if scope.Flags&(SCOPE_VAR|SCOPE_CLASS_FIELD_INIT|SCOPE_CLASS_STATIC_BLOCK) > 0 && scope.Flags&SCOPE_ARROW != SCOPE_ARROW {
+			return scope
+		}
+	}
+
+	return nil
+}
+
+func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
+	return (scope.Flags&SCOPE_FUNCTION != 0) || (!this.InModule && scope.Flags&SCOPE_TOP != 0)
+}
+
+func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
+	redeclared := false
+
+	scope := this.currentScope()
+	if bindingType == BIND_LEXICAL {
+		redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Functions, name) || slices.Contains(scope.Var, name)
+		scope.Lexical = append(scope.Lexical, name)
+		if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
+			delete(this.UndefinedExports, name)
+		}
+	} else if bindingType == BIND_SIMPLE_CATCH {
+		scope.Lexical = append(scope.Lexical, name)
+	} else if bindingType == BIND_FUNCTION {
+		if this.treatFunctionsAsVar() {
+			redeclared = slices.Contains(scope.Lexical, name)
+		} else {
+			redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Var, name)
+		}
+		scope.Functions = append(scope.Functions, name)
+	} else {
+		for _, scope := range this.ScopeStack {
+			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !this.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
+				redeclared = true
+				break
+			}
+
+			scope.Var = append(scope.Var, name)
+			if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
+				delete(this.UndefinedExports, name)
+			}
+
+			if scope.Flags&SCOPE_VAR != 0 {
+				break
+			}
+		}
+	}
+
+	if redeclared {
+		return this.raiseRecoverable(pos, `Identifier '${name}' has already been declared`)
 	}
 	return nil
 }

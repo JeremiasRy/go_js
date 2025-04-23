@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -56,15 +55,57 @@ type Parser struct {
 	RegexpState              *RegExpState
 	PrivateNameStack         []PrivateName
 	InTemplateElement        bool
-	CanAwait                 bool
-	AllowSuper               bool
-	AllowDirectSuper         bool
-	InAsync                  bool
-	InGenerator              bool
 	InClassStaticBlock       bool
-	AllowNewDotTarget        bool
 }
 
+func (p *Parser) inFunction() bool {
+	return p.currentVarScope().Flags&SCOPE_FUNCTION > 0
+}
+func (p *Parser) inAsync() bool {
+	return p.currentVarScope().Flags&SCOPE_ASYNC > 0
+}
+
+func (p *Parser) inGenerator() bool {
+	return p.currentVarScope().Flags&SCOPE_GENERATOR > 0
+}
+
+func (p *Parser) canAwait() bool {
+	for _, scope := range p.ScopeStack {
+		flags := scope.Flags
+
+		if flags&(SCOPE_CLASS_STATIC_BLOCK|SCOPE_CLASS_FIELD_INIT) > 0 {
+			return false
+		}
+
+		if flags&SCOPE_FUNCTION == SCOPE_FUNCTION {
+			return flags&SCOPE_ASYNC > 0
+		}
+	}
+
+	return (p.InModule && p.getEcmaVersion() >= 13) || p.options.AllowAwaitOutsideFunction
+}
+
+func (p *Parser) allowSuper() bool {
+	return p.currentThisScope().Flags&SCOPE_SUPER > 0 || p.options.AllowSuperOutsideMethod
+}
+
+func (p *Parser) allowDirectSuper() bool {
+	return p.currentThisScope().Flags&SCOPE_DIRECT_SUPER > 0
+}
+func (p *Parser) allowNewDotTarget() bool {
+	for _, scope := range p.ScopeStack {
+		flags := scope.Flags
+
+		if flags&(SCOPE_CLASS_STATIC_BLOCK|SCOPE_CLASS_FIELD_INIT) > 0 || flags&SCOPE_FUNCTION == SCOPE_FUNCTION && flags&SCOPE_ARROW != SCOPE_ARROW {
+			return true
+		}
+	}
+	return false
+}
+
+func (this *Parser) treatFunctionsAsVar() bool {
+	return this.treatFunctionsAsVarInScope(this.currentScope())
+}
 func (p *Parser) getEcmaVersion() int {
 	if ecmaVersion, ok := p.options.ecmaVersion.(int); ok {
 		return ecmaVersion
@@ -185,123 +226,6 @@ func (this *Parser) exitScope() {
 
 func (this *Parser) currentScope() *Scope {
 	return this.ScopeStack[len(this.ScopeStack)-1]
-}
-
-func (this *Parser) treatFunctionsAsVar() bool {
-	return this.treatFunctionsAsVarInScope(this.currentScope())
-}
-
-func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
-	return (scope.Flags&SCOPE_FUNCTION != 0) || (!this.InModule && scope.Flags&SCOPE_TOP != 0)
-}
-
-func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
-	redeclared := false
-
-	scope := this.currentScope()
-	if bindingType == BIND_LEXICAL {
-		redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Functions, name) || slices.Contains(scope.Var, name)
-		scope.Lexical = append(scope.Lexical, name)
-		if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
-			delete(this.UndefinedExports, name)
-		}
-	} else if bindingType == BIND_SIMPLE_CATCH {
-		scope.Lexical = append(scope.Lexical, name)
-	} else if bindingType == BIND_FUNCTION {
-		if this.treatFunctionsAsVar() {
-			redeclared = slices.Contains(scope.Lexical, name)
-		} else {
-			redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Var, name)
-		}
-		scope.Functions = append(scope.Functions, name)
-	} else {
-		for _, scope := range this.ScopeStack {
-			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !this.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
-				redeclared = true
-				break
-			}
-
-			scope.Var = append(scope.Var, name)
-			if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
-				delete(this.UndefinedExports, name)
-			}
-
-			if scope.Flags&SCOPE_VAR != 0 {
-				break
-			}
-		}
-	}
-
-	if redeclared {
-		return this.raiseRecoverable(pos, `Identifier '${name}' has already been declared`)
-	}
-	return nil
-}
-
-func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod bool, forInit string) error {
-	isExpression := isArrowFunction && this.Type.identifier != TOKEN_BRACEL
-	oldStrict, useStrict := this.Strict, false
-
-	if isExpression {
-		maybeAssign, err := this.parseMaybeAssign(forInit, nil)
-		if err != nil {
-			return err
-		}
-		node.BodyNode = maybeAssign
-		node.IsExpression = true
-		err = this.checkParams(node, false)
-		if err != nil {
-			return err
-		}
-	} else {
-		nonSimple := this.getEcmaVersion() >= 7 && !this.isSimpleParamList(node.Params)
-		if !oldStrict || nonSimple {
-			useStrict = this.strictDirective(this.End)
-			// If this is a strict mode function, verify that argument names
-			// are not repeated, and it does not try to bind the words `eval`
-			// or `arguments`.
-			if useStrict && nonSimple {
-				return this.raiseRecoverable(node.Start, "Illegal 'use strict' directive in function with non-simple parameter list")
-			}
-
-		}
-		// Start a new scope with regard to labels and the `inFunction`
-		// flag (restore them to their old value afterwards).
-		oldLabels := this.Labels
-		this.Labels = []Label{}
-		if useStrict {
-			this.Strict = true
-		}
-
-		// Add the params to varDeclaredNames to ensure that an error is thrown
-		// if a let/const declaration in the function clashes with one of the params.
-		err := this.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node.Params))
-
-		if err != nil {
-			return err
-		}
-		// Ensure the function name isn't a forbidden identifier in strict mode, e.g. 'eval'
-		if this.Strict && node.Id != nil {
-			err := this.checkLValSimple(node.Id, BIND_OUTSIDE, struct {
-				check bool
-				hash  map[string]bool
-			}{})
-
-			if err != nil {
-				return err
-			}
-		}
-		block, err := this.parseBlock(false, nil, useStrict && !oldStrict)
-		if err != nil {
-			return err
-		}
-		node.BodyNode = block
-		node.IsExpression = false
-		this.adaptDirectivePrologue(node.BodyNode.Body)
-		this.Labels = oldLabels
-	}
-	this.exitScope()
-	return nil
 }
 
 // #### CONTEXT RELATED CODE

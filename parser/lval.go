@@ -4,7 +4,7 @@ func (this *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErr
 	if this.getEcmaVersion() >= 6 && node != nil {
 		switch node.Type {
 		case NODE_IDENTIFIER:
-			if this.InAsync && node.Name == "await" {
+			if this.inAsync() && node.Name == "await" {
 				return nil, this.raise(node.Start, "Cannot use 'await' as identifier inside an async function")
 			}
 

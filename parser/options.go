@@ -8,8 +8,8 @@ type Options struct {
 	AllowReserved               bool
 	AllowReturnOutsideFunction  bool
 	AllowImportExportEverywhere bool
-	AllowAwaitOutsideFunction   *bool
-	AllowSuperOutsideMethod     *bool
+	AllowAwaitOutsideFunction   bool
+	AllowSuperOutsideMethod     bool
 	AllowHashBang               bool
 	CheckPrivateFields          bool
 	Locations                   bool
@@ -30,8 +30,8 @@ var DefaultOptions = Options{
 	AllowReserved:               false,
 	AllowReturnOutsideFunction:  false,
 	AllowImportExportEverywhere: false,
-	AllowAwaitOutsideFunction:   nil,
-	AllowSuperOutsideMethod:     nil,
+	AllowAwaitOutsideFunction:   false,
+	AllowSuperOutsideMethod:     false,
 	AllowHashBang:               false,
 	CheckPrivateFields:          true,
 	Locations:                   false,

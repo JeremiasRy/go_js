@@ -463,7 +463,7 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 	var expr *Node
 	var err error
 
-	if this.isContextual("await") && this.CanAwait {
+	if this.isContextual("await") && this.canAwait() {
 		expr, err = this.parseAwait(forInit)
 		sawUnary = true
 	} else if this.Type.prefix {
@@ -741,13 +741,13 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 	_, canBeArrow := this.PotentialArrowAt == this.start, this.PotentialArrowAt == this.start
 	switch this.Type.identifier {
 	case TOKEN_SUPER:
-		if !this.AllowSuper {
+		if !this.allowSuper() {
 			return nil, this.raise(this.start, "'super' keyword outside a method")
 		}
 
 		node := this.startNode()
 		this.next(false)
-		if this.Type.identifier == TOKEN_PARENL && !this.AllowDirectSuper {
+		if this.Type.identifier == TOKEN_PARENL && !this.allowDirectSuper() {
 			return nil, this.raise(node.Start, "super() call outside constructor of a subclass")
 		}
 
@@ -1005,11 +1005,11 @@ func (this *Parser) checkUnreserved(opts struct {
 	end   int
 	name  string
 }) error {
-	if this.InGenerator && opts.name == "yield" {
+	if this.inGenerator() && opts.name == "yield" {
 		return this.raiseRecoverable(opts.start, "Cannot use 'yield' as identifier inside a generator")
 	}
 
-	if this.InAsync && opts.name == "await" {
+	if this.inAsync() && opts.name == "await" {
 		return this.raiseRecoverable(opts.start, "Cannot use 'await' as identifier inside an async function")
 	}
 	curScope := this.currentThisScope()
@@ -1037,7 +1037,7 @@ func (this *Parser) checkUnreserved(opts struct {
 	}
 
 	if re.Match([]byte(opts.name)) {
-		if !this.InAsync && opts.name == "await" {
+		if !this.inAsync() && opts.name == "await" {
 			return this.raiseRecoverable(opts.start, "Cannot use keyword 'await' outside an async function")
 		}
 
@@ -1379,7 +1379,7 @@ func (this *Parser) parseNew() (*Node, error) {
 			return nil, this.raiseRecoverable(node.Start, "'new.target' must not contain escaped characters")
 		}
 
-		if !this.AllowNewDotTarget {
+		if !this.allowNewDotTarget() {
 			return nil, this.raiseRecoverable(node.Start, "'new.target' can only be used in functions and class static block")
 		}
 
@@ -1435,6 +1435,72 @@ func (this *Parser) parseArrowExpression(node *Node, params []*Node, isAsync boo
 	this.AwaitIdentPos = oldAwaitIdentPos
 
 	return this.finishNode(node, NODE_ARROW_FUNCTION_EXPRESSION), nil
+}
+
+func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod bool, forInit string) error {
+	isExpression := isArrowFunction && this.Type.identifier != TOKEN_BRACEL
+	oldStrict, useStrict := this.Strict, false
+
+	if isExpression {
+		maybeAssign, err := this.parseMaybeAssign(forInit, nil)
+		if err != nil {
+			return err
+		}
+		node.BodyNode = maybeAssign
+		node.IsExpression = true
+		err = this.checkParams(node, false)
+		if err != nil {
+			return err
+		}
+	} else {
+		nonSimple := this.getEcmaVersion() >= 7 && !this.isSimpleParamList(node.Params)
+		if !oldStrict || nonSimple {
+			useStrict = this.strictDirective(this.End)
+			// If this is a strict mode function, verify that argument names
+			// are not repeated, and it does not try to bind the words `eval`
+			// or `arguments`.
+			if useStrict && nonSimple {
+				return this.raiseRecoverable(node.Start, "Illegal 'use strict' directive in function with non-simple parameter list")
+			}
+
+		}
+		// Start a new scope with regard to labels and the `inFunction`
+		// flag (restore them to their old value afterwards).
+		oldLabels := this.Labels
+		this.Labels = []Label{}
+		if useStrict {
+			this.Strict = true
+		}
+
+		// Add the params to varDeclaredNames to ensure that an error is thrown
+		// if a let/const declaration in the function clashes with one of the params.
+		err := this.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node.Params))
+
+		if err != nil {
+			return err
+		}
+		// Ensure the function name isn't a forbidden identifier in strict mode, e.g. 'eval'
+		if this.Strict && node.Id != nil {
+			err := this.checkLValSimple(node.Id, BIND_OUTSIDE, struct {
+				check bool
+				hash  map[string]bool
+			}{})
+
+			if err != nil {
+				return err
+			}
+		}
+		block, err := this.parseBlock(false, nil, useStrict && !oldStrict)
+		if err != nil {
+			return err
+		}
+		node.BodyNode = block
+		node.IsExpression = false
+		this.adaptDirectivePrologue(node.BodyNode.Body)
+		this.Labels = oldLabels
+	}
+	this.exitScope()
+	return nil
 }
 
 func (this *Parser) isSimpleParamList(params []*Node) bool {
