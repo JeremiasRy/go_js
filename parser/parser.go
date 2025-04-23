@@ -51,7 +51,7 @@ type Parser struct {
 	AwaitPos                 int
 	AwaitIdentPos            int
 	Labels                   []Label
-	UndefinedExports         map[string]any
+	UndefinedExports         map[string]*Node
 	ScopeStack               []*Scope
 	RegexpState              *RegExpState
 	PrivateNameStack         []PrivateName
@@ -297,7 +297,7 @@ func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod
 		}
 		node.BodyNode = block
 		node.IsExpression = false
-		this.adaptDirectivePrologue(node.BodyNode.BodyNode)
+		this.adaptDirectivePrologue(node.BodyNode.Body)
 		this.Labels = oldLabels
 	}
 	this.exitScope()

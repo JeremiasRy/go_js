@@ -99,7 +99,7 @@ const (
 type DeclarationKind int
 
 const (
-	DECLARATION_KINF_NOT_INITIALIZED DeclarationKind = iota
+	DECLARATION_KIND_NOT_INITIALIZED DeclarationKind = iota
 	VAR
 	LET
 	CONST
