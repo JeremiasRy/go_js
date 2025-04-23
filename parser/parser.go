@@ -11,6 +11,7 @@ import (
 
 type Label struct {
 	Kind string
+	Name string
 }
 
 type PrivateName struct {

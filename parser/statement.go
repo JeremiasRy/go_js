@@ -282,7 +282,18 @@ func (this *Parser) parseLabeledStatement(node *Node, name string, expr *Node, c
 }
 
 func (this *Parser) isAsyncFunction() bool {
-	panic("unimplemented")
+	if this.getEcmaVersion() < 8 || !this.isContextual("async") {
+		return false
+	}
+
+	skip := skipWhiteSpace.Find(this.input[this.pos:])
+	next := this.pos + len(skip)
+	after := rune(this.input[next+8])
+
+	return !lineBreak.Match(this.input[this.pos:next]) &&
+		string(this.input[next:next+8]) == "function" &&
+		(next+8 == len(this.input) ||
+			!(IsIdentifierChar(after, false) /*|| after > 0xd7ff && after < 0xdc00*/))
 }
 
 func (this *Parser) parseExport(node *Node) (*Node, error) {
@@ -330,7 +341,44 @@ func (this *Parser) parseReturnStatement(node *Node) (*Node, error) {
 }
 
 func (this *Parser) isLet(context string) bool {
-	panic("unimplemented")
+	if this.getEcmaVersion() < 6 || !this.isContextual("let") {
+		return false
+	}
+
+	skip := skipWhiteSpace.Find(this.input[this.pos:])
+	next := this.pos + len(skip)
+
+	nextCh := rune(this.input[next])
+	// For ambiguous cases, determine if a LexicalDeclaration (or only a
+	// Statement) is allowed here. If context is not empty then only a Statement
+	// is allowed. However, `let [` is an explicit negative lookahead for
+	// ExpressionStatement, so special-case it first.
+	if nextCh == '[' || nextCh == '\\' {
+		return true
+	}
+	if len(context) != 0 {
+		return false
+	}
+
+	if nextCh == 123 /* || nextCh > 0xd7ff && nextCh < 0xdc00 */ {
+		return true // '{', astral
+	}
+	if IsIdentifierStart(nextCh, true) {
+		pos := next + 1
+		nextCh = rune(this.input[pos])
+		for IsIdentifierChar(nextCh, true) {
+			pos = pos + 1
+		}
+		if nextCh == 92 /*|| nextCh > 0xd7ff && nextCh < 0xdc00*/ {
+			return true
+
+		}
+		ident := this.input[next:pos]
+		if !keywordRelationalOperator.Match(ident) {
+			return true
+		}
+	}
+	return false
 }
 
 func (this *Parser) parseIfStatement(node *Node) (*Node, error) {
@@ -354,6 +402,53 @@ func (this *Parser) parseDebuggerStatement(node *Node) (*Node, error) {
 }
 
 func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*Node, error) {
+	isBreak := keyword == "break"
+	this.next(false)
+	if this.eat(TOKEN_SEMI) || this.insertSemicolon() {
+		node.Label = nil
+	} else if this.Type.identifier != TOKEN_NAME {
+		return nil, this.unexpected(nil)
+	} else {
+		ident, err := this.parseIdent(false)
+
+		if err != nil {
+			return nil, err
+		}
+		node.Label = ident
+		this.semicolon()
+	}
+
+	// Verify that there is an actual destination to break or
+	// continue to.
+	i := 0
+	for i < len(this.Labels) {
+		lab := this.Labels[i]
+		if node.Label == nil || lab.Name == node.Label.Name {
+			if len(lab.Kind) != 0 && isBreak || lab.Kind == "loop" {
+				break
+			}
+			if node.Label != nil && isBreak {
+				break
+			}
+		}
+	}
+
+	if i == len(this.Labels) {
+		return nil, this.raise(node.Start, "Unsyntactic "+keyword)
+	}
+
+	if isBreak {
+		return this.finishNode(node, NODE_BREAK_STATEMENT), nil
+	}
+
+	return this.finishNode(node, NODE_CONTINUE_STATEMENT), nil
+}
+
+func (this *Parser) semicolon() {
+	panic("unimplemented")
+}
+
+func (this *Parser) insertSemicolon() bool {
 	panic("unimplemented")
 }
 
