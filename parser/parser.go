@@ -10,8 +10,9 @@ import (
 )
 
 type Label struct {
-	Kind string
-	Name string
+	Kind           string
+	Name           string
+	StatementStart int
 }
 
 type PrivateName struct {
