@@ -2,6 +2,7 @@ package parser
 
 import (
 	"errors"
+	"slices"
 	"strings"
 )
 
@@ -139,7 +140,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 			return nil, this.unexpected(nil)
 		}
 
-		varStatement, err := this.parseVarStatement(node, kind)
+		varStatement, err := this.parseVarStatement(node, kind, false)
 
 		if err != nil {
 			return nil, err
@@ -431,15 +432,7 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 					return nil, err
 				}
 
-				err = this.checkLocalExport(struct {
-					start int
-					end   int
-					name  string
-				}{start: spec.Local.Start, end: spec.Local.End, name: spec.Local.Name})
-
-				if err != nil {
-					return nil, err
-				}
+				this.checkLocalExport(spec.Local)
 
 				if spec.Local.Type == NODE_LITERAL {
 					return nil, this.raise(spec.Local.Start, "A string literal cannot be used as an exported binding without `from`.")
@@ -451,80 +444,692 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 				node.Attributes = []*Node{}
 			}
 		}
-		this.semicolon()
+		err = this.semicolon()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return this.finishNode(node, NODE_EXPORT_NAMED_DECLARATION), nil
 }
 
-func (this *Parser) checkLocalExport(opts struct {
-	start int
-	end   int
-	name  string
-}) error {
-	panic("unimplemented")
+func (this *Parser) checkLocalExport(opts *Node) {
+	if slices.Index(this.ScopeStack[0].Lexical, opts.Name) == -1 &&
+		slices.Index(this.ScopeStack[0].Var, opts.Name) == -1 {
+		this.UndefinedExports[opts.Name] = opts
+	}
 }
 
 func (this *Parser) parseExportSpecifiers(exports map[string]*Node) ([]*Node, error) {
-	panic("unimplemented")
+	nodes, first := []*Node{}, true
+	// export { x, y as z } [from '...']
+	err := this.expect(TOKEN_BRACEL)
+
+	if err != nil {
+		return nil, err
+	}
+	for !this.eat(TOKEN_BRACER) {
+		if !first {
+			err := this.expect(TOKEN_COMMA)
+			if err != nil {
+				return nil, err
+			}
+			if this.afterTrailingComma(TOKEN_BRACER, false) {
+				break
+			}
+		} else {
+			first = false
+		}
+		exportSpecifier, err := this.parseExportSpecifier(exports)
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, exportSpecifier)
+
+	}
+	return nodes, nil
+}
+
+func (this *Parser) parseExportSpecifier(exports map[string]*Node) (*Node, error) {
+	node := this.startNode()
+	moduleExportName, err := this.parseModuleExportName()
+	if err != nil {
+		return nil, err
+	}
+	node.Local = moduleExportName
+
+	if this.eatContextual("as") {
+		moduleExportName, err := this.parseModuleExportName()
+		if err != nil {
+			return nil, err
+		}
+
+		node.Exported = moduleExportName
+	} else {
+		node.Exported = node.Local
+	}
+	this.checkExport(
+		exports,
+		struct {
+			s string
+			n *Node
+		}{
+			n: node.Exported,
+		},
+		node.Exported.Start,
+	)
+
+	return this.finishNode(node, NODE_EXPORT_SPECIFIER), nil
+}
+
+func (this *Parser) parseModuleExportName() (*Node, error) {
+	if this.getEcmaVersion() >= 13 && this.Type.identifier == TOKEN_STRING {
+		stringLiteral, err := this.parseLiteral(this.Value)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if val, ok := stringLiteral.Value.(string); ok {
+			if loneSurrogate.Match([]byte(val)) {
+				return nil, this.raise(stringLiteral.Start, "An export name cannot include a lone surrogate.")
+			}
+			return stringLiteral, nil
+		}
+	}
+	ident, err := this.parseIdent(true)
+	if err != nil {
+		return nil, err
+	}
+	return ident, nil
 }
 
 func (this *Parser) parseWithClause() ([]*Node, error) {
-	panic("unimplemented")
+	nodes := []*Node{}
+	if !this.eat(TOKEN_WITH) {
+		return nodes, nil
+	}
+
+	err := this.expect(TOKEN_BRACEL)
+	if err != nil {
+		return nil, err
+	}
+	attributeKeys := map[string]struct{}{}
+	first := true
+	for !this.eat(TOKEN_BRACER) {
+		if !first {
+			err := this.expect(TOKEN_COMMA)
+			if err != nil {
+				return nil, err
+			}
+			if this.afterTrailingComma(TOKEN_BRACER, false) {
+				break
+			}
+		} else {
+			first = false
+		}
+
+		attr, err := this.parseImportAttribute()
+		if err != nil {
+			return nil, err
+		}
+		keyName := ""
+
+		if attr.Key.Type == NODE_IDENTIFIER {
+			keyName = attr.Key.Name
+		} else {
+			if val, ok := attr.Key.Value.(string); ok {
+				keyName = val
+			}
+		}
+
+		if _, found := attributeKeys[keyName]; found {
+			return nil, this.raiseRecoverable(attr.Key.Start, "Duplicate attribute key '"+keyName+"'")
+		}
+		attributeKeys[keyName] = struct{}{}
+		nodes = append(nodes, attr)
+	}
+	return nodes, nil
+}
+
+func (this *Parser) parseImportAttribute() (*Node, error) {
+	node := this.startNode()
+
+	if this.Type.identifier == TOKEN_STRING {
+		exprAtom, err := this.parseExprAtom(nil, "", false)
+
+		if err != nil {
+			return nil, err
+		}
+		node.Key = exprAtom
+	} else {
+		ident, err := this.parseIdent(this.options.AllowReserved) // questions to be answered: this.parseIdent(this.options.allowReserved !== "never"), we'll figure it out :)
+
+		if err != nil {
+			return nil, err
+		}
+		node.Key = ident
+	}
+	err := this.expect(TOKEN_COLON)
+	if err != nil {
+		return nil, err
+	}
+
+	if this.Type.identifier != TOKEN_STRING {
+		return nil, this.unexpected(nil)
+	}
+
+	exprAtom, err := this.parseExprAtom(nil, "", false)
+
+	if err != nil {
+		return nil, err
+	}
+
+	node.Value = exprAtom
+	return this.finishNode(node, NODE_IMPORT_ATTRIBUTE), nil
 }
 
 func (this *Parser) checkVariableExport(exports map[string]*Node, declarations []*Node) error {
-	panic("unimplemented")
+	if exports == nil {
+		return errors.New("exports was defined, i guess we don't want that?")
+	}
+
+	for _, decl := range declarations {
+		err := this.checkPatternExport(exports, decl.Id)
+
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (this *Parser) checkPatternExport(exports map[string]*Node, pat *Node) error {
+	t := pat.Type
+
+	switch t {
+	case NODE_IDENTIFIER:
+		this.checkExport(exports, struct {
+			s string
+			n *Node
+		}{n: pat}, pat.Start)
+	case NODE_OBJECT_PATTERN:
+		for _, prop := range pat.Properties {
+			err := this.checkPatternExport(exports, prop)
+			if err != nil {
+				return err
+			}
+		}
+	case NODE_ARRAY_PATTERN:
+		for _, elt := range pat.Elements {
+			if elt != nil {
+				err := this.checkPatternExport(exports, elt)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	case NODE_PROPERTY:
+		if val, ok := pat.Value.(*Node); ok {
+			err := this.checkPatternExport(exports, val)
+			if err != nil {
+				return err
+			}
+		} else {
+			panic("we were expecting *Node from node.Value")
+		}
+	case NODE_ASSIGNMENT_PATTERN:
+
+		err := this.checkPatternExport(exports, pat.Left)
+		if err != nil {
+			return err
+		}
+	case NODE_REST_ELEMENT:
+		err := this.checkPatternExport(exports, pat.Argument)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (this *Parser) parseExportDeclaration(node *Node) (*Node, error) {
-	panic("unimplemented")
+	stmt, err := this.parseStatement("", false, nil)
+	if err != nil {
+		return nil, err
+	}
+	return stmt, nil
 }
 
 func (this *Parser) shouldParseExportStatement() bool {
-	panic("unimplemented")
+	return this.Type.keyword == "var" ||
+		this.Type.keyword == "const" ||
+		this.Type.keyword == "class" ||
+		this.Type.keyword == "function" ||
+		this.isLet("") ||
+		this.isAsyncFunction()
 }
 
 func (this *Parser) checkExport(exports map[string]*Node, val struct {
 	s string
 	n *Node
 }, start int) error {
-	panic("unimplemented")
+	if exports == nil {
+		return nil
+	}
+
+	name := ""
+
+	if len(val.s) == 0 {
+		name = val.n.Name
+	} else {
+		name = val.s
+	}
+
+	if _, found := exports[name]; found {
+		return this.raiseRecoverable(start, "Duplicate export '"+name+"'")
+	}
+
+	return nil
 }
 
 func (this *Parser) parseExportAllDeclaration(node *Node, exports map[string]*Node) (*Node, error) {
-	panic("unimplemented")
+	if this.getEcmaVersion() >= 11 {
+		if this.eatContextual("as") {
+			moduleExportName, err := this.parseModuleExportName()
+			if err != nil {
+				return nil, err
+			}
+
+			node.Exported = moduleExportName
+
+			this.checkExport(exports, struct {
+				s string
+				n *Node
+			}{n: node.Exported}, this.LastTokStart)
+		} else {
+			node.Exported = nil
+		}
+	}
+	err := this.expectContextual("from")
+
+	if err != nil {
+		return nil, err
+	}
+
+	if this.Type.identifier != TOKEN_STRING {
+		return nil, this.unexpected(nil)
+	}
+	exprAtom, err := this.parseExprAtom(nil, "", false)
+	if err != nil {
+		return nil, err
+	}
+	node.Source = exprAtom
+	if this.getEcmaVersion() >= 16 {
+		attr, err := this.parseWithClause()
+		if err != nil {
+			return nil, err
+		}
+		node.Attributes = attr
+	}
+
+	err = this.semicolon()
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(node, NODE_EXPORT_ALL_DECLARATION), nil
+}
+
+func (this *Parser) expectContextual(name string) error {
+	if !this.eatContextual(name) {
+		return this.unexpected(nil)
+	}
+	return nil
 }
 
 func (this *Parser) parseImport(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+
+	// import '...'
+	if this.Type.identifier == TOKEN_STRING {
+		node.Specifiers = []*Node{}
+		exprAtom, err := this.parseExprAtom(nil, "", false)
+		if err != nil {
+			return nil, err
+		}
+		node.Source = exprAtom
+	} else {
+		importSpecifiers, err := this.parseImportSpecifiers()
+		if err != nil {
+			return nil, err
+		}
+
+		node.Specifiers = importSpecifiers
+		err = this.expectContextual("from")
+		if err != nil {
+			return nil, err
+		}
+		if this.Type.identifier == TOKEN_STRING {
+			exprAtom, err := this.parseExprAtom(nil, "", false)
+			if err != nil {
+				return nil, err
+			}
+			node.Source = exprAtom
+		} else {
+			return nil, this.unexpected(nil)
+		}
+	}
+	if this.getEcmaVersion() >= 16 {
+		withClause, err := this.parseWithClause()
+		if err != nil {
+			return nil, err
+		}
+		node.Attributes = withClause
+	}
+	err := this.semicolon()
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(node, NODE_IMPORT_DECLARATION), nil
 }
 
-func (this *Parser) parseExpressionStatement(node *Node, expression *Node) (*Node, error) {
-	panic("unimplemented")
+func (this *Parser) parseImportSpecifiers() ([]*Node, error) {
+	nodes, first := []*Node{}, true
+	if this.Type.identifier == TOKEN_NAME {
+		importDefaultSpecifier, err := this.parseImportDefaultSpecifier()
+		if err != nil {
+			return nil, err
+		}
+
+		nodes = append(nodes, importDefaultSpecifier)
+		if !this.eat(TOKEN_COMMA) {
+			return nodes, nil
+		}
+	}
+	if this.Type.identifier == TOKEN_STAR {
+		importNamespaceSpecifier, err := this.parseImportNamespaceSpecifier()
+		if err != nil {
+			return nil, err
+		}
+
+		nodes = append(nodes, importNamespaceSpecifier)
+		return nodes, nil
+	}
+	err := this.expect(TOKEN_BRACEL)
+	if err != nil {
+		return nil, err
+	}
+
+	for !this.eat(TOKEN_BRACER) {
+		if !first {
+			err := this.expect(TOKEN_COMMA)
+			if err != nil {
+				return nil, err
+			}
+			if this.afterTrailingComma(TOKEN_BRACER, false) {
+				break
+			}
+		} else {
+			first = false
+		}
+		importSpecifier, err := this.parseImportSpecifier()
+		if err != nil {
+			return nil, err
+		}
+		nodes = append(nodes, importSpecifier)
+	}
+	return nodes, nil
+}
+
+func (this *Parser) parseImportSpecifier() (*Node, error) {
+	node := this.startNode()
+	moduleExportName, err := this.parseModuleExportName()
+	if err != nil {
+		return nil, err
+	}
+	node.Imported = moduleExportName
+	if this.eatContextual("as") {
+		ident, err := this.parseIdent(false)
+		if err != nil {
+			return nil, err
+		}
+		node.Local = ident
+	} else {
+		err := this.checkUnreserved(struct {
+			start int
+			end   int
+			name  string
+		}{start: node.Imported.Start, end: node.Imported.End, name: node.Imported.Name})
+		if err != nil {
+			return nil, err
+		}
+
+		node.Local = node.Imported
+	}
+	err = this.checkLValSimple(node.Local, BIND_LEXICAL, struct {
+		check bool
+		hash  map[string]bool
+	}{check: false})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return this.finishNode(node, NODE_IMPORT_SPECIFIER), nil
+}
+
+func (this *Parser) parseImportNamespaceSpecifier() (*Node, error) {
+	node := this.startNode()
+	this.next(false)
+	err := this.expectContextual("as")
+
+	if err != nil {
+		return nil, err
+	}
+
+	ident, err := this.parseIdent(false)
+
+	if err != nil {
+		return nil, err
+	}
+	node.Local = ident
+	err = this.checkLValSimple(node.Local, BIND_LEXICAL, struct {
+		check bool
+		hash  map[string]bool
+	}{check: false})
+
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(node, NODE_IMPORT_NAMESPACE_SPECIFIER), nil
+}
+
+func (this *Parser) parseImportDefaultSpecifier() (*Node, error) {
+	// import defaultObj, { x, y as z } from '...'
+	node := this.startNode()
+	ident, err := this.parseIdent(false)
+	if err != nil {
+		return nil, err
+	}
+	node.Local = ident
+	err = this.checkLValSimple(node.Local, BIND_LEXICAL, struct {
+		check bool
+		hash  map[string]bool
+	}{check: false})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return this.finishNode(node, NODE_IMPORT_DEFAULT_SPECIFIER), nil
+}
+
+func (this *Parser) parseExpressionStatement(node *Node, expr *Node) (*Node, error) {
+	node.Expression = expr
+	err := this.semicolon()
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(node, NODE_EXPRESSION_STATEMENT), nil
 }
 
 func (this *Parser) parseEmptyStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+	return this.finishNode(node, NODE_EMPTY_STATEMENT), nil
 }
 
 func (this *Parser) parseWithStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	if this.Strict {
+		this.raise(this.start, "'with' in strict mode")
+	}
+	this.next(false)
+	parenthesizedExpr, err := this.parseParenExpression()
+	if err != nil {
+		return nil, err
+	}
+	node.Object = parenthesizedExpr
+	stmt, err := this.parseStatement("with", false, nil)
+	node.BodyNode = stmt
+	return this.finishNode(node, NODE_WITH_STATEMENT), nil
 }
 
 func (this *Parser) parseWhileStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+	parenthesizedExpression, err := this.parseParenExpression()
+	if err != nil {
+		return nil, err
+	}
+	node.Test = parenthesizedExpression
+	this.Labels = append(this.Labels, Label{Kind: "loop"})
+
+	stmt, err := this.parseStatement("while", false, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	node.BodyNode = stmt
+	this.Labels = this.Labels[:len(this.Labels)-1]
+
+	return this.finishNode(node, NODE_WHILE_STATEMENT), nil
 }
 
-func (this *Parser) parseVarStatement(node *Node, kind DeclarationKind) (*Node, error) {
-	panic("unimplemented")
+func (this *Parser) parseVarStatement(node *Node, kind DeclarationKind, allowMissingInitializer bool) (*Node, error) {
+	this.next(false)
+	_, err := this.parseVar(node, false, kind, allowMissingInitializer)
+	if err != nil {
+		return nil, err
+	}
+	err = this.semicolon()
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(node, NODE_VARIABLE_DECLARATION), nil
 }
 
 func (this *Parser) parseTryStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+
+	blok, err := this.parseBlock(false, nil, false)
+	if err != nil {
+		return nil, err
+	}
+	node.Block = blok
+	node.Handler = nil
+	if this.Type.identifier == TOKEN_CATCH {
+		clause := this.startNode()
+		this.next(false)
+		if this.eat(TOKEN_PARENL) {
+			catchClauseParam, err := this.parseCatchClauseParam()
+			if err != nil {
+				return nil, err
+			}
+			clause.Param = catchClauseParam
+		} else {
+			if this.getEcmaVersion() < 10 {
+				return nil, this.unexpected(nil)
+			}
+			clause.Param = nil
+			this.enterScope(0)
+		}
+		block, err := this.parseBlock(false, nil, false)
+		if err != nil {
+			return nil, err
+		}
+
+		clause.BodyNode = block
+		this.exitScope()
+		node.Handler = this.finishNode(clause, NODE_CATCH_CLAUSE)
+	}
+	if this.eat(TOKEN_FINALLY) {
+		block, err := this.parseBlock(false, nil, false)
+		if err != nil {
+			return nil, err
+		}
+		node.Finalizer = block
+	} else {
+		node.Finalizer = nil
+	}
+
+	if node.Handler == nil && node.Finalizer == nil {
+		return nil, this.raise(node.Start, "Missing catch or finally clause")
+	}
+
+	return this.finishNode(node, NODE_TRY_STATEMENT), nil
+}
+
+func (this *Parser) parseCatchClauseParam() (*Node, error) {
+	param, err := this.parseBindingAtom()
+	if err != nil {
+		return nil, err
+	}
+
+	simple := param.Type == NODE_IDENTIFIER
+	if simple {
+		this.enterScope(SCOPE_SIMPLE_CATCH)
+	} else {
+		this.enterScope(0)
+	}
+
+	if simple {
+		err := this.checkLValPattern(param, BIND_SIMPLE_CATCH, struct {
+			check bool
+			hash  map[string]bool
+		}{check: false})
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		err := this.checkLValPattern(param, BIND_LEXICAL, struct {
+			check bool
+			hash  map[string]bool
+		}{check: false})
+		if err != nil {
+			return nil, err
+		}
+	}
+	err = this.expect(TOKEN_PARENR)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return param, nil
 }
 
 func (this *Parser) parseThrowStatement(node *Node) (*Node, error) {
-	panic("unimplemented")
+	this.next(false)
+	if lineBreak.Match(this.input[this.LastTokEnd:this.start]) {
+		return nil, this.raise(this.LastTokEnd, "Illegal newline after throw")
+	}
+	expr, err := this.parseExpression("", nil)
+	if err != nil {
+		return nil, err
+	}
+	node.Argument = expr
+	err = this.semicolon()
+	if err != nil {
+		return nil, err
+	}
+	return this.finishNode(node, NODE_THROW_STATEMENT), nil
 }
 
 func (this *Parser) parseSwitchStatement(node *Node) (*Node, error) {
@@ -620,7 +1225,10 @@ func (this *Parser) parseReturnStatement(node *Node) (*Node, error) {
 			return nil, err
 		}
 		node.Argument = expr
-		this.semicolon()
+		err = this.semicolon()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return this.finishNode(node, NODE_RETURN_STATEMENT), nil
 }
@@ -868,11 +1476,94 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 }
 
 func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
-	panic("unimplemented")
+	node.Init = init
+	err := this.expect(TOKEN_SEMI)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if this.Type.identifier == TOKEN_SEMI {
+		node.Test = nil
+	} else {
+		expr, err := this.parseExpression("", nil)
+
+		if err != nil {
+			return nil, err
+		}
+
+		node.Test = expr
+	}
+
+	err = this.expect(TOKEN_SEMI)
+
+	if err != nil {
+		return nil, err
+	}
+
+	if this.Type.identifier == TOKEN_PARENR {
+		node.Update = nil
+	} else {
+		expr, err := this.parseExpression("", nil)
+
+		if err != nil {
+			return nil, err
+		}
+		node.Update = expr
+	}
+
+	err = this.expect(TOKEN_PARENR)
+	if err != nil {
+		return nil, err
+	}
+	stmt, err := this.parseStatement("for", false, nil)
+
+	if err != nil {
+		return nil, err
+	}
+
+	node.BodyNode = stmt
+	this.exitScope()
+	this.Labels = this.Labels[:len(this.Labels)-1]
+	return this.finishNode(node, NODE_FOR_STATEMENT), nil
 }
 
 func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
-	panic("unimplemented")
+	isForIn := this.Type.identifier == TOKEN_IN
+	this.next(false)
+
+	if init.Type == NODE_VARIABLE_DECLARATION && init.Declarations[0].Init != nil && (!isForIn || this.getEcmaVersion() < 8 || this.Strict || init.DeclarationKind != VAR || init.Declarations[0].Id.Type != NODE_IDENTIFIER) {
+		return nil, this.raise(init.Start, `for-in or for-of loop variable declaration may not have an initializer`)
+	}
+	node.Left = init
+	if isForIn {
+		expr, err := this.parseExpression("", nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Rigth = expr
+	} else {
+		maybeAssign, err := this.parseMaybeAssign("", nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Rigth = maybeAssign
+	}
+
+	this.expect(TOKEN_PARENR)
+	stmt, err := this.parseStatement("for", false, nil)
+	if err != nil {
+		return nil, err
+	}
+	node.BodyNode = stmt
+	this.exitScope()
+	this.Labels = this.Labels[:len(this.Labels)-1]
+
+	if isForIn {
+		return this.finishNode(node, NODE_FOR_IN_STATEMENT), nil
+	}
+	return this.finishNode(node, NODE_FOR_OF_STATEMENT), nil
+
 }
 
 func (this *Parser) parseVar(node *Node, isFor bool, kind DeclarationKind, allowMissingInitializer bool) (*Node, error) {
@@ -939,8 +1630,12 @@ func (this *Parser) parseVarId(decl *Node, kind DeclarationKind) error {
 	return nil
 }
 
-func (this *Parser) eatContextual(s string) bool {
-	panic("unimplemented")
+func (this *Parser) eatContextual(name string) bool {
+	if !this.isContextual(name) {
+		return false
+	}
+	this.next(false)
+	return true
 }
 
 func (this *Parser) parseDoStatement(node *Node) (*Node, error) {
@@ -969,7 +1664,10 @@ func (this *Parser) parseDoStatement(node *Node) (*Node, error) {
 	if this.getEcmaVersion() >= 6 {
 		this.eat(TOKEN_SEMI)
 	} else {
-		this.semicolon()
+		err := this.semicolon()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return this.finishNode(node, NODE_DO_WHILE_STATEMENT), nil
@@ -977,7 +1675,10 @@ func (this *Parser) parseDoStatement(node *Node) (*Node, error) {
 
 func (this *Parser) parseDebuggerStatement(node *Node) (*Node, error) {
 	this.next(false)
-	this.semicolon()
+	err := this.semicolon()
+	if err != nil {
+		return nil, err
+	}
 	return this.finishNode(node, NODE_DEBUGGER_STATEMENT), nil
 }
 
@@ -995,7 +1696,10 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 			return nil, err
 		}
 		node.Label = ident
-		this.semicolon()
+		err = this.semicolon()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Verify that there is an actual destination to break or
@@ -1024,16 +1728,31 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 	return this.finishNode(node, NODE_CONTINUE_STATEMENT), nil
 }
 
-func (this *Parser) semicolon() {
-	panic("unimplemented")
-}
-
-func (this *Parser) insertSemicolon() bool {
-	panic("unimplemented")
-}
-
 func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStrict bool) (*Node, error) {
-	panic("unimplemented")
+	node.Body = []*Node{}
+	err := this.expect(TOKEN_BRACEL)
+	if err != nil {
+		return nil, err
+	}
+	if createNewLexicalScope {
+		this.enterScope(0)
+	}
+	for this.Type.identifier != TOKEN_BRACER {
+		stmt, err := this.parseStatement("", false, nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Body = append(node.Body, stmt)
+	}
+	if exitStrict {
+		this.Strict = false
+	}
+	this.next(false)
+
+	if createNewLexicalScope {
+		this.exitScope()
+	}
+	return this.finishNode(node, NODE_BLOCK_STATEMENT), nil
 }
 
 func (this *Parser) adaptDirectivePrologue(param []*Node) error {

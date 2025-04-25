@@ -18,6 +18,7 @@ var AstralIdentifierStartCodes = [598]rune{0, 11, 2, 25, 2, 18, 2, 1, 2, 14, 3, 
 
 var nonASCIIwhitespace = regexp.MustCompile("[\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]")
 var keywordRelationalOperator = regexp.MustCompile("^in(stanceof)?$")
+var loneSurrogate = regexp.MustCompile("")
 
 func IsIdentifierStart(code rune, astral bool) bool {
 	if code < 65 {

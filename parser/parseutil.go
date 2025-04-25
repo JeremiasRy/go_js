@@ -34,9 +34,31 @@ func (this *Parser) canInsertSemicolon() bool {
 		lineBreak.Match(this.input[this.LastTokEnd:this.start])
 }
 
+func (this *Parser) semicolon() error {
+	if !this.eat(TOKEN_SEMI) && !this.insertSemicolon() {
+		return this.unexpected(nil)
+	}
+	return nil
+}
+
+func (this *Parser) insertSemicolon() bool {
+	return this.canInsertSemicolon()
+	/* Not ported:
+	if this.canInsertSemicolon() {
+		if (this.options.onInsertedSemicolon)
+			this.options.onInsertedSemicolon(this.lastTokEnd, this.lastTokEndLoc)
+		return true
+	}
+	return false
+	*/
+}
+
 func (this *Parser) isContextual(name string) bool {
+	if this.Type.identifier == TOKEN_NAME {
+		return true
+	}
 	if value, ok := this.Value.(string); ok {
-		return this.Type.identifier == TOKEN_NAME && value == name && !this.ContainsEsc
+		return value == name && !this.ContainsEsc
 	}
 	return false
 }
