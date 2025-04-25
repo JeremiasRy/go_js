@@ -217,7 +217,7 @@ type Node struct {
 	IsExpression       bool
 	IsAsync            bool
 	Expression         *Node // Expression | Literal
-	Directive          *string
+	Directive          string
 	Delegate           bool
 	Object             *Node   // Expression
 	Argument           *Node   // Expression
@@ -376,11 +376,8 @@ func (this *Parser) copyNode(node *Node) *Node {
 		newNode.Regex = &regex
 	}
 
-	// Copy Directive (*string)
-	if node.Directive != nil {
-		directive := *node.Directive
-		newNode.Directive = &directive
-	}
+	directive := node.Directive
+	newNode.Directive = directive
 
 	newNode.Await = node.Await
 

@@ -23,11 +23,7 @@ func (this *Parser) parseTopLevel(node *Node) (*Node, error) {
 		}
 	}
 
-	err := this.adaptDirectivePrologue(node.Body)
-
-	if err != nil {
-		return nil, err
-	}
+	this.adaptDirectivePrologue(node.Body)
 	return this.finishNode(node, NODE_PROGRAM), nil
 }
 
@@ -1755,8 +1751,21 @@ func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStric
 	return this.finishNode(node, NODE_BLOCK_STATEMENT), nil
 }
 
-func (this *Parser) adaptDirectivePrologue(param []*Node) error {
-	panic("unimplemented")
+func (this *Parser) adaptDirectivePrologue(statements []*Node) {
+	for i := 0; i < len(statements) && this.isDirectiveCandidate(statements[i]); {
+		statements[i].Directive = statements[i].Expression.Raw[1 : len(statements[i].Expression.Raw)-2]
+		i++
+	}
+}
+
+func (this *Parser) isDirectiveCandidate(statement *Node) bool {
+	literalAndString := false
+
+	if statement.Expression.Type == NODE_LITERAL {
+		_, ok := statement.Expression.Value.(string)
+		literalAndString = ok
+	}
+	return this.getEcmaVersion() >= 5 && statement.Type == NODE_EXPRESSION_STATEMENT && literalAndString && /* Reject parenthesized strings.*/ (this.input[statement.Start] == '"' || this.input[statement.Start] == '\'')
 }
 
 func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBody bool, isAsync bool, forInit string) (*Node, error) {
