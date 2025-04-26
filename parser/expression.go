@@ -32,10 +32,10 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 		return nil
 	}
 
-	kind := prop.PropertyKind
+	kind := prop.Kind
 
 	if this.getEcmaVersion() >= 6 {
-		if name == "__proto__" && kind == INIT {
+		if name == "__proto__" && kind == KIND_PROPERTY_INIT {
 			if propHash.proto {
 				if refDestructuringErrors != nil {
 					if refDestructuringErrors.doubleProto < 0 {
@@ -53,19 +53,19 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 	name = "$" + name
 	if other, found := propHash.m[name]; found {
 		redefinition := false
-		if kind == INIT {
-			redefinition = this.Strict && other[INIT] || other[GET] || other[SET]
+		if kind == KIND_PROPERTY_INIT {
+			redefinition = this.Strict && other[KIND_PROPERTY_INIT] || other[KIND_PROPERTY_GET] || other[KIND_PROPERTY_SET]
 		} else {
-			redefinition = other[INIT] || other[kind]
+			redefinition = other[KIND_PROPERTY_INIT] || other[kind]
 		}
 		if redefinition {
 			this.raiseRecoverable(key.Start, "Redefinition of property")
 		}
 	} else {
-		newInfo := map[PropertyKind]bool{
-			INIT: false,
-			GET:  false,
-			SET:  false,
+		newInfo := map[Kind]bool{
+			KIND_PROPERTY_INIT: false,
+			KIND_PROPERTY_GET:  false,
+			KIND_PROPERTY_SET:  false,
 		}
 		newInfo[kind] = true
 		propHash.m[name] = newInfo
@@ -1597,7 +1597,7 @@ func (this *Parser) parseMethod(isGenerator bool, isAsync bool, allowDirectSuper
 }
 
 func (this *Parser) parseObj(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	node, first, propHash := this.startNode(), true, &PropertyHash{proto: false, m: map[string]map[PropertyKind]bool{}}
+	node, first, propHash := this.startNode(), true, &PropertyHash{proto: false, m: map[string]map[Kind]bool{}}
 	node.Properties = []*Node{}
 	this.next(false)
 	for !this.eat(TOKEN_BRACER) {
@@ -1705,7 +1705,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 	}
 
 	if this.eat(TOKEN_COLON) {
-		prop.PropertyKind = INIT
+		prop.Kind = KIND_PROPERTY_INIT
 		if isPattern {
 			val, err := this.parseMaybeDefault(this.start, this.startLoc, nil)
 			if err != nil {
@@ -1728,7 +1728,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 			return err
 		}
 		prop.IsMethod = true
-		prop.PropertyKind = INIT
+		prop.Kind = KIND_PROPERTY_INIT
 		prop.Value = method
 	} else if !isPattern && !containsEsc &&
 		this.getEcmaVersion() >= 5 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER &&
@@ -1775,7 +1775,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		} else {
 			prop.Value = this.copyNode(prop.Key)
 		}
-		prop.PropertyKind = INIT
+		prop.Kind = KIND_PROPERTY_INIT
 		prop.Shorthand = true
 	} else {
 		return this.unexpected(nil)
@@ -1784,13 +1784,13 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 }
 
 func (this *Parser) parseGetterSetter(prop *Node) error {
-	kind := PROPERTY_KIND_NOT_INITIALIZED
+	kind := KIND_NOT_INITIALIZED
 
 	switch prop.Key.Name {
 	case "set":
-		kind = SET
+		kind = KIND_PROPERTY_SET
 	case "get":
-		kind = GET
+		kind = KIND_PROPERTY_GET
 	}
 
 	this.parsePropertyName(prop)
@@ -1799,23 +1799,23 @@ func (this *Parser) parseGetterSetter(prop *Node) error {
 		return err
 	}
 	prop.Value = method
-	prop.PropertyKind = kind
+	prop.Kind = kind
 	paramCount := 0
 
-	if prop.PropertyKind == GET {
+	if prop.Kind == KIND_PROPERTY_GET {
 		paramCount = 1
 	}
 
 	if val, ok := prop.Value.(*Node); ok {
 		if len(val.Params) != paramCount {
 			start := val.Start
-			if prop.PropertyKind == GET {
+			if prop.Kind == KIND_PROPERTY_GET {
 				return this.raiseRecoverable(start, "getter should have no params")
 			} else {
 				return this.raiseRecoverable(start, "setter should have exactly one param")
 			}
 		} else {
-			if prop.PropertyKind == SET && val.Params[0].Type == NODE_REST_ELEMENT {
+			if prop.Kind == KIND_PROPERTY_SET && val.Params[0].Type == NODE_REST_ELEMENT {
 				return this.raiseRecoverable(val.Params[0].Start, "Setter cannot use rest params")
 			}
 		}

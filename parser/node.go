@@ -96,23 +96,24 @@ const (
 	NODE_UNTYPED
 )
 
-type DeclarationKind int
+type Kind int
 
 const (
-	DECLARATION_KIND_NOT_INITIALIZED DeclarationKind = iota
-	VAR
-	LET
-	CONST
+	KIND_NOT_INITIALIZED Kind = iota
+	KIND_DECLARATION_VAR
+	KIND_DECLARATION_LET
+	KIND_DECLARATION_CONST
+	KIND_PROPERTY_GET
+	KIND_PROPERTY_SET
+	KIND_PROPERTY_INIT
+	KIND_PROPERTY_METHOD
+	KIND_CONSTRUCTOR
 )
 
-type PropertyKind int
-
-const (
-	PROPERTY_KIND_NOT_INITIALIZED PropertyKind = iota
-	GET
-	SET
-	INIT
-)
+var kindStringMap = map[Kind]string{
+	KIND_PROPERTY_GET: "get",
+	KIND_PROPERTY_SET: "set",
+}
 
 type Regex struct {
 	Pattern string
@@ -235,11 +236,10 @@ type Node struct {
 	Init               *Node   // VariableDeclaration | Expression
 	Update             *Node   // Expression
 	Declarations       []*Node // VariableDeclarator
-	DeclarationKind    DeclarationKind
+	Kind               Kind
 	Elements           []*Node // Expression | SpreadElement
 	Properties         []*Node // Property | SpreadElement
 	Key                *Node   // Expression
-	PropertyKind       PropertyKind
 	IsMethod           bool
 	Shorthand          bool
 	Computed           bool

@@ -31,7 +31,7 @@ func (this *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErr
 
 		case NODE_PROPERTY:
 			// AssignmentProperty has type == "Property"
-			if node.PropertyKind != INIT {
+			if node.Kind != KIND_PROPERTY_INIT {
 				return nil, this.raise(node.Key.Start, "Object pattern can't contain getter or setter")
 			}
 

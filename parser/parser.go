@@ -16,7 +16,7 @@ type Label struct {
 }
 
 type PrivateName struct {
-	Declared []*Node
+	Declared map[string]string
 	Used     []*Node
 }
 
@@ -55,7 +55,7 @@ type Parser struct {
 	UndefinedExports         map[string]*Node
 	ScopeStack               []*Scope
 	RegexpState              *RegExpState
-	PrivateNameStack         []PrivateName
+	PrivateNameStack         []*PrivateName
 	InTemplateElement        bool
 	InClassStaticBlock       bool
 }

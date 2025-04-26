@@ -29,11 +29,11 @@ func (this *Parser) parseTopLevel(node *Node) (*Node, error) {
 
 func (this *Parser) parseStatement(context string, topLevel bool, exports map[string]*Node) (*Node, error) {
 	startType, node := this.Type, this.startNode()
-	kind := DECLARATION_KIND_NOT_INITIALIZED
+	kind := KIND_NOT_INITIALIZED
 
 	if this.isLet(context) {
 		startType = tokenTypes[TOKEN_VAR]
-		kind = LET
+		kind = KIND_DECLARATION_LET
 	}
 
 	switch startType.identifier {
@@ -124,15 +124,15 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 		return tryStatement, nil
 
 	case TOKEN_CONST, TOKEN_VAR:
-		if kind == DECLARATION_KIND_NOT_INITIALIZED {
-			if k, ok := this.Value.(DeclarationKind); ok {
+		if kind == KIND_NOT_INITIALIZED {
+			if k, ok := this.Value.(Kind); ok {
 				kind = k
 			} else {
 				panic("We were expectin a DeclarationKind from node.Value, didn't happen so we are now here.")
 			}
 		}
 
-		if len(context) != 0 && kind != VAR {
+		if len(context) != 0 && kind != KIND_DECLARATION_VAR {
 			return nil, this.unexpected(nil)
 		}
 
@@ -1008,7 +1008,7 @@ func (this *Parser) parseWhileStatement(node *Node) (*Node, error) {
 	return this.finishNode(node, NODE_WHILE_STATEMENT), nil
 }
 
-func (this *Parser) parseVarStatement(node *Node, kind DeclarationKind, allowMissingInitializer bool) (*Node, error) {
+func (this *Parser) parseVarStatement(node *Node, kind Kind, allowMissingInitializer bool) (*Node, error) {
 	this.next(false)
 	_, err := this.parseVar(node, false, kind, allowMissingInitializer)
 	if err != nil {
@@ -1350,11 +1350,11 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 	if this.Type.identifier == TOKEN_VAR || this.Type.identifier == TOKEN_CONST || isLet {
 		init := this.startNode()
 
-		kind := DECLARATION_KIND_NOT_INITIALIZED
+		kind := KIND_NOT_INITIALIZED
 		if isLet {
-			kind = LET
+			kind = KIND_DECLARATION_LET
 		} else {
-			if k, ok := this.Value.(DeclarationKind); ok {
+			if k, ok := this.Value.(Kind); ok {
 				kind = k
 			} else {
 				panic("parser.Value was snot declarationKind as we expected")
@@ -1528,7 +1528,7 @@ func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 	isForIn := this.Type.identifier == TOKEN_IN
 	this.next(false)
 
-	if init.Type == NODE_VARIABLE_DECLARATION && init.Declarations[0].Init != nil && (!isForIn || this.getEcmaVersion() < 8 || this.Strict || init.DeclarationKind != VAR || init.Declarations[0].Id.Type != NODE_IDENTIFIER) {
+	if init.Type == NODE_VARIABLE_DECLARATION && init.Declarations[0].Init != nil && (!isForIn || this.getEcmaVersion() < 8 || this.Strict || init.Kind != KIND_DECLARATION_VAR || init.Declarations[0].Id.Type != NODE_IDENTIFIER) {
 		return nil, this.raise(init.Start, `for-in or for-of loop variable declaration may not have an initializer`)
 	}
 	node.Left = init
@@ -1562,9 +1562,9 @@ func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 
 }
 
-func (this *Parser) parseVar(node *Node, isFor bool, kind DeclarationKind, allowMissingInitializer bool) (*Node, error) {
+func (this *Parser) parseVar(node *Node, isFor bool, kind Kind, allowMissingInitializer bool) (*Node, error) {
 	node.Declarations = []*Node{}
-	node.DeclarationKind = kind
+	node.Kind = kind
 	for {
 		decl := this.startNode()
 		err := this.parseVarId(decl, kind)
@@ -1583,7 +1583,7 @@ func (this *Parser) parseVar(node *Node, isFor bool, kind DeclarationKind, allow
 				return nil, err
 			}
 			decl.Init = declInit
-		} else if !allowMissingInitializer && kind == CONST && !(this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) {
+		} else if !allowMissingInitializer && kind == KIND_DECLARATION_CONST && !(this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) {
 			return nil, this.unexpected(nil)
 		} else if !allowMissingInitializer && decl.Id.Type != NODE_IDENTIFIER && !(isFor && (this.Type.identifier == TOKEN_IN || this.isContextual("of"))) {
 			return nil, this.raise(this.LastTokEnd, "Complex binding patterns require an initialization value")
@@ -1598,13 +1598,13 @@ func (this *Parser) parseVar(node *Node, isFor bool, kind DeclarationKind, allow
 	return node, nil
 }
 
-func (this *Parser) parseVarId(decl *Node, kind DeclarationKind) error {
+func (this *Parser) parseVarId(decl *Node, kind Kind) error {
 	declarationIdentifier, err := this.parseBindingAtom()
 	if err != nil {
 		return err
 	}
 	decl.Id = declarationIdentifier
-	if kind == VAR {
+	if kind == KIND_DECLARATION_VAR {
 		err := this.checkLValPattern(decl.Id, BIND_VAR, struct {
 			check bool
 			hash  map[string]bool
@@ -1883,6 +1883,370 @@ func (this *Parser) parseFunctionParams(node *Node) error {
 	return nil
 }
 
-func (p *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
-	panic("unimplemented")
+func (this *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
+	this.next(false)
+
+	// ecma-262 14.6 Class Definitions
+	// A class definition is always strict mode code.
+	oldStrict := this.Strict
+	this.Strict = true
+
+	err := this.parseClassId(node, isStatement)
+	if err != nil {
+		return nil, err
+	}
+	err = this.parseClassSuper(node)
+	if err != nil {
+		return nil, err
+	}
+	privateNameMap, err := this.enterClassBody()
+	if err != nil {
+		return nil, err
+	}
+	classBody := this.startNode()
+	hadConstructor := false
+	classBody.Body = []*Node{}
+	err = this.expect(TOKEN_BRACEL)
+	for this.Type.identifier != TOKEN_BRACER {
+		element, err := this.parseClassElement(node.SuperClass != nil)
+		if err != nil {
+			return nil, err
+		}
+		if element != nil {
+			classBody.Body = append(classBody.Body, element)
+			if element.Type == NODE_METHOD_DEFINITION && element.Kind == KIND_CONSTRUCTOR {
+				if hadConstructor {
+					return nil, this.raiseRecoverable(element.Start, "Duplicate constructor in the same class")
+				}
+				hadConstructor = true
+			} else if element.Key != nil && element.Key.Type == NODE_PRIVATE_IDENTIFIER && isPrivateNameConflicted(privateNameMap, element) {
+				return nil, this.raiseRecoverable(element.Key.Start, `Identifier '#${element.key.name}' has already been declared`)
+			}
+		}
+	}
+	this.Strict = oldStrict
+	this.next(false)
+	node.BodyNode = this.finishNode(classBody, NODE_CLASS_BODY)
+	err = this.exitClassBody()
+
+	if err != nil {
+		return nil, err
+	}
+
+	if isStatement {
+		return this.finishNode(node, NODE_CLASS_DECLARATION), nil
+	}
+	return this.finishNode(node, NODE_CLASS_EXPRESSION), nil
+}
+
+func (this *Parser) exitClassBody() error {
+	privateNameTop := this.PrivateNameStack[len(this.PrivateNameStack)-1]
+	this.PrivateNameStack = this.PrivateNameStack[:len(this.PrivateNameStack)-1]
+
+	if !this.options.CheckPrivateFields {
+		return nil
+	}
+	stackLength := len(this.PrivateNameStack)
+
+	var parent *PrivateName
+
+	if stackLength != 0 {
+		parent = this.PrivateNameStack[len(this.PrivateNameStack)-1]
+	}
+
+	for _, id := range privateNameTop.Used {
+		if _, found := privateNameTop.Declared[id.Name]; found {
+			if parent != nil {
+				parent.Used = append(parent.Used, id)
+			} else {
+				return this.raiseRecoverable(id.Start, "Private field #"+id.Name+" must be declared in an enclosing class")
+			}
+		}
+	}
+	return nil
+}
+
+func isPrivateNameConflicted(privateNameMap map[string]string, element *Node) bool {
+	name := element.Key.Name
+	curr := privateNameMap[name]
+
+	next := "true"
+	if element.Type == NODE_METHOD_DEFINITION && (element.Kind == KIND_PROPERTY_GET || element.Kind == KIND_PROPERTY_SET) {
+		if element.IsStatic {
+			next = "s" + kindStringMap[element.Kind]
+		} else {
+			next = "i" + kindStringMap[element.Kind]
+		}
+	}
+
+	// `class { get #a(){}; static set #a(_){} }` is also conflict.
+	if curr == "iget" && next == "iset" || curr == "iset" && next == "iget" || curr == "sget" && next == "sset" || curr == "sset" && next == "sget" {
+		privateNameMap[name] = "true"
+		return false
+	} else if len(curr) == 0 {
+		privateNameMap[name] = next
+		return false
+	} else {
+		return true
+	}
+}
+
+func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error) {
+	if this.eat(TOKEN_SEMI) {
+		return nil, nil
+	}
+
+	ecmaVersion := this.getEcmaVersion()
+	node := this.startNode()
+	keyName, isGenerator, isAsync, kind, isStatic := "", false, false, KIND_PROPERTY_METHOD, false
+
+	if this.eatContextual("static") {
+		// Parse static init block
+		if ecmaVersion >= 13 && this.eat(TOKEN_BRACEL) {
+			_, err := this.parseClassStaticBlock(node)
+			if err != nil {
+				return nil, err
+			}
+			return node, nil
+		}
+
+		if this.isClassElementNameStart() || this.Type.identifier == TOKEN_STAR {
+			isStatic = true
+		} else {
+			keyName = "static"
+		}
+	}
+	node.IsStatic = isStatic
+
+	if len(keyName) == 0 && ecmaVersion >= 8 && this.eatContextual("async") {
+		if (this.isClassElementNameStart() || this.Type.identifier == TOKEN_STAR) && !this.canInsertSemicolon() {
+			isAsync = true
+		} else {
+			keyName = "async"
+		}
+	}
+
+	if len(keyName) == 0 && (ecmaVersion >= 9 || !isAsync) && this.eat(TOKEN_STAR) {
+		isGenerator = true
+	}
+
+	if len(keyName) == 0 && !isAsync && !isGenerator {
+		lastValue := this.Value
+		if this.eatContextual("get") || this.eatContextual("set") {
+			if this.isClassElementNameStart() {
+				if k, ok := lastValue.(Kind); ok {
+					kind = k
+				} else {
+					panic("We were expecting this.Value to be kind, it wasn't")
+				}
+			} else {
+				if str, ok := lastValue.(string); ok {
+					keyName = str
+				} else {
+					panic("We were expecting this.Value to be string, it wasn't")
+				}
+			}
+		}
+	}
+
+	// Parse element name
+	if len(keyName) != 0 {
+		// 'async', 'get', 'set', or 'static' were not a keyword contextually.
+		// The last token is any of those. Make it the element name.
+		node.Computed = false
+		node.Key = this.startNodeAt(this.LastTokStart, this.LastTokStartLoc)
+		node.Key.Name = keyName
+		this.finishNode(node.Key, NODE_IDENTIFIER)
+	} else {
+		err := this.parseClassElementName(node)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// Parse element value
+	if ecmaVersion < 13 || this.Type.identifier == TOKEN_PARENL || kind != KIND_PROPERTY_METHOD || isGenerator || isAsync {
+		isConstructor := !node.IsStatic && checkKeyName(node, "constructor")
+		allowsDirectSuper := isConstructor && constructorAllowsSuper
+		// Couldn't move this check into the 'parseClassMethod' method for backward compatibility.
+		if isConstructor && kind != KIND_PROPERTY_METHOD {
+			return nil, this.raise(node.Key.Start, "Constructor can't have get/set modifier")
+		}
+
+		if isConstructor {
+			node.Kind = KIND_CONSTRUCTOR
+		} else {
+			node.Kind = kind
+		}
+		_, err := this.parseClassMethod(node, isGenerator, isAsync, allowsDirectSuper)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		_, err := this.parseClassField(node)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return node, nil
+}
+
+func (this *Parser) parseClassStaticBlock(node *Node) (*Node, error) {
+	node.Body = []*Node{}
+
+	oldLabels := this.Labels
+	this.Labels = []Label{}
+	this.enterScope(SCOPE_CLASS_STATIC_BLOCK | SCOPE_SUPER)
+	for this.Type.identifier != TOKEN_BRACER {
+		stmt, err := this.parseStatement("", false, nil)
+		if err != nil {
+			return nil, err
+		}
+		node.Body = append(node.Body, stmt)
+	}
+	this.next(false)
+	this.exitScope()
+	this.Labels = oldLabels
+
+	return this.finishNode(node, NODE_STATIC_BLOCK), nil
+}
+
+func (this *Parser) parseClassField(field *Node) (*Node, error) {
+	if checkKeyName(field, "constructor") {
+		return nil, this.raise(field.Key.Start, "Classes can't have a field named 'constructor'")
+	} else if field.IsStatic && checkKeyName(field, "prototype") {
+		return nil, this.raise(field.Key.Start, "Classes can't have a static field named 'prototype'")
+	}
+
+	if this.eat(TOKEN_EQ) {
+		// To raise SyntaxError if 'arguments' exists in the initializer.
+		this.enterScope(SCOPE_CLASS_FIELD_INIT | SCOPE_SUPER)
+		maybeAssign, err := this.parseMaybeAssign("", nil)
+		if err != nil {
+			return nil, err
+		}
+		field.Value = maybeAssign
+		this.exitScope()
+	} else {
+		field.Value = nil
+	}
+	this.semicolon()
+
+	return this.finishNode(field, NODE_PROPERTY_DEFINITION), nil
+}
+
+func (this *Parser) parseClassMethod(method *Node, isGenerator bool, isAsync bool, allowsDirectSuper bool) (*Node, error) {
+	// Check key and flags
+	key := method.Key
+	if method.Kind == KIND_CONSTRUCTOR {
+		if isGenerator {
+			return nil, this.raise(key.Start, "Constructor can't be a generator")
+		}
+		if isAsync {
+			return nil, this.raise(key.Start, "Constructor can't be an async method")
+		}
+	} else if method.IsStatic && checkKeyName(method, "prototype") {
+		return nil, this.raise(key.Start, "Classes may not have a static property named prototype")
+	}
+
+	// Parse value
+	value, err := this.parseMethod(isGenerator, isAsync, allowsDirectSuper)
+	if err != nil {
+		return nil, err
+	}
+	method.Value = value
+
+	// Check value
+	if method.Kind == KIND_PROPERTY_GET && len(value.Params) != 0 {
+		return nil, this.raiseRecoverable(value.Start, "getter should have no params")
+	}
+
+	if method.Kind == KIND_PROPERTY_SET && len(value.Params) != 1 {
+		return nil, this.raiseRecoverable(value.Start, "setter should have exactly one param")
+	}
+
+	if method.Kind == KIND_PROPERTY_SET && value.Params[0].Type == NODE_REST_ELEMENT {
+		return nil, this.raiseRecoverable(value.Params[0].Start, "Setter cannot use rest params")
+	}
+
+	return this.finishNode(method, NODE_METHOD_DEFINITION), nil
+}
+
+func checkKeyName(node *Node, name string) bool {
+	computed, key := node.Computed, node.Key
+	return !computed && (key.Type == NODE_IDENTIFIER && key.Name == name || key.Type == NODE_LITERAL && key.Value == name)
+}
+
+func (this *Parser) parseClassElementName(element *Node) error {
+	if this.Type.identifier == TOKEN_PRIVATEID {
+		if val, ok := this.Value.(string); ok && val == "constructor" {
+			return this.raise(this.start, "Classes can't have an element named '#constructor'")
+		}
+		element.Computed = false
+		privateId, err := this.parsePrivateIdent()
+		if err != nil {
+			return err
+		}
+		element.Key = privateId
+	} else {
+		_, err := this.parsePropertyName(element)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (this *Parser) isClassElementNameStart() bool {
+	t := this.Type.identifier
+	return t == TOKEN_NAME || t == TOKEN_PRIVATEID || t == TOKEN_NUM || t == TOKEN_STRING || t == TOKEN_BRACKETL || len(this.Type.keyword) != 0
+}
+
+func (this *Parser) enterClassBody() (map[string]string, error) {
+	element := &PrivateName{Declared: map[string]string{}, Used: []*Node{}}
+	this.PrivateNameStack = append(this.PrivateNameStack, element)
+	return element.Declared, nil
+}
+
+func (this *Parser) parseClassSuper(node *Node) error {
+
+	if this.eat(TOKEN_EXTENDS) {
+		expr, err := this.parseExprSubscripts(nil, "")
+		if err != nil {
+			return err
+		}
+		node.SuperClass = expr
+	} else {
+		node.SuperClass = nil
+	}
+	return nil
+}
+
+func (this *Parser) parseClassId(node *Node, isStatement bool) error {
+	if this.Type.identifier == TOKEN_NAME {
+
+		id, err := this.parseIdent(false)
+		if err != nil {
+			return err
+		}
+		node.Id = id
+		if isStatement {
+			err := this.checkLValSimple(node.Id, BIND_LEXICAL, struct {
+				check bool
+				hash  map[string]bool
+			}{check: false})
+			if err != nil {
+				return err
+			}
+		} else {
+			if isStatement {
+				return this.unexpected(nil)
+			}
+
+			node.Id = nil
+		}
+		return nil
+	}
+	return nil
 }
