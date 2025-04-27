@@ -35,7 +35,6 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 		startType = tokenTypes[TOKEN_VAR]
 		kind = KIND_DECLARATION_LET
 	}
-
 	switch startType.identifier {
 	case TOKEN_BREAK, TOKEN_CONTINUE:
 		breakContinueStatement, err := this.parseBreakContinueStatement(node, startType.keyword)
@@ -67,7 +66,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 
 	case TOKEN_FUNCTION:
 		if len(context) != 0 && (this.Strict || context != "if" && context != "label" && this.getEcmaVersion() >= 6) {
-			return nil, this.unexpected(`len(context) != 0 && (this.Strict || context != "if" && context != "label" && this.getEcmaVersion() >= 6)`, nil)
+			return nil, this.unexpected("", nil)
 		}
 		functionStatement, err := this.parseFunctionStatement(node, false, len(context) == 0)
 
@@ -1260,6 +1259,7 @@ func (this *Parser) isLet(context string) bool {
 		nextCh = rune(this.input[pos])
 		for IsIdentifierChar(nextCh, true) {
 			pos = pos + 1
+			nextCh = rune(this.input[pos])
 		}
 		if nextCh == 92 /*|| nextCh > 0xd7ff && nextCh < 0xdc00*/ {
 			return true
