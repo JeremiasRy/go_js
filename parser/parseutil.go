@@ -1,6 +1,8 @@
 package parser
 
-import "regexp"
+import (
+	"regexp"
+)
 
 var literal = regexp.MustCompile(`^(?:'((?:\\[^]|[^'\\])*?)'|\"((?:\\[^]|[^"\\])*?)")`)
 

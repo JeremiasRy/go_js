@@ -591,7 +591,7 @@ func (this *Parser) readToken_eq_excl(code rune) {
 		return
 	}
 	if code == 61 {
-		this.finishOp(tokenTypes[TOKEN_EQUALITY], 1)
+		this.finishOp(tokenTypes[TOKEN_EQ], 1)
 		return
 	}
 

@@ -28,9 +28,10 @@ func (this *Parser) parseTopLevel(node *Node) (*Node, error) {
 }
 
 func (this *Parser) parseStatement(context string, topLevel bool, exports map[string]*Node) (*Node, error) {
-	this.printState()
+	// this.printState()
 	startType, node := this.Type, this.startNode()
 	kind := KIND_NOT_INITIALIZED
+
 	if this.isLet(context) {
 		startType = tokenTypes[TOKEN_VAR]
 		kind = KIND_DECLARATION_LET

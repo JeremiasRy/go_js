@@ -541,7 +541,11 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 
 		for this.Type.postfix && !this.canInsertSemicolon() {
 			node := this.startNodeAt(startPos, startLoc)
-			node.UpdateOperator = this.Value.(UpdateOperator)
+			if val, ok := this.Value.([]byte); ok {
+				node.UpdateOperator = UpdateOperator(val)
+			} else {
+				panic("We expected []byte")
+			}
 			node.Prefix = false
 			node.Argument = expr
 			err := this.checkLValSimple(expr, 0, struct {
