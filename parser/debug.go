@@ -177,8 +177,13 @@ func printNode(node *Node, indent int) {
 		fmt.Printf("%s  Regex: Pattern=%s, Flags=%s\n", indentStr, node.Regex.Pattern, node.Regex.Flags)
 	}
 
+	sourceTypeString := map[SourceType]string{
+		TYPE_SCRIPT: "script",
+		TYPE_MODULE: "module",
+	}
+
 	// SourceType
-	fmt.Printf("%s  SourceType: %s\n", indentStr, node.SourceType)
+	fmt.Printf("%s  SourceType: %s\n", indentStr, sourceTypeString[node.SourceType])
 
 	// Boolean fields
 	if node.IsGenerator {

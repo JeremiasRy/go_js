@@ -28,7 +28,7 @@ func (this *Parser) parseTopLevel(node *Node) (*Node, error) {
 }
 
 func (this *Parser) parseStatement(context string, topLevel bool, exports map[string]*Node) (*Node, error) {
-	// this.printState()
+	//this.printState()
 	startType, node := this.Type, this.startNode()
 	kind := KIND_NOT_INITIALIZED
 
@@ -1936,7 +1936,7 @@ func (this *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
 				}
 				hadConstructor = true
 			} else if element.Key != nil && element.Key.Type == NODE_PRIVATE_IDENTIFIER && isPrivateNameConflicted(privateNameMap, element) {
-				return nil, this.raiseRecoverable(element.Key.Start, `Identifier '#${element.key.name}' has already been declared`)
+				return nil, this.raiseRecoverable(element.Key.Start, "Identifier #"+element.Key.Name+"has already been declared")
 			}
 		}
 	}
@@ -2079,7 +2079,6 @@ func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error
 			return nil, err
 		}
 	}
-
 	// Parse element value
 	if ecmaVersion < 13 || this.Type.identifier == TOKEN_PARENL || kind != KIND_PROPERTY_METHOD || isGenerator || isAsync {
 		isConstructor := !node.IsStatic && checkKeyName(node, "constructor")

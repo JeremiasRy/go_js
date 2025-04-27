@@ -23,7 +23,7 @@ type Options struct {
 }
 
 var DefaultOptions = Options{
-	ecmaVersion:                 nil,
+	ecmaVersion:                 15,
 	SourceType:                  "script",
 	OnInsertedSemicolon:         nil,
 	OnTrailingComma:             nil,
