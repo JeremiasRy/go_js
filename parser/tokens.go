@@ -326,9 +326,9 @@ func newTokContext(token string, isExpr, preserveSpace, generator bool, override
 // TOKEN RELATED CODE
 
 // Move to next token
-func (this *Parser) next(ignoreEscapeSequenceInKeyword bool) {
+func (this *Parser) next(ignoreEscapeSequenceInKeyword bool) error {
 	if !ignoreEscapeSequenceInKeyword && len(this.Type.keyword) != 0 && this.ContainsEsc {
-		// this.raiseRecoverable(this.start, "Escape sequence in keyword " + this.type.keyword)
+		return this.raiseRecoverable(this.start, "Escape sequence in keyword "+this.Type.keyword)
 	}
 
 	if this.options.OnToken != nil {
@@ -340,11 +340,12 @@ func (this *Parser) next(ignoreEscapeSequenceInKeyword bool) {
 	this.LastTokEndLoc = this.startLoc
 	this.LastTokStartLoc = this.startLoc
 	this.nextToken()
+	return nil
 }
 
 func (this *Parser) nextToken() {
 	context := this.currentContext()
-	if context == nil || context.PreserveSpace {
+	if context == nil || !context.PreserveSpace {
 		this.skipSpace()
 	}
 
@@ -362,8 +363,8 @@ func (this *Parser) nextToken() {
 		context.Override(this)
 		return
 	} else {
-		ch, _, _ := this.fullCharCodeAtPos()
-		this.readToken(ch)
+		ch, size, _ := this.fullCharCodeAtPos()
+		this.readToken(ch, size)
 	}
 }
 
@@ -393,62 +394,83 @@ func (this *Parser) fullCharCodeAtPos() (code rune, size int, err error) {
 	return (r<<10 + next - 0x35FDC00), size + nextSize, nil
 }
 
-func (this *Parser) readToken(code rune) {
+func (this *Parser) readToken(code rune, size int) {
 	if IsIdentifierStart(code, this.getEcmaVersion() >= 6) || code == 92 {
 		this.readWord()
 		return
 	}
-
-	this.getTokenFromCode(code)
+	this.getTokenFromCode(code, size)
 }
 
-func (this *Parser) getTokenFromCode(code rune) error {
+func (this *Parser) finishToken(Type *TokenType, value any) {
+	this.End = this.pos
+	if this.options.Locations {
+		this.EndLoc = this.currentPosition()
+	}
+	prevType := this.Type
+	this.Type = Type
+	this.Value = value
+	this.updateContext(prevType)
+}
+
+func (this *Parser) getTokenFromCode(code rune, size int) error {
 	switch code {
 	case 46: // '.'
 		this.readToken_dot()
-
+		return nil
 	case 40: // '('
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_PARENL], nil)
+		return nil
 
 	case 41: // ')'
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_PARENR], nil)
+		return nil
 
 	case 59: // ';'
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_SEMI], nil)
+		return nil
 
 	case 44: // ','
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_COMMA], nil)
+		return nil
 
 	case 91: // '['
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_BRACKETL], nil)
+		return nil
 
 	case 93: // ']'
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_BRACKETR], nil)
+		return nil
 
 	case 123: // '{'
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_BRACEL], nil)
+		return nil
 
 	case 125: // '}'
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_BRACER], nil)
 
+		return nil
+
 	case 58: // ':'
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_COLON], nil)
+		return nil
 
 	case 96: // '`'
 		if this.getEcmaVersion() < 6 {
 			break
 		}
-		this.pos++
+		this.pos = this.pos + size
 		this.finishToken(tokenTypes[TOKEN_BACKQUOTE], nil)
+		return nil
 
 	case 48: // '0'
 		next := this.input[this.pos+1]
@@ -478,27 +500,35 @@ func (this *Parser) getTokenFromCode(code rune) error {
 
 	case 37, 42: // '%', '*'
 		this.readToken_mult_modulo_exp(code)
+		return nil
 
 	case 124, 38: // '|', '&'
 		this.readToken_pipe_amp(code)
+		return nil
 
 	case 94: // '^'
 		this.readToken_caret()
+		return nil
 
 	case 43, 45: // '+', '-'
 		this.readToken_plus_min(code)
+		return nil
 
 	case 60, 62: // '<', '>'
 		this.readToken_lt_gt(code)
+		return nil
 
 	case 61, 33: // '=', '!'
 		this.readToken_eq_excl(code)
+		return nil
 
 	case 63: // '?'
 		this.readToken_question()
+		return nil
 
 	case 126: // '~'
 		this.finishOp(tokenTypes[TOKEN_PREFIX], 1)
+		return nil
 
 	case 35: // '#'
 		return this.readToken_numberSign()
@@ -509,7 +539,7 @@ func (this *Parser) getTokenFromCode(code rune) error {
 func (this *Parser) finishOp(token *TokenType, size int) {
 	str := this.input[this.pos : this.pos+size]
 	this.pos = this.pos + size
-	this.finishToken(token, &str)
+	this.finishToken(token, str)
 }
 
 func (this *Parser) readToken_question() {
@@ -709,7 +739,7 @@ func (this *Parser) readToken_mult_modulo_exp(code rune) {
 func (this *Parser) readToken_slash() error {
 	next := this.input[this.pos+1]
 	if this.ExprAllowed {
-		this.pos++
+		this.pos = this.pos + 1
 		return this.readRegexp()
 	}
 	if next == 61 {
@@ -756,7 +786,7 @@ func (this *Parser) readRegexp() error {
 		return this.raise(this.pos, "Failed to read regExp flags")
 	}
 	if this.ContainsEsc {
-		return this.unexpected(&flagsStart)
+		return this.unexpected("", &flagsStart)
 	}
 
 	// Validate pattern
@@ -880,9 +910,9 @@ func (this *Parser) readNumber(startsWithDot bool) error {
 		}
 	}
 	ch, _, _ := this.fullCharCodeAtPos()
+
 	if IsIdentifierStart(ch, false) {
 		return this.raise(this.pos, "Identifier directly after number")
-
 	}
 
 	val := stringToNumber(this.input[start:this.pos], octal)
@@ -1060,7 +1090,7 @@ func (this *Parser) readEscapedChar(inTemplate bool) (string, error) {
 	if this.pos >= len(this.input) {
 		return "", this.invalidStringToken(this.pos, "Unexpected end of input after backslash")
 	}
-	this.pos++ // Skip backslash
+	this.pos = this.pos + 1 // Skip backslash
 	r, size := utf8.DecodeRune(this.input[this.pos:])
 	if r == utf8.RuneError {
 
@@ -1090,7 +1120,7 @@ func (this *Parser) readEscapedChar(inTemplate bool) (string, error) {
 		return "\f", nil
 	case '\r':
 		if this.pos < len(this.input) && this.input[this.pos] == '\n' {
-			this.pos++
+			this.pos = this.pos + size
 		}
 		fallthrough
 	case '\n':
@@ -1234,7 +1264,7 @@ func (this *Parser) readCodePoint() (rune, error) {
 
 	if ch == 123 { // '{'
 		if this.getEcmaVersion() < 6 {
-			return 0, this.unexpected(nil)
+			return 0, this.unexpected("ecma version < 6 and a brace left was present '{'", nil)
 		}
 		codePos := this.pos + 1
 		this.pos = this.pos + 1
@@ -1274,18 +1304,17 @@ func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiter
 	e := 0
 
 	if length == nil {
-		e = int(math.Inf(1))
+		e = math.MaxInt64
 	} else {
 		e = *length
 	}
 
-	for i := 0; i < e; i = i + 1 {
+	for i := range e {
 		if this.pos >= len(this.input) {
 			return 0, this.raiseRecoverable(this.pos, "Unexpected end of input")
 		}
 		code := int(this.input[this.pos])
 		val := 0
-		this.pos = this.pos + 1
 
 		if allowSeparators && code == 95 {
 			if isLegacyOctalNumericLiteral {
@@ -1298,6 +1327,7 @@ func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiter
 				return 0, this.raiseRecoverable(this.pos-1, "Numeric separator is not allowed at the first of digits")
 			}
 			lastCode = code
+			this.pos = this.pos + 1
 			continue
 		}
 
@@ -1308,13 +1338,14 @@ func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiter
 		} else if code >= 48 && code <= 57 { // 0-9
 			val = code - 48
 		} else {
-			val = int(math.Inf(1))
+			val = math.MaxInt64
 		}
 		if val >= radix {
 			break
 		}
 		lastCode = code
 		total = total*radix + val
+		this.pos = this.pos + 1
 	}
 
 	if allowSeparators && lastCode == 95 {
@@ -1324,7 +1355,6 @@ func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiter
 	if this.pos == start || length != nil && this.pos-start != *length {
 		return 0, this.raiseRecoverable(this.pos-1, "Error ? I dont know")
 	}
-
 	return total, nil
 }
 
@@ -1340,21 +1370,10 @@ func (this *Parser) readToken_dot() error {
 		this.finishToken(tokenTypes[TOKEN_ELLIPSIS], nil)
 		return nil
 	}
-	this.pos++
+	this.pos = this.pos + 1
 	this.finishToken(tokenTypes[TOKEN_DOT], nil)
 	return nil
 
-}
-
-func (this *Parser) finishToken(tokenType *TokenType, value any) {
-	this.End = this.pos
-	if this.options.Locations {
-		this.EndLoc = this.currentPosition()
-	}
-	prevType := tokenType
-	this.Type = tokenType
-	this.Value = value
-	this.updateContext(prevType)
 }
 
 func (this *Parser) currentPosition() *Location {

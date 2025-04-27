@@ -17,14 +17,14 @@ func (this *Parser) expect(token Token) error {
 	if this.eat(token) {
 		return nil
 	}
-	return this.unexpected(&this.pos)
+	return this.unexpected("Expected "+tokenToString[token], &this.pos)
 }
 
-func (this *Parser) unexpected(pos *int) error {
+func (this *Parser) unexpected(msg string, pos *int) error {
 	if pos != nil {
-		return this.raise(*pos, "Unexpected token")
+		return this.raise(*pos, "Unexpected token: "+msg)
 	} else {
-		return this.raise(this.start, "Unexpected token")
+		return this.raise(this.start, "Unexpected token: "+msg)
 	}
 }
 
@@ -36,7 +36,7 @@ func (this *Parser) canInsertSemicolon() bool {
 
 func (this *Parser) semicolon() error {
 	if !this.eat(TOKEN_SEMI) && !this.insertSemicolon() {
-		return this.unexpected(nil)
+		return this.unexpected("Expected "+tokenToString[TOKEN_SEMI], nil)
 	}
 	return nil
 }

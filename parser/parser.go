@@ -21,7 +21,7 @@ type PrivateName struct {
 }
 
 type Parser struct {
-	options                  Options
+	options                  *Options
 	SourceFile               *string
 	Keywords                 *regexp.Regexp
 	ReservedWords            *regexp.Regexp
@@ -60,8 +60,129 @@ type Parser struct {
 	InClassStaticBlock       bool
 }
 
+func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
+	initEcmaUnicode()
+	this := Parser{}
+	opts := GetOptions(options)
+	this.options = opts
+	options = opts
+	this.SourceFile = options.SourceFile
+
+	if this.getEcmaVersion() >= 6 {
+		this.Keywords = WordsRegexp(syntaxKeywords["6"])
+	} else {
+		if options.SourceType == "module" {
+			this.Keywords = WordsRegexp(syntaxKeywords["5module"])
+		} else {
+			WordsRegexp(syntaxKeywords["5"])
+		}
+	}
+	reserved := ""
+	if options.AllowReserved {
+		if this.getEcmaVersion() >= 6 {
+			reserved = reservedWords["6"]
+		} else if this.getEcmaVersion() == 5 {
+			reserved = reservedWords["5"]
+		} else {
+			reserved = reservedWords["3"]
+		}
+		if options.SourceType == "module" {
+			reserved += " await"
+		}
+	}
+	this.ReservedWords = WordsRegexp(reserved)
+	reservedStrict := reservedWords["strict"]
+
+	if len(reserved) != 0 {
+		reservedStrict = reservedStrict + " " + reserved
+	}
+	this.ReservedWordsStrict = WordsRegexp(reservedStrict)
+	this.ReservedWordsStrictBind = WordsRegexp(reservedStrict + " " + reservedWords["strictBind"])
+	this.input = input
+
+	// Used to signal to callers of `readWord1` whether the word
+	// contained any escape sequences. This is needed because words with
+	// escape sequences must not be interpreted as keywords.
+	this.ContainsEsc = false
+
+	// Set up token state
+
+	// The current position of the tokenizer in the input.
+	if startPos != 0 {
+		this.pos = startPos
+		this.LineStart = strings.LastIndex(string(this.input[:startPos-1]), "\n") + 1
+		this.CurLine = len(lineBreak.Split(string(this.input[:this.LineStart]), -1))
+	} else {
+		this.pos, this.LineStart = 0, 0
+		this.CurLine = 1
+	}
+
+	// Properties of the current token:
+	// Its type
+	this.Type = tokenTypes[TOKEN_EOF]
+	// For tokens that include more information than their type, the value
+	this.Value = nil
+	// Its start and end offset
+	this.start, this.End = this.pos, this.pos
+	// And, if locations are used, the {line, column} object
+	// corresponding to those offsets
+	this.startLoc, this.EndLoc = this.currentPosition(), this.currentPosition()
+
+	// Position information for the previous token
+	this.LastTokEndLoc, this.LastTokStartLoc = nil, nil
+	this.LastTokStart, this.LastTokEnd = this.pos, this.pos
+
+	// The context stack is used to superficially track syntactic
+	// context to predict whether a regular expression is allowed in a
+	// given position.
+	this.Context = this.initialContext()
+	this.ExprAllowed = true
+
+	// Figure out if it's a module code.
+	this.InModule = options.SourceType == "module"
+	this.Strict = this.InModule || this.strictDirective(this.pos)
+
+	// Used to signify the start of a potential arrow function
+	this.PotentialArrowAt = -1
+	this.PotentialArrowInForAwait = false
+
+	// Positions to delayed-check that yield/await does not exist in default parameters.
+	this.YieldPos, this.AwaitPos, this.AwaitIdentPos = 0, 0, 0
+	// Labels in scope.
+	this.Labels = []Label{}
+	// Thus-far undefined exports.
+	this.UndefinedExports = map[string]*Node{}
+
+	// If enabled, skip leading hashbang line.
+	if this.pos == 0 && options.AllowHashBang && string(this.input[0:2]) == "#!" {
+		this.skipLineComment(2)
+	}
+
+	// Scope tracking for duplicate variable names (see scope.js)
+	this.ScopeStack = []*Scope{}
+	this.enterScope(SCOPE_TOP)
+
+	// For RegExp validation
+	this.RegexpState = nil
+
+	// The stack of private names.
+	// Each element has two properties: 'declared' and 'used'.
+	// When it exited from the outermost class definition, all used private names must be declared.
+	this.PrivateNameStack = []*PrivateName{}
+	this.initAllUpdateContext()
+
+	this.nextToken()
+	node, err := this.parseTopLevel(this.startNode())
+
+	if err != nil {
+		return nil, err
+	}
+
+	return node, nil
+}
+
 func (p *Parser) inFunction() bool {
-	return p.currentVarScope().Flags&SCOPE_FUNCTION > 0
+	return p.currentVarScope().Flags&SCOPE_FUNCTION == SCOPE_FUNCTION
 }
 func (p *Parser) inAsync() bool {
 	return p.currentVarScope().Flags&SCOPE_ASYNC > 0
@@ -139,16 +260,14 @@ Loop:
 	for this.pos < len(this.input) {
 		ch, size, _ := this.fullCharCodeAtPos()
 		switch ch {
-		case 32:
-		case 160: // ' '
+		case 32, 160: // ' '
 			this.pos = this.pos + size
 		case 13:
 			if this.input[this.pos+size] == 10 {
 				this.pos = this.pos + size
 			}
-		case 10:
-		case 8232:
-		case 8233:
+			fallthrough
+		case 10, 8232, 8233:
 			this.pos = this.pos + size
 			if this.options.Locations {
 				this.CurLine = this.CurLine + 1
@@ -157,7 +276,7 @@ Loop:
 		case 47: // '/'
 			switch this.input[this.pos+1] {
 			case 42: // '*'
-				return this.skipBlockComment()
+				this.skipBlockComment()
 			case 47:
 				this.skipLineComment(2)
 			default:
@@ -241,7 +360,7 @@ func (this *Parser) currentContext() *TokenContext {
 }
 
 func (this *Parser) inGeneratorContext() bool {
-	for i := len(this.Context); i >= 1; i-- {
+	for i := len(this.Context) - 1; i >= 1; i-- {
 		context := this.Context[i]
 		if context.Token == "function" {
 			return context.Generator

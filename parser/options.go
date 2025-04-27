@@ -46,13 +46,13 @@ var DefaultOptions = Options{
 
 var warnedAboutEcmaVersion = false
 
-func GetOptions(opts *Options) Options {
-	options := Options{}
+func GetOptions(opts *Options) *Options {
+	options := &Options{}
 
 	if opts == nil {
-		options = DefaultOptions
+		options = &DefaultOptions
 	} else {
-		options = DefaultOptions
+		options = &DefaultOptions
 		if opts.ecmaVersion != nil {
 			options.ecmaVersion = opts.ecmaVersion
 		}
@@ -99,9 +99,11 @@ func GetOptions(opts *Options) Options {
 		}
 	}
 
-	if array, ok := options.OnComment.([]*Comment); ok {
-		options.OnComment = pushComment(options, array)
-	}
+	/*
+		if array, ok := options.OnComment.([]*Comment); ok {
+			options.OnComment = pushComment(options, array)
+		}
+	*/
 
 	return options
 }

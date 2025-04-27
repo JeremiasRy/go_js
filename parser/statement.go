@@ -28,9 +28,9 @@ func (this *Parser) parseTopLevel(node *Node) (*Node, error) {
 }
 
 func (this *Parser) parseStatement(context string, topLevel bool, exports map[string]*Node) (*Node, error) {
+	this.printState()
 	startType, node := this.Type, this.startNode()
 	kind := KIND_NOT_INITIALIZED
-
 	if this.isLet(context) {
 		startType = tokenTypes[TOKEN_VAR]
 		kind = KIND_DECLARATION_LET
@@ -67,7 +67,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 
 	case TOKEN_FUNCTION:
 		if len(context) != 0 && (this.Strict || context != "if" && context != "label" && this.getEcmaVersion() >= 6) {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected(`len(context) != 0 && (this.Strict || context != "if" && context != "label" && this.getEcmaVersion() >= 6)`, nil)
 		}
 		functionStatement, err := this.parseFunctionStatement(node, false, len(context) == 0)
 
@@ -79,7 +79,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 
 	case TOKEN_CLASS:
 		if len(context) != 0 {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected("Cant parse class in context", nil)
 		}
 		classStatement, err := this.parseClass(node, true)
 
@@ -133,7 +133,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 		}
 
 		if len(context) != 0 && kind != KIND_DECLARATION_VAR {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected("Expected empty context, and not KIND_DECLARATION_VAR", nil)
 		}
 
 		varStatement, err := this.parseVarStatement(node, kind, false)
@@ -232,7 +232,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 	default:
 		if this.isAsyncFunction() {
 			if len(context) != 0 {
-				return nil, this.unexpected(nil)
+				return nil, this.unexpected("Expected empty context", nil)
 			}
 			this.next(false)
 
@@ -325,7 +325,10 @@ func (this *Parser) isAsyncFunction() bool {
 
 	skip := skipWhiteSpace.Find(this.input[this.pos:])
 	next := this.pos + len(skip)
-	after := rune(this.input[next+8])
+	after := rune(-1)
+	if next+8 < len(this.input) {
+		after = rune(this.input[next+8])
+	}
 
 	return !lineBreak.Match(this.input[this.pos:next]) &&
 		string(this.input[next:next+8]) == "function" &&
@@ -398,7 +401,7 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 
 		if this.eatContextual("from") {
 			if this.Type.identifier == TOKEN_STRING {
-				return nil, this.unexpected(nil)
+				return nil, this.unexpected("Can't have STRING as current type", nil)
 			}
 			exprAtom, err := this.parseExprAtom(nil, "", false)
 
@@ -611,7 +614,7 @@ func (this *Parser) parseImportAttribute() (*Node, error) {
 	}
 
 	if this.Type.identifier != TOKEN_STRING {
-		return nil, this.unexpected(nil)
+		return nil, this.unexpected("Expected TOKEN_STRING", nil)
 	}
 
 	exprAtom, err := this.parseExprAtom(nil, "", false)
@@ -753,7 +756,7 @@ func (this *Parser) parseExportAllDeclaration(node *Node, exports map[string]*No
 	}
 
 	if this.Type.identifier != TOKEN_STRING {
-		return nil, this.unexpected(nil)
+		return nil, this.unexpected("Expected TOKEN_STRING", nil)
 	}
 	exprAtom, err := this.parseExprAtom(nil, "", false)
 	if err != nil {
@@ -777,7 +780,7 @@ func (this *Parser) parseExportAllDeclaration(node *Node, exports map[string]*No
 
 func (this *Parser) expectContextual(name string) error {
 	if !this.eatContextual(name) {
-		return this.unexpected(nil)
+		return this.unexpected("Expected context from context stack", nil)
 	}
 	return nil
 }
@@ -811,7 +814,7 @@ func (this *Parser) parseImport(node *Node) (*Node, error) {
 			}
 			node.Source = exprAtom
 		} else {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected("Expected TOKEN_STRING", nil)
 		}
 	}
 	if this.getEcmaVersion() >= 16 {
@@ -1041,7 +1044,7 @@ func (this *Parser) parseTryStatement(node *Node) (*Node, error) {
 			clause.Param = catchClauseParam
 		} else {
 			if this.getEcmaVersion() < 10 {
-				return nil, this.unexpected(nil)
+				return nil, this.unexpected("Wrong ecma version", nil)
 			}
 			clause.Param = nil
 			this.enterScope(0)
@@ -1181,7 +1184,7 @@ func (this *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 			}
 		} else {
 			if cur == nil {
-				return nil, this.unexpected(nil)
+				return nil, this.unexpected("cur cant be nil", nil)
 			}
 			stmt, err := this.parseStatement("", false, nil)
 
@@ -1304,8 +1307,9 @@ const (
 
 func (this *Parser) parseFunctionStatement(node *Node, isAsync bool, declarationPosition bool) (*Node, error) {
 	this.next(false)
+
 	if declarationPosition {
-		function, err := this.parseFunction(node, FUNC_STATEMENT|0, false, isAsync, "")
+		function, err := this.parseFunction(node, FUNC_STATEMENT, false, isAsync, "")
 		if err != nil {
 			return nil, err
 		}
@@ -1337,7 +1341,7 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 
 	if this.Type.identifier == TOKEN_SEMI {
 		if awaitAt > -1 {
-			return nil, this.unexpected(&awaitAt)
+			return nil, this.unexpected("Something about having an await clause and semicolon", &awaitAt)
 		}
 		forStatement, err := this.parseFor(node, nil)
 		if err != nil {
@@ -1373,7 +1377,7 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 			if this.getEcmaVersion() >= 9 {
 				if this.Type.identifier == TOKEN_IN {
 					if awaitAt > -1 {
-						return nil, this.unexpected(&awaitAt)
+						return nil, this.unexpected("", &awaitAt)
 					}
 				} else {
 					node.Await = awaitAt > -1
@@ -1387,7 +1391,7 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 			return forIn, nil
 		}
 		if awaitAt > -1 {
-			return nil, this.unexpected(&awaitAt)
+			return nil, this.unexpected("", &awaitAt)
 		}
 
 		forStatement, err := this.parseFor(node, init)
@@ -1420,12 +1424,12 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 	if this.Type.identifier == TOKEN_IN || (isForOf && this.isContextual("of")) {
 		if awaitAt > -1 { // implies `ecmaVersion >= 9` (see declaration of awaitAt)
 			if this.Type.identifier == TOKEN_IN {
-				return nil, this.unexpected(&awaitAt)
+				return nil, this.unexpected("", &awaitAt)
 			}
 			node.Await = true
 		} else if isForOf && this.getEcmaVersion() >= 8 {
 			if init.Start == initPos && !containsEsc && init.Type == NODE_IDENTIFIER && init.Name == "async" {
-				return nil, this.unexpected(nil)
+				return nil, this.unexpected("", nil)
 			} else if this.getEcmaVersion() >= 9 {
 				node.Await = false
 			}
@@ -1460,7 +1464,7 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 		}
 	}
 	if awaitAt > -1 {
-		return nil, this.unexpected(&awaitAt)
+		return nil, this.unexpected("", &awaitAt)
 	}
 
 	forStatement, err := this.parseFor(node, init)
@@ -1539,14 +1543,18 @@ func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 		}
 		node.Rigth = expr
 	} else {
-		maybeAssign, err := this.parseMaybeAssign("", nil)
+		maybeAssign, err := this.parseMaybeAssign("", nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		node.Rigth = maybeAssign
 	}
 
-	this.expect(TOKEN_PARENR)
+	err := this.expect(TOKEN_PARENR)
+
+	if err != nil {
+		return nil, err
+	}
 	stmt, err := this.parseStatement("for", false, nil)
 	if err != nil {
 		return nil, err
@@ -1578,13 +1586,13 @@ func (this *Parser) parseVar(node *Node, isFor bool, kind Kind, allowMissingInit
 			if isFor {
 				forInit = "isFor"
 			}
-			declInit, err := this.parseMaybeAssign(forInit, nil)
+			declInit, err := this.parseMaybeAssign(forInit, nil, nil)
 			if err != nil {
 				return nil, err
 			}
 			decl.Init = declInit
 		} else if !allowMissingInitializer && kind == KIND_DECLARATION_CONST && !(this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected("Missing initializer in for..of loop", nil)
 		} else if !allowMissingInitializer && decl.Id.Type != NODE_IDENTIFIER && !(isFor && (this.Type.identifier == TOKEN_IN || this.isContextual("of"))) {
 			return nil, this.raise(this.LastTokEnd, "Complex binding patterns require an initialization value")
 		} else {
@@ -1684,7 +1692,7 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 	if this.eat(TOKEN_SEMI) || this.insertSemicolon() {
 		node.Label = nil
 	} else if this.Type.identifier != TOKEN_NAME {
-		return nil, this.unexpected(nil)
+		return nil, this.unexpected("", nil)
 	} else {
 		ident, err := this.parseIdent(false)
 
@@ -1725,6 +1733,9 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 }
 
 func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStrict bool) (*Node, error) {
+	if node == nil {
+		node = this.startNode()
+	}
 	node.Body = []*Node{}
 	err := this.expect(TOKEN_BRACEL)
 	if err != nil {
@@ -1761,7 +1772,7 @@ func (this *Parser) adaptDirectivePrologue(statements []*Node) {
 func (this *Parser) isDirectiveCandidate(statement *Node) bool {
 	literalAndString := false
 
-	if statement.Expression.Type == NODE_LITERAL {
+	if statement.Expression != nil && statement.Expression.Type == NODE_LITERAL {
 		_, ok := statement.Expression.Value.(string)
 		literalAndString = ok
 	}
@@ -1772,7 +1783,7 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 	this.initFunction(node)
 	if this.getEcmaVersion() >= 9 || this.getEcmaVersion() >= 6 && !isAsync {
 		if this.Type.identifier == TOKEN_STAR && (statement&FUNC_HANGING_STATEMENT == FUNC_HANGING_STATEMENT) {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected("Token was star and FUNC_HANGING_STATEMENT flag was set", nil)
 		}
 
 		node.IsGenerator = this.eat(TOKEN_STAR)
@@ -1782,7 +1793,8 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 	}
 
 	if statement&FUNC_STATEMENT == FUNC_STATEMENT {
-		if statement&FUNC_NULLABLE_ID == FUNC_NULLABLE_ID && this.Type.identifier == TOKEN_NAME {
+
+		if statement&FUNC_NULLABLE_ID == FUNC_NULLABLE_ID && this.Type.identifier != TOKEN_NAME {
 			node.Id = nil
 		} else {
 			identifier, err := this.parseIdent(false)
@@ -1907,6 +1919,9 @@ func (this *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
 	hadConstructor := false
 	classBody.Body = []*Node{}
 	err = this.expect(TOKEN_BRACEL)
+	if err != nil {
+		return nil, err
+	}
 	for this.Type.identifier != TOKEN_BRACER {
 		element, err := this.parseClassElement(node.SuperClass != nil)
 		if err != nil {
@@ -2122,7 +2137,7 @@ func (this *Parser) parseClassField(field *Node) (*Node, error) {
 	if this.eat(TOKEN_EQ) {
 		// To raise SyntaxError if 'arguments' exists in the initializer.
 		this.enterScope(SCOPE_CLASS_FIELD_INIT | SCOPE_SUPER)
-		maybeAssign, err := this.parseMaybeAssign("", nil)
+		maybeAssign, err := this.parseMaybeAssign("", nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -2241,7 +2256,7 @@ func (this *Parser) parseClassId(node *Node, isStatement bool) error {
 			}
 		} else {
 			if isStatement {
-				return this.unexpected(nil)
+				return this.unexpected("cant be in a statement", nil)
 			}
 
 			node.Id = nil

@@ -68,13 +68,12 @@ func (this *Parser) currentThisScope() *Scope {
 }
 
 func (p *Parser) currentVarScope() *Scope {
-	for _, scope := range p.ScopeStack {
+	for i := len(p.ScopeStack) - 1; ; i-- {
+		scope := p.ScopeStack[i]
 		if scope.Flags&(SCOPE_VAR|SCOPE_CLASS_FIELD_INIT|SCOPE_CLASS_STATIC_BLOCK) > 0 && scope.Flags&SCOPE_ARROW != SCOPE_ARROW {
 			return scope
 		}
 	}
-
-	return nil
 }
 
 func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {

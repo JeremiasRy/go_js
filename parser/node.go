@@ -243,10 +243,10 @@ type Node struct {
 	IsMethod           bool
 	Shorthand          bool
 	Computed           bool
-	UnaryOperator      *UnaryOperator
+	UnaryOperator      UnaryOperator
 	Prefix             bool
-	UpdateOperator     *UpdateOperator
-	BinaryOperator     *BinaryOperator
+	UpdateOperator     UpdateOperator
+	BinaryOperator     BinaryOperator
 	Left               *Node // Expression | PrivateIdentifier
 	Rigth              *Node
 	AssignmentOperator *AssignmentOperator
@@ -388,22 +388,18 @@ func (this *Parser) copyNode(node *Node) *Node {
 	}
 
 	// Copy UnaryOperator (*UnaryOperator)
-	if node.UnaryOperator != nil {
-		unaryOp := *node.UnaryOperator
-		newNode.UnaryOperator = &unaryOp
-	}
+
+	unaryOp := node.UnaryOperator
+	newNode.UnaryOperator = unaryOp
 
 	// Copy UpdateOperator (*UpdateOperator)
-	if node.UpdateOperator != nil {
-		updateOp := *node.UpdateOperator
-		newNode.UpdateOperator = &updateOp
-	}
+
+	updateOp := node.UpdateOperator
+	newNode.UpdateOperator = updateOp
 
 	// Copy BinaryOperator (*BinaryOperator)
-	if node.BinaryOperator != nil {
-		binaryOp := *node.BinaryOperator
-		newNode.BinaryOperator = &binaryOp
-	}
+	binaryOp := node.BinaryOperator
+	newNode.BinaryOperator = binaryOp
 
 	// Copy AssignmentOperator (*AssignmentOperator)
 	if node.AssignmentOperator != nil {

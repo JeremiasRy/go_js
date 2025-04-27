@@ -123,7 +123,7 @@ func (this *Parser) toAssignableList(exprList []*Node, isBinding bool) ([]*Node,
 	if end != 0 {
 		last := exprList[end-1]
 		if this.getEcmaVersion() == 6 && isBinding && last != nil && last.Type == NODE_REST_ELEMENT && last.Argument.Type != NODE_IDENTIFIER {
-			return nil, this.unexpected(&last.Argument.Start)
+			return nil, this.unexpected(`if this.getEcmaVersion() == 6 && isBinding && last != nil && last.Type == NODE_REST_ELEMENT && last.Argument.Type != NODE_IDENTIFIER`, &last.Argument.Start)
 		}
 
 	}
@@ -242,7 +242,7 @@ func (this *Parser) checkLValInnerPattern(expr *Node, bindingType Flags, checkCl
 func (this *Parser) parseSpread(refDestructuringErrors *DestructuringErrors) (*Node, error) {
 	node := this.startNode()
 	this.next(false)
-	maybeAsssign, err := this.parseMaybeAssign("", refDestructuringErrors)
+	maybeAsssign, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -256,7 +256,7 @@ func (this *Parser) parseRestBinding() (*Node, error) {
 
 	// RestElement inside of a function parameter must be an identifier
 	if this.getEcmaVersion() == 6 && this.Type.identifier != TOKEN_NAME {
-		return nil, this.unexpected(nil)
+		return nil, this.unexpected("", nil)
 	}
 
 	bindingAtom, err := this.parseBindingAtom()
@@ -307,7 +307,7 @@ func (this *Parser) parseMaybeDefault(startPos int, startLoc *Location, left *No
 	}
 	node := this.startNodeAt(startPos, startLoc)
 	node.Left = left
-	maybeAssign, err := this.parseMaybeAssign("", nil)
+	maybeAssign, err := this.parseMaybeAssign("", nil, nil)
 	if err != nil {
 		return nil, err
 	}

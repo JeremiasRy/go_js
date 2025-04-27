@@ -76,7 +76,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 
 func (this *Parser) parseExpression(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
 	startPos, startLoc := this.start, this.startLoc
-	expr, err := this.parseMaybeAssign(forInit, refDestructuringErrors)
+	expr, err := this.parseMaybeAssign(forInit, refDestructuringErrors, nil)
 
 	if err != nil {
 		return nil, err
@@ -86,7 +86,7 @@ func (this *Parser) parseExpression(forInit string, refDestructuringErrors *Dest
 		node.Expressions = []*Node{expr}
 
 		for this.eat(TOKEN_COMMA) {
-			maybeAssign, err := this.parseMaybeAssign(forInit, refDestructuringErrors)
+			maybeAssign, err := this.parseMaybeAssign(forInit, refDestructuringErrors, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -98,7 +98,9 @@ func (this *Parser) parseExpression(forInit string, refDestructuringErrors *Dest
 	return expr, nil
 }
 
-func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *DestructuringErrors, afterLeftParse *struct {
+	call func(p *Parser, l *Node, s int, sl *Location) (*Node, error)
+}) (*Node, error) {
 	if this.isContextual("yield") {
 		if this.inGeneratorContext() {
 			yield, err := this.parseYield(forInit)
@@ -137,11 +139,13 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 		return nil, err
 	}
 
-	/* what ??
-	 if afterLeftParse {
-		left = afterLeftParse.call(this, left, startPos, startLoc)
-	 }
-	*/
+	if afterLeftParse != nil {
+		newLeft, err := afterLeftParse.call(this, left, startPos, startLoc)
+		if err != nil {
+			return nil, err
+		}
+		left = newLeft
+	}
 
 	if this.Type.isAssign {
 		node := this.startNodeAt(startPos, startLoc)
@@ -177,7 +181,7 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 
 		node.Left = left
 		this.next(false)
-		node.Rigth, err = this.parseMaybeAssign(forInit, refDestructuringErrors)
+		node.Rigth, err = this.parseMaybeAssign(forInit, refDestructuringErrors, nil)
 
 		if err != nil {
 			return nil, err
@@ -220,7 +224,7 @@ func (this *Parser) parseMaybeConditional(forInit string, refDestructuringErrors
 	if this.eat(TOKEN_QUESTION) {
 		node := this.startNodeAt(startPos, startLoc)
 		node.Test = expr
-		maybeAssign, err := this.parseMaybeAssign("", nil)
+		maybeAssign, err := this.parseMaybeAssign("", nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -231,7 +235,7 @@ func (this *Parser) parseMaybeConditional(forInit string, refDestructuringErrors
 			return nil, err
 		}
 
-		maybeAssignElse, errElse := this.parseMaybeAssign(forInit, nil)
+		maybeAssignElse, errElse := this.parseMaybeAssign(forInit, nil, nil)
 		if errElse != nil {
 			return nil, errElse
 		}
@@ -335,7 +339,7 @@ func (this *Parser) parseSubscript(base *Node, startPos int, startLoc *Location,
 		this.YieldPos = 0
 		this.AwaitPos = 0
 		this.AwaitIdentPos = 0
-		exprList, err := this.parseExprList(TOKEN_PARENL, this.getEcmaVersion() >= 8, false, refDestructuringErrors)
+		exprList, err := this.parseExprList(TOKEN_PARENR, this.getEcmaVersion() >= 8, false, refDestructuringErrors)
 
 		if err != nil {
 			return nil, err
@@ -450,7 +454,7 @@ func (this *Parser) buildBinary(startPos int, startLoc *Location, left *Node, ri
 	}
 	node := this.startNodeAt(startPos, startLoc)
 	node.Left = left
-	node.BinaryOperator = &op
+	node.BinaryOperator = op
 	node.Rigth = right
 	if logical {
 		return this.finishNode(node, NODE_LOGICAL_EXPRESSION), nil
@@ -465,10 +469,18 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 
 	if this.isContextual("await") && this.canAwait() {
 		expr, err = this.parseAwait(forInit)
+		if err != nil {
+			return nil, err
+		}
 		sawUnary = true
 	} else if this.Type.prefix {
 		node, update := this.startNode(), this.Type.identifier == TOKEN_INCDEC
-		node.UnaryOperator = this.Value.(*UnaryOperator)
+		if uop, ok := this.Value.([]byte); ok {
+			node.UnaryOperator = UnaryOperator(uop)
+		} else {
+			panic("this.Value was not []byte as expected")
+		}
+
 		node.Prefix = true
 		this.next(false)
 		maybeUnary, err := this.parseMaybeUnary(nil, true, update, forInit)
@@ -491,9 +503,9 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 			if err != nil {
 				return nil, err
 			}
-		} else if this.Strict && *node.UnaryOperator == UNARY_DELETE && isLocalVariableAccess(node.Argument) {
+		} else if this.Strict && node.UnaryOperator == UNARY_DELETE && isLocalVariableAccess(node.Argument) {
 			return nil, this.raiseRecoverable(node.Start, "Deleting local variable in strict mode")
-		} else if *node.UnaryOperator == UNARY_DELETE && isPrivateFieldAccess(node.Argument) {
+		} else if node.UnaryOperator == UNARY_DELETE && isPrivateFieldAccess(node.Argument) {
 			return nil, this.raiseRecoverable(node.Start, "Private fields can not be deleted")
 		} else {
 			sawUnary = true
@@ -507,7 +519,7 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 
 	} else if !sawUnary && this.Type.identifier == TOKEN_PRIVATEID {
 		if len(forInit) != 0 || len(this.PrivateNameStack) == 0 && this.options.CheckPrivateFields {
-			return nil, this.unexpected(&this.pos)
+			return nil, this.unexpected(`len(forInit) != 0 || len(this.PrivateNameStack) == 0 && this.options.CheckPrivateFields`, &this.pos)
 		}
 		expr, err = this.parsePrivateIdent()
 		if err != nil {
@@ -515,7 +527,7 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 		}
 		// only could be private fields in 'in', such as #x in obj
 		if this.Type.identifier != TOKEN_IN {
-			return nil, this.unexpected(&this.pos)
+			return nil, this.unexpected("`only could be private fields in 'in', such as #x in obj` what?", &this.pos)
 		}
 	} else {
 		expr, err = this.parseExprSubscripts(refDestructuringErrors, forInit)
@@ -529,7 +541,7 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 
 		for this.Type.postfix && !this.canInsertSemicolon() {
 			node := this.startNodeAt(startPos, startLoc)
-			node.UpdateOperator = this.Value.(*UpdateOperator)
+			node.UpdateOperator = this.Value.(UpdateOperator)
 			node.Prefix = false
 			node.Argument = expr
 			err := this.checkLValSimple(expr, 0, struct {
@@ -548,7 +560,7 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 	if !incDec && this.eat(TOKEN_STARSTAR) {
 		if sawUnary {
 
-			return nil, this.unexpected(&this.LastTokStart)
+			return nil, this.unexpected("we saw unary, which is wrong?", &this.LastTokStart)
 		} else {
 			unary, err := this.parseMaybeUnary(nil, false, false, forInit)
 			if err != nil {
@@ -579,10 +591,13 @@ func (this *Parser) parseExprOps(forInit string, refDestructuringErrors *Destruc
 	}
 	if expr.Start == startPos && expr.Type == NODE_ARROW_FUNCTION_EXPRESSION {
 		return expr, nil
-	} else {
-		expr, err := this.parseExprOp(expr, startPos, startLoc, -1, forInit)
-		return expr, err
 	}
+	expr, err = this.parseExprOp(expr, startPos, startLoc, -1, forInit)
+	if err != nil {
+		return nil, err
+	}
+	return expr, nil
+
 }
 
 func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Location, minPrec int, forInit string) (*Node, error) {
@@ -596,7 +611,7 @@ func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Loca
 				// In other words, `node.right` shouldn't contain logical expressions in order to check the mixed error.
 				prec = tokenTypes[TOKEN_LOGICALAND].binop.prec
 			}
-			if op, ok := this.Value.(BinaryOperator); ok {
+			if op, ok := this.Value.([]byte); ok {
 				this.next(false)
 				startPos, startLoc := this.start, this.startLoc
 				unary, err := this.parseMaybeUnary(nil, false, false, forInit)
@@ -608,7 +623,7 @@ func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Loca
 				if err != nil {
 					return nil, err
 				}
-				node, err := this.buildBinary(leftStartPos, leftStartLoc, left, right, op, logical || coalesce)
+				node, err := this.buildBinary(leftStartPos, leftStartLoc, left, right, BinaryOperator(op), logical || coalesce)
 				if err != nil {
 					return nil, err
 				}
@@ -616,9 +631,12 @@ func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Loca
 					return nil, this.raiseRecoverable(this.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
 				}
 				expr, err := this.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
-				return expr, err
+				if err != nil {
+					return nil, err
+				}
+				return expr, nil
 			} else {
-				panic("Node had invalid operator as Value, expected BinaryOperator")
+				panic("Node had invalid operator as Value, expected []byte")
 			}
 
 		}
@@ -645,7 +663,7 @@ func (this *Parser) parseYield(forInit string) (*Node, error) {
 		node.Argument = nil
 	} else {
 		node.Delegate = this.eat(TOKEN_STAR)
-		maybeAssign, err := this.parseMaybeAssign(forInit, nil)
+		maybeAssign, err := this.parseMaybeAssign(forInit, nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -759,7 +777,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 		//     super ( Arguments )
 
 		if this.Type.identifier != TOKEN_DOT && this.Type.identifier != TOKEN_BRACKETL && this.Type.identifier != TOKEN_PARENL {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected(`this.Type.identifier != TOKEN_DOT && this.Type.identifier != TOKEN_BRACKETL && this.Type.identifier != TOKEN_PARENL`, nil)
 		}
 
 		return this.finishNode(node, NODE_SUPER), nil
@@ -795,7 +813,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 				}
 
 				if this.canInsertSemicolon() || !this.eat(TOKEN_ARROW) {
-					return nil, this.unexpected(nil)
+					return nil, this.unexpected(`if this.canInsertSemicolon() || !this.eat(TOKEN_ARROW)`, nil)
 				}
 				arrowExpr, err := this.parseArrowExpression(this.startNodeAt(startPos, startLoc), []*Node{id}, true, forInit)
 				return arrowExpr, err
@@ -891,7 +909,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 			exprImport, err := this.parseExprImport(forNew)
 			return exprImport, err
 		} else {
-			return nil, this.unexpected(nil)
+			return nil, this.unexpected("Ecma version is too old", nil)
 		}
 
 	default:
@@ -901,7 +919,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 }
 
 func (p *Parser) parseExprAtomDefault() error {
-	return p.unexpected(nil)
+	return p.unexpected("parseExprAtomDefault()", nil)
 }
 
 func (this *Parser) shouldParseAsyncArrow() bool {
@@ -940,7 +958,7 @@ func (this *Parser) parseExprList(close Token, allowTrailingComma bool, allowEmp
 			elt = spreadElement
 
 		} else {
-			maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors)
+			maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -957,7 +975,7 @@ func (this *Parser) parseIdent(liberal bool) (*Node, error) {
 		return nil, err
 	}
 
-	this.next(!liberal)
+	this.next(liberal)
 	this.finishNode(node, NODE_IDENTIFIER)
 	if !liberal {
 		err := this.checkUnreserved(struct {
@@ -995,7 +1013,7 @@ func (this *Parser) parseIdentNode() (*Node, error) {
 		}
 		this.Type = tokenTypes[TOKEN_NAME]
 	} else {
-		return nil, this.unexpected(nil)
+		return nil, this.unexpected("Keyword was not present, we want it", nil)
 	}
 	return node, nil
 }
@@ -1020,7 +1038,6 @@ func (this *Parser) checkUnreserved(opts struct {
 	if this.InClassStaticBlock && (opts.name == "arguments" || opts.name == "await") {
 		return this.raise(opts.start, `Cannot use ${name} in class static initialization block`)
 	}
-
 	if this.Keywords.Match([]byte(opts.name)) {
 		return this.raise(opts.start, "Unexpected keyword "+opts.name)
 	}
@@ -1071,7 +1088,7 @@ func (this *Parser) parseExprImport(forNew bool) (*Node, error) {
 		importMeta, err := this.parseImportMeta(node)
 		return importMeta, err
 	} else {
-		return nil, this.unexpected(nil)
+		return nil, this.unexpected("", nil)
 	}
 }
 
@@ -1105,7 +1122,7 @@ func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
 	this.next(false) // skip `(`
 
 	// Parse node.source.
-	source, err := this.parseMaybeAssign("", nil)
+	source, err := this.parseMaybeAssign("", nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1119,7 +1136,7 @@ func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
 			}
 
 			if !this.afterTrailingComma(TOKEN_PARENR, false) {
-				opts, err := this.parseMaybeAssign("", nil)
+				opts, err := this.parseMaybeAssign("", nil, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -1130,7 +1147,7 @@ func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
 						return nil, err
 					}
 					if !this.afterTrailingComma(TOKEN_PARENR, false) {
-						this.unexpected(nil)
+						this.unexpected("trailing commas", nil)
 					}
 				}
 			} else {
@@ -1146,7 +1163,7 @@ func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
 			if this.eat(TOKEN_COMMA) && this.eat(TOKEN_PARENR) {
 				return nil, this.raiseRecoverable(errorPos, "Trailing comma is not allowed in import()")
 			} else {
-				return nil, this.unexpected(&errorPos)
+				return nil, this.unexpected("", &errorPos)
 			}
 		}
 	}
@@ -1157,6 +1174,7 @@ func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
 func (this *Parser) parseLiteral(value any) (*Node, error) {
 	node := this.startNode()
 	node.Value = value
+
 	node.Raw = string(this.input[this.start:this.End])
 	if node.Raw[len(node.Raw)-1] == 110 { // big int stuff, maybe some day....
 		node.Bigint = strings.ReplaceAll(node.Raw[:len(node.Raw)-1], "_", "")
@@ -1175,7 +1193,7 @@ func (this *Parser) parsePrivateIdent() (*Node, error) {
 			panic("In parsePrivateIdent() this.Value was not string as expected")
 		}
 	} else {
-		return nil, this.unexpected(&this.pos)
+		return nil, this.unexpected("", &this.pos)
 	}
 	this.next(false)
 	this.finishNode(node, NODE_PRIVATE_IDENTIFIER)
@@ -1240,8 +1258,13 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 				}
 				break
 			} else {
-				maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors)
-				// TODO: send in afterLeftParse func, exprList.push(this.parseMaybeAssign(false, refDestructuringErrors, this.parseParenItem))
+				maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors, &struct {
+					call func(p *Parser, l *Node, s int, sl *Location) (*Node, error)
+				}{call: func(p *Parser, l *Node, s int, sl *Location) (*Node, error) {
+					res, err := p.parseParenItem(l)
+					return res, err
+				}}) // Horrible :S
+
 				if err != nil {
 					return nil, err
 				}
@@ -1273,11 +1296,11 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 		}
 
 		if len(exprList) != 0 || lastIsComma {
-			return nil, this.unexpected(&this.LastTokStart)
+			return nil, this.unexpected("hanging comma", &this.LastTokStart)
 		}
 
 		if spreadStart != 0 {
-			return nil, this.unexpected(&spreadStart)
+			return nil, this.unexpected("", &spreadStart)
 		}
 		_, err = this.checkExpressionErrors(refDestructuringErrors, true)
 
@@ -1442,7 +1465,7 @@ func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod
 	oldStrict, useStrict := this.Strict, false
 
 	if isExpression {
-		maybeAssign, err := this.parseMaybeAssign(forInit, nil)
+		maybeAssign, err := this.parseMaybeAssign(forInit, nil, nil)
 		if err != nil {
 			return err
 		}
@@ -1650,7 +1673,7 @@ func (this *Parser) parseProperty(isPattern bool, refDestructuringErrors *Destru
 			return this.finishNode(prop, NODE_REST_ELEMENT), nil
 		}
 		// Parse argument.
-		maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors)
+		maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1701,7 +1724,7 @@ func (this *Parser) parseProperty(isPattern bool, refDestructuringErrors *Destru
 
 func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator bool, isAsync bool, startPos int, startLoc *Location, refDestructuringErrors *DestructuringErrors, containsEsc bool) error {
 	if (isGenerator || isAsync) && this.Type.identifier == TOKEN_COLON {
-		return this.unexpected(nil)
+		return this.unexpected("", nil)
 	}
 
 	if this.eat(TOKEN_COLON) {
@@ -1713,7 +1736,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 			}
 			prop.Value = val
 		} else {
-			val, err := this.parseMaybeAssign("", refDestructuringErrors)
+			val, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
 			if err != nil {
 				return err
 			}
@@ -1721,7 +1744,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		}
 	} else if this.getEcmaVersion() >= 6 && this.Type.identifier == TOKEN_PARENL {
 		if isPattern {
-			return this.unexpected(nil)
+			return this.unexpected("", nil)
 		}
 		method, err := this.parseMethod(isGenerator, isAsync, false)
 		if err != nil {
@@ -1735,7 +1758,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		(prop.Key.Name == "get" || prop.Key.Name == "set") &&
 		(this.Type.identifier != TOKEN_COMMA && this.Type.identifier != TOKEN_BRACER && this.Type.identifier != TOKEN_EQ) {
 		if isGenerator || isAsync {
-			return this.unexpected(nil)
+			return this.unexpected("", nil)
 		}
 		err := this.parseGetterSetter(prop)
 		if err != nil {
@@ -1743,7 +1766,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		}
 	} else if this.getEcmaVersion() >= 6 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER {
 		if isGenerator || isAsync {
-			return this.unexpected(nil)
+			return this.unexpected("", nil)
 		}
 		err := this.checkUnreserved(struct {
 			start int
@@ -1778,7 +1801,7 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		prop.Kind = KIND_PROPERTY_INIT
 		prop.Shorthand = true
 	} else {
-		return this.unexpected(nil)
+		return this.unexpected("", nil)
 	}
 	return nil
 }
@@ -1835,7 +1858,7 @@ func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
 	if this.getEcmaVersion() >= 6 {
 		if this.eat(TOKEN_BRACKETL) {
 			prop.Computed = true
-			maybeAssign, err := this.parseMaybeAssign("", nil)
+			maybeAssign, err := this.parseMaybeAssign("", nil, nil)
 			if err != nil {
 				return nil, err
 			}

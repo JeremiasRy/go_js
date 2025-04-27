@@ -71,7 +71,7 @@ func TestReadString(t *testing.T) {
 			p := &Parser{
 				input: []byte(tt.input),
 				pos:   0,
-				options: Options{
+				options: &Options{
 					ecmaVersion: 6, // Assume ECMAScript 6 for testing
 					Locations:   false,
 				},

@@ -19,6 +19,21 @@ var AstralIdentifierStartCodes = [598]rune{0, 11, 2, 25, 2, 18, 2, 1, 2, 14, 3, 
 var nonASCIIwhitespace = regexp.MustCompile("[\u1680\u2000-\u200a\u202f\u205f\u3000\ufeff]")
 var keywordRelationalOperator = regexp.MustCompile("^in(stanceof)?$")
 var loneSurrogate = regexp.MustCompile("")
+var reservedWords = map[string]string{
+	"3":          "abstract boolean byte char class double enum export extends final float goto implements import int interface long native package private protected public short static super synchronized throws transient volatile",
+	"5":          "class enum extends super const export import",
+	"6":          "enum",
+	"strict":     "implements interface let package private protected public static yield",
+	"strictBind": "eval arguments",
+}
+
+const ecma5AndLessKeywords = "break case catch continue debugger default do else finally for function if return switch throw try var while with null true false instanceof typeof void delete new in this"
+
+var syntaxKeywords = map[string]string{
+	"5":       ecma5AndLessKeywords,
+	"5module": ecma5AndLessKeywords + " export import",
+	"6":       ecma5AndLessKeywords + " const class extends export import super",
+}
 
 func IsIdentifierStart(code rune, astral bool) bool {
 	if code < 65 {
@@ -192,7 +207,7 @@ const ecma12ScriptValues = ecma11ScriptValues + " Chorasmian Chrs Diak Dives_Aku
 const ecma13ScriptValues = ecma12ScriptValues + " Cypro_Minoan Cpmn Old_Uyghur Ougr Tangsa Tnsa Toto Vithkuqi Vith"
 const ecma14ScriptValues = ecma13ScriptValues + " " + ScriptValuesAddedInUnicode
 
-var skipWhiteSpace = regexp.MustCompile(`(?:\s|\/\/.*|\/\*[^]*?\*\/)*`)
+var skipWhiteSpace = regexp.MustCompile(`(?:\s|\/\/.*|\/\*[\s\S]*?\*\/)*`)
 
 // unicodeBinaryProperties maps ECMAScript versions to binary properties.
 var unicodeBinaryProperties = map[int]string{
