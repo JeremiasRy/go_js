@@ -56,11 +56,8 @@ func (this *Parser) insertSemicolon() bool {
 }
 
 func (this *Parser) isContextual(name string) bool {
-	if this.Type.identifier == TOKEN_NAME {
-		return true
-	}
 	if value, ok := this.Value.(string); ok {
-		return value == name && !this.ContainsEsc
+		return value == name && !this.ContainsEsc && this.Type.identifier == TOKEN_NAME
 	}
 	return false
 }

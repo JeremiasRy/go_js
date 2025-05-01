@@ -370,10 +370,10 @@ func (this *Parser) nextToken() {
 
 func (this *Parser) fullCharCodeAtPos() (code rune, size int, err error) {
 	if this.pos < 0 || this.pos >= len(this.input) {
-
 		return 0, 0, this.raise(this.pos, "Invalid position")
 	}
 	r, size := utf8.DecodeRune(this.input[this.pos:])
+
 	if r == utf8.RuneError {
 
 		return 0, size, this.raise(this.pos, "Invalid UTF-8 sequence")
@@ -876,7 +876,11 @@ func (this *Parser) readNumber(startsWithDot bool) error {
 	if octal && this.Strict {
 		return this.raise(start, "Invalid number")
 	}
-	next := this.input[this.pos]
+	next := math.MaxInt
+	if this.pos < len(this.input) {
+		next = int(this.input[this.pos])
+	}
+
 	if !octal && !startsWithDot && this.getEcmaVersion() >= 11 && next == 110 {
 		val := stringToBigInt(this.input[start:this.pos])
 		this.pos = this.pos + 1
@@ -895,11 +899,11 @@ func (this *Parser) readNumber(startsWithDot bool) error {
 	if next == 46 && !octal { // '.'
 		this.pos = this.pos + 1
 		this.readInt(10, nil, false)
-		next = this.input[this.pos]
+		next = int(this.input[this.pos])
 	}
 	if (next == 69 || next == 101) && !octal { // 'eE'
 		this.pos = this.pos + 1
-		next = this.input[this.pos]
+		next = int(this.input[this.pos])
 		if next == 43 || next == 45 { // '+-'
 			this.pos = this.pos + 1
 		}
@@ -1308,12 +1312,12 @@ func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiter
 	} else {
 		e = *length
 	}
-
 	for i := range e {
-		if this.pos >= len(this.input) {
-			return 0, this.raiseRecoverable(this.pos, "Unexpected end of input")
+		code := math.MinInt64
+		if this.pos < len(this.input) {
+			code = int(this.input[this.pos])
 		}
-		code := int(this.input[this.pos])
+
 		val := 0
 
 		if allowSeparators && code == 95 {
@@ -1345,7 +1349,11 @@ func (this *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiter
 		}
 		lastCode = code
 		total = total*radix + val
-		this.pos = this.pos + 1
+
+		if this.pos < len(this.input) {
+			this.pos = this.pos + 1
+		}
+
 	}
 
 	if allowSeparators && lastCode == 95 {

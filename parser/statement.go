@@ -124,11 +124,25 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 		return tryStatement, nil
 
 	case TOKEN_CONST, TOKEN_VAR:
+
 		if kind == KIND_NOT_INITIALIZED {
-			if k, ok := this.Value.(Kind); ok {
-				kind = k
+			if str, ok := this.Value.(string); ok {
+				switch str {
+				case "const":
+					{
+						kind = KIND_DECLARATION_CONST
+					}
+				case "var":
+					{
+						kind = KIND_DECLARATION_VAR
+					}
+				case "let":
+					{
+						kind = KIND_DECLARATION_LET
+					}
+				}
 			} else {
-				panic("We were expectin a DeclarationKind from node.Value, didn't happen so we are now here.")
+				panic("We were expectin a Kind from node.Value, didn't happen so we are now here.")
 			}
 		}
 
@@ -1971,7 +1985,7 @@ func (this *Parser) exitClassBody() error {
 	}
 
 	for _, id := range privateNameTop.Used {
-		if _, found := privateNameTop.Declared[id.Name]; found {
+		if _, found := privateNameTop.Declared[id.Name]; !found {
 			if parent != nil {
 				parent.Used = append(parent.Used, id)
 			} else {
@@ -2017,7 +2031,6 @@ func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error
 	keyName, isGenerator, isAsync, kind, isStatic := "", false, false, KIND_PROPERTY_METHOD, false
 
 	if this.eatContextual("static") {
-		// Parse static init block
 		if ecmaVersion >= 13 && this.eat(TOKEN_BRACEL) {
 			_, err := this.parseClassStaticBlock(node)
 			if err != nil {

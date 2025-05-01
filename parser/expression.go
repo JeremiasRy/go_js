@@ -1226,7 +1226,6 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 		this.AwaitPos = 0
 		// Do not save awaitIdentPos to allow checking awaits nested in parameters
 		for this.Type.identifier != TOKEN_PARENR {
-
 			if first {
 				first = false
 			} else {
@@ -1299,7 +1298,7 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 			return parenArrowList, err
 		}
 
-		if len(exprList) != 0 || lastIsComma {
+		if len(exprList) == 0 || lastIsComma {
 			return nil, this.unexpected("hanging comma", &this.LastTokStart)
 		}
 
