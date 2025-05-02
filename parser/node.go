@@ -197,85 +197,84 @@ const (
 
 type Node struct {
 	// Base values
-	Start      int
-	End        int
-	Type       NodeType
-	Range      [2]int
-	Loc        *SourceLocation
-	SourceFile *string
+	start      int
+	end        int
+	type_      NodeType
+	range_     [2]int
+	location   *SourceLocation
+	sourceFile *string
+	name       string
+	value      any // string, bool, float64, *regexp.Regexp, *big.Int, *Node
 
-	Name               string
-	Value              any // string, bool, float64, *regexp.Regexp, *big.Int, *Node
-	Raw                string
-	Regex              *Regex
-	Bigint             string
-	Body               []*Node // Statement | ModuleDeclaration
-	BodyNode           *Node   // BlockStatement | Expression
-	SourceType         SourceType
-	Id                 *Node   // Identifier
-	Params             []*Node // Pattern
-	IsGenerator        bool
-	IsExpression       bool
-	IsAsync            bool
-	Expression         *Node // Expression | Literal
-	Directive          string
-	Delegate           bool
-	Object             *Node   // Expression
-	Argument           *Node   // Expression
-	Label              *Node   // Identifier
-	Test               *Node   // Expression
-	Consequent         *Node   // Statement
-	Alternate          *Node   // Statement
-	Discriminant       *Node   // Expression
-	Cases              []*Node // SwitchCase
-	ConsequentSlice    []*Node // Statement (renamed to avoid conflict with Consequent)
-	Block              *Node   // BlockStatement
-	Handler            *Node   // CatchClause
-	Finalizer          *Node   // BlockStatement
-	Param              *Node   // Pattern
-	Init               *Node   // VariableDeclaration | Expression
-	Update             *Node   // Expression
-	Declarations       []*Node // VariableDeclarator
-	Kind               Kind
-	Elements           []*Node // Expression | SpreadElement
-	Properties         []*Node // Property | SpreadElement
-	Key                *Node   // Expression
-	IsMethod           bool
-	Shorthand          bool
-	Computed           bool
-	UnaryOperator      UnaryOperator
-	Prefix             bool
-	UpdateOperator     UpdateOperator
-	BinaryOperator     BinaryOperator
-	Left               *Node // Expression | PrivateIdentifier
-	Rigth              *Node
-	AssignmentOperator *AssignmentOperator
-	LogicalOperator    *LogicalOperator
-	MemberProperty     *Node // Expression | PrivateIdentifier
-	Optional           bool
-	Callee             *Node   // Expression | Super
-	Arguments          []*Node // Expression | SpreadElement
-	Expressions        []*Node // Expression
-	Await              bool
-	IsDelegate         *bool
-	Quasis             []*Node // TemplateElement
-	Tag                *Node   // Expression
-	Quasi              *Node   // TemplateLiteral
-	Tail               bool
-	TmplValue          *TemplateValue
-	SuperClass         *Node // Expression
-	ClassBody          *Node // ClassBody
-	IsStatic           bool
-	Meta               *Node   // Identifier
-	Property           *Node   // Identifier
-	Specifiers         []*Node // ImportSpecifier | ImportDefaultSpecifier | ImportNamespaceSpecifier
-	Source             *Node   // Literal
-	Attributes         []*Node // ImportAttribute
-	Imported           *Node   // Identifier | Literal
-	Local              *Node   // Identifier
-	Declaration        *Node   // Declaration
-	Exported           *Node   // Identifier | Literal
-	Options            *Node   // Expression
+	raw                string
+	regex              *Regex
+	bigint             string
+	body               []*Node // Statement | ModuleDeclaration
+	bodyNode           *Node   // BlockStatement | Expression
+	sourceType         SourceType
+	identifier         *Node   // Identifier
+	params             []*Node // Pattern
+	isGenerator        bool
+	isExpression       bool
+	isAsync            bool
+	expression         *Node // Expression | Literal
+	directive          string
+	delegate           bool
+	object             *Node   // Expression
+	argument           *Node   // Expression
+	label              *Node   // Identifier
+	test               *Node   // Expression
+	consequent         *Node   // Statement
+	alternate          *Node   // Statement
+	discriminant       *Node   // Expression
+	cases              []*Node // SwitchCase
+	consequentSlice    []*Node // Statement (renamed to avoid conflict with Consequent)
+	block              *Node   // BlockStatement
+	handler            *Node   // CatchClause
+	finalizer          *Node   // BlockStatement
+	param              *Node   // Pattern
+	initializer        *Node   // VariableDeclaration | Expression
+	update             *Node   // Expression
+	declarations       []*Node // VariableDeclarator
+	kind               Kind
+	elements           []*Node // Expression | SpreadElement
+	properties         []*Node // Property | SpreadElement
+	key                *Node   // Expression
+	isMethod           bool
+	shorthand          bool
+	computed           bool
+	unaryOperator      UnaryOperator
+	prefix             bool
+	updateOperator     UpdateOperator
+	binaryOperator     BinaryOperator
+	left               *Node // Expression | PrivateIdentifier
+	rigth              *Node
+	assignmentOperator AssignmentOperator
+	logicalOperator    LogicalOperator
+	memberProperty     *Node // Expression | PrivateIdentifier
+	optional           bool
+	callee             *Node   // Expression | Super
+	arguments          []*Node // Expression | SpreadElement
+	expressions        []*Node // Expression
+	await              bool
+	isDelegate         *bool
+	quasis             []*Node // TemplateElement
+	quasi              *Node   // TemplateLiteral
+	tag                *Node   // Expression
+	tail               bool
+	tmplValue          *TemplateValue
+	superClass         *Node // Expression
+	isStatic           bool
+	meta               *Node   // Identifier
+	property           *Node   // Identifier
+	specifierss        []*Node // ImportSpecifier | ImportDefaultSpecifier | ImportNamespaceSpecifier
+	source             *Node   // Literal
+	attributes         []*Node // ImportAttribute
+	imported           *Node   // Identifier | Literal
+	local              *Node   // Identifier
+	declaration        *Node   // Declaration
+	exported           *Node   // Identifier | Literal
+	options            *Node   // Expression
 }
 
 type TemplateValue struct {
@@ -285,21 +284,21 @@ type TemplateValue struct {
 
 func NewNode(parser *Parser, pos int, loc *Location) *Node {
 	node := &Node{
-		Type:  NODE_UNTYPED,
-		Start: pos,
-		End:   0,
+		type_: NODE_UNTYPED,
+		start: pos,
+		end:   0,
 	}
 
 	if parser.options.Locations {
-		node.Loc = NewSourceLocation(parser, loc, nil)
+		node.location = NewSourceLocation(parser, loc, nil)
 	}
 
 	if parser.options.DirectSourceFile != nil {
-		node.SourceFile = parser.options.DirectSourceFile
+		node.sourceFile = parser.options.DirectSourceFile
 	}
 
 	if parser.options.Ranges {
-		node.Range = [2]int{pos, 0}
+		node.range_ = [2]int{pos, 0}
 	}
 	return node
 }
@@ -313,14 +312,14 @@ func (this *Parser) startNodeAt(pos int, loc *Location) *Node {
 }
 
 func (this *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Location) {
-	node.Type = finishType
-	node.End = pos
+	node.type_ = finishType
+	node.end = pos
 	if this.options.Locations {
-		node.Loc.End = loc
+		node.location.End = loc
 	}
 
 	if this.options.Ranges {
-		node.Range[1] = pos
+		node.range_[1] = pos
 	}
 }
 
@@ -337,204 +336,194 @@ func (this *Parser) copyNode(node *Node) *Node {
 
 	// Create a new Node and copy basic fields
 	newNode := &Node{
-		Start:        node.Start,
-		End:          node.End,
-		Type:         node.Type,
-		Range:        node.Range, // Array is copied by value
-		Name:         node.Name,
-		Raw:          node.Raw,
-		Bigint:       node.Bigint,
-		SourceType:   node.SourceType,
-		IsGenerator:  node.IsGenerator,
-		IsExpression: node.IsExpression,
-		IsAsync:      node.IsAsync,
-		Delegate:     node.Delegate,
-		IsMethod:     node.IsMethod,
-		Shorthand:    node.Shorthand,
-		Computed:     node.Computed,
-		Prefix:       node.Prefix,
-		Optional:     node.Optional,
-		Tail:         node.Tail,
-		IsStatic:     node.IsStatic,
+		start:        node.start,
+		end:          node.end,
+		type_:        node.type_,
+		range_:       node.range_, // Array is copied by value
+		name:         node.name,
+		raw:          node.raw,
+		bigint:       node.bigint,
+		sourceType:   node.sourceType,
+		isGenerator:  node.isGenerator,
+		isExpression: node.isExpression,
+		isAsync:      node.isAsync,
+		delegate:     node.delegate,
+		isMethod:     node.isMethod,
+		shorthand:    node.shorthand,
+		computed:     node.computed,
+		prefix:       node.prefix,
+		optional:     node.optional,
+		tail:         node.tail,
+		isStatic:     node.isStatic,
 	}
 
 	// Copy SourceFile (*string)
-	if node.SourceFile != nil {
-		sourceFile := *node.SourceFile
-		newNode.SourceFile = &sourceFile
+	if node.sourceFile != nil {
+		sourceFile := *node.sourceFile
+		newNode.sourceFile = &sourceFile
 	}
 
 	// Copy Loc (*SourceLocation)
-	if node.Loc != nil {
-		loc := *node.Loc // Assuming SourceLocation has no pointers
-		newNode.Loc = &loc
+	if node.location != nil {
+		loc := *node.location // Assuming SourceLocation has no pointers
+		newNode.location = &loc
 	}
 
 	// Copy Regex (*Regex)
-	if node.Regex != nil {
-		regex := *node.Regex // Assuming Regex has no pointers
-		newNode.Regex = &regex
+	if node.regex != nil {
+		regex := *node.regex // Assuming Regex has no pointers
+		newNode.regex = &regex
 	}
 
-	directive := node.Directive
-	newNode.Directive = directive
+	directive := node.directive
+	newNode.directive = directive
 
-	newNode.Await = node.Await
+	newNode.await = node.await
 
 	// Copy IsDelegate (*bool)
-	if node.IsDelegate != nil {
-		isDelegate := *node.IsDelegate
-		newNode.IsDelegate = &isDelegate
+	if node.isDelegate != nil {
+		isDelegate := *node.isDelegate
+		newNode.isDelegate = &isDelegate
 	}
 
 	// Copy UnaryOperator (*UnaryOperator)
 
-	unaryOp := node.UnaryOperator
-	newNode.UnaryOperator = unaryOp
+	unaryOp := node.unaryOperator
+	newNode.unaryOperator = unaryOp
 
 	// Copy UpdateOperator (*UpdateOperator)
 
-	updateOp := node.UpdateOperator
-	newNode.UpdateOperator = updateOp
+	updateOp := node.updateOperator
+	newNode.updateOperator = updateOp
 
 	// Copy BinaryOperator (*BinaryOperator)
-	binaryOp := node.BinaryOperator
-	newNode.BinaryOperator = binaryOp
+	binaryOp := node.binaryOperator
+	newNode.binaryOperator = binaryOp
 
-	// Copy AssignmentOperator (*AssignmentOperator)
-	if node.AssignmentOperator != nil {
-		assignOp := *node.AssignmentOperator
-		newNode.AssignmentOperator = &assignOp
-	}
-
-	// Copy LogicalOperator (*LogicalOperator)
-	if node.LogicalOperator != nil {
-		logicalOp := *node.LogicalOperator
-		newNode.LogicalOperator = &logicalOp
-	}
+	newNode.assignmentOperator = node.assignmentOperator
+	newNode.logicalOperator = node.logicalOperator
 
 	// Copy TmplValue (*TemplateValue)
-	if node.TmplValue != nil {
-		tmplValue := *node.TmplValue
-		newNode.TmplValue = &tmplValue
+	if node.tmplValue != nil {
+		tmplValue := *node.tmplValue
+		newNode.tmplValue = &tmplValue
 	}
 
 	// Copy Value (any)
-	switch v := node.Value.(type) {
+	switch v := node.value.(type) {
 	case *Node:
-		newNode.Value = this.copyNode(v)
+		newNode.value = this.copyNode(v)
 	case *regexp.Regexp:
 		if v != nil {
 			// Create a new regexp with the same pattern
 			newRegexp, err := regexp.Compile(v.String())
 			if err == nil {
-				newNode.Value = newRegexp
+				newNode.value = newRegexp
 			}
 		}
 	case *big.Int:
 		if v != nil {
 			newBigInt := new(big.Int).Set(v)
-			newNode.Value = newBigInt
+			newNode.value = newBigInt
 		}
 	case string, bool, float64:
-		newNode.Value = v // Direct copy for value types
+		newNode.value = v // Direct copy for value types
 	}
 
 	// Copy single Node pointers
-	newNode.BodyNode = this.copyNode(node.BodyNode)
-	newNode.Id = this.copyNode(node.Id)
-	newNode.BodyNode = this.copyNode(node.BodyNode)
-	newNode.Expression = this.copyNode(node.Expression)
-	newNode.Object = this.copyNode(node.Object)
-	newNode.Argument = this.copyNode(node.Argument)
-	newNode.Label = this.copyNode(node.Label)
-	newNode.Test = this.copyNode(node.Test)
-	newNode.Consequent = this.copyNode(node.Consequent)
-	newNode.Alternate = this.copyNode(node.Alternate)
-	newNode.Discriminant = this.copyNode(node.Discriminant)
-	newNode.Block = this.copyNode(node.Block)
-	newNode.Handler = this.copyNode(node.Handler)
-	newNode.Finalizer = this.copyNode(node.Finalizer)
-	newNode.Param = this.copyNode(node.Param)
-	newNode.Init = this.copyNode(node.Init)
-	newNode.Update = this.copyNode(node.Update)
-	newNode.Key = this.copyNode(node.Key)
-	newNode.Left = this.copyNode(node.Left)
-	newNode.Rigth = this.copyNode(node.Rigth)
-	newNode.MemberProperty = this.copyNode(node.MemberProperty)
-	newNode.Callee = this.copyNode(node.Callee)
-	newNode.Tag = this.copyNode(node.Tag)
-	newNode.Quasi = this.copyNode(node.Quasi)
-	newNode.SuperClass = this.copyNode(node.SuperClass)
-	newNode.ClassBody = this.copyNode(node.ClassBody)
-	newNode.Meta = this.copyNode(node.Meta)
-	newNode.Property = this.copyNode(node.Property)
-	newNode.Source = this.copyNode(node.Source)
-	newNode.Imported = this.copyNode(node.Imported)
-	newNode.Local = this.copyNode(node.Local)
-	newNode.Declaration = this.copyNode(node.Declaration)
-	newNode.Exported = this.copyNode(node.Exported)
-	newNode.Options = this.copyNode(node.Options)
+	newNode.bodyNode = this.copyNode(node.bodyNode)
+	newNode.identifier = this.copyNode(node.identifier)
+	newNode.bodyNode = this.copyNode(node.bodyNode)
+	newNode.expression = this.copyNode(node.expression)
+	newNode.object = this.copyNode(node.object)
+	newNode.argument = this.copyNode(node.argument)
+	newNode.label = this.copyNode(node.label)
+	newNode.test = this.copyNode(node.test)
+	newNode.consequent = this.copyNode(node.consequent)
+	newNode.alternate = this.copyNode(node.alternate)
+	newNode.discriminant = this.copyNode(node.discriminant)
+	newNode.block = this.copyNode(node.block)
+	newNode.handler = this.copyNode(node.handler)
+	newNode.finalizer = this.copyNode(node.finalizer)
+	newNode.param = this.copyNode(node.param)
+	newNode.initializer = this.copyNode(node.initializer)
+	newNode.update = this.copyNode(node.update)
+	newNode.key = this.copyNode(node.key)
+	newNode.left = this.copyNode(node.left)
+	newNode.rigth = this.copyNode(node.rigth)
+	newNode.memberProperty = this.copyNode(node.memberProperty)
+	newNode.callee = this.copyNode(node.callee)
+	newNode.tag = this.copyNode(node.tag)
+	newNode.quasi = this.copyNode(node.quasi)
+	newNode.superClass = this.copyNode(node.superClass)
+	newNode.meta = this.copyNode(node.meta)
+	newNode.property = this.copyNode(node.property)
+	newNode.source = this.copyNode(node.source)
+	newNode.imported = this.copyNode(node.imported)
+	newNode.local = this.copyNode(node.local)
+	newNode.declaration = this.copyNode(node.declaration)
+	newNode.exported = this.copyNode(node.exported)
+	newNode.options = this.copyNode(node.options)
 
 	// Copy Node slices
-	newNode.Body = make([]*Node, len(node.Body))
-	for i, param := range node.Body {
-		newNode.Body[i] = this.copyNode(param)
+	newNode.body = make([]*Node, len(node.body))
+	for i, param := range node.body {
+		newNode.body[i] = this.copyNode(param)
 	}
 
-	newNode.Params = make([]*Node, len(node.Params))
-	for i, param := range node.Params {
-		newNode.Params[i] = this.copyNode(param)
+	newNode.params = make([]*Node, len(node.params))
+	for i, param := range node.params {
+		newNode.params[i] = this.copyNode(param)
 	}
 
-	newNode.Cases = make([]*Node, len(node.Cases))
-	for i, c := range node.Cases {
-		newNode.Cases[i] = this.copyNode(c)
+	newNode.cases = make([]*Node, len(node.cases))
+	for i, c := range node.cases {
+		newNode.cases[i] = this.copyNode(c)
 	}
 
-	newNode.ConsequentSlice = make([]*Node, len(node.ConsequentSlice))
-	for i, cons := range node.ConsequentSlice {
-		newNode.ConsequentSlice[i] = this.copyNode(cons)
+	newNode.consequentSlice = make([]*Node, len(node.consequentSlice))
+	for i, cons := range node.consequentSlice {
+		newNode.consequentSlice[i] = this.copyNode(cons)
 	}
 
-	newNode.Declarations = make([]*Node, len(node.Declarations))
-	for i, decl := range node.Declarations {
-		newNode.Declarations[i] = this.copyNode(decl)
+	newNode.declarations = make([]*Node, len(node.declarations))
+	for i, decl := range node.declarations {
+		newNode.declarations[i] = this.copyNode(decl)
 	}
 
-	newNode.Elements = make([]*Node, len(node.Elements))
-	for i, elem := range node.Elements {
-		newNode.Elements[i] = this.copyNode(elem)
+	newNode.elements = make([]*Node, len(node.elements))
+	for i, elem := range node.elements {
+		newNode.elements[i] = this.copyNode(elem)
 	}
 
-	newNode.Properties = make([]*Node, len(node.Properties))
-	for i, prop := range node.Properties {
-		newNode.Properties[i] = this.copyNode(prop)
+	newNode.properties = make([]*Node, len(node.properties))
+	for i, prop := range node.properties {
+		newNode.properties[i] = this.copyNode(prop)
 	}
 
-	newNode.Arguments = make([]*Node, len(node.Arguments))
-	for i, arg := range node.Arguments {
-		newNode.Arguments[i] = this.copyNode(arg)
+	newNode.arguments = make([]*Node, len(node.arguments))
+	for i, arg := range node.arguments {
+		newNode.arguments[i] = this.copyNode(arg)
 	}
 
-	newNode.Expressions = make([]*Node, len(node.Expressions))
-	for i, expr := range node.Expressions {
-		newNode.Expressions[i] = this.copyNode(expr)
+	newNode.expressions = make([]*Node, len(node.expressions))
+	for i, expr := range node.expressions {
+		newNode.expressions[i] = this.copyNode(expr)
 	}
 
-	newNode.Quasis = make([]*Node, len(node.Quasis))
-	for i, quasi := range node.Quasis {
-		newNode.Quasis[i] = this.copyNode(quasi)
+	newNode.quasis = make([]*Node, len(node.quasis))
+	for i, quasi := range node.quasis {
+		newNode.quasis[i] = this.copyNode(quasi)
 	}
 
-	newNode.Specifiers = make([]*Node, len(node.Specifiers))
-	for i, spec := range node.Specifiers {
-		newNode.Specifiers[i] = this.copyNode(spec)
+	newNode.specifierss = make([]*Node, len(node.specifierss))
+	for i, spec := range node.specifierss {
+		newNode.specifierss[i] = this.copyNode(spec)
 	}
 
-	newNode.Attributes = make([]*Node, len(node.Attributes))
-	for i, attr := range node.Attributes {
-		newNode.Attributes[i] = this.copyNode(attr)
+	newNode.attributes = make([]*Node, len(node.attributes))
+	for i, attr := range node.attributes {
+		newNode.attributes[i] = this.copyNode(attr)
 	}
 
 	return newNode

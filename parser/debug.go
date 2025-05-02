@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-func (p *Parser) printState() {
+func (p *Parser) PrintState() {
 	loc := getLineInfo(p.input, p.pos)
 	t := tokenToString[p.Type.identifier]
 	line := strconv.Itoa(loc.Line)
@@ -126,34 +126,34 @@ func printNode(node *Node, indent int) {
 	fmt.Printf("%sNode:\n", indentStr)
 
 	// Base values
-	fmt.Printf("%s  Start: %d\n", indentStr, node.Start)
-	fmt.Printf("%s  End: %d\n", indentStr, node.End)
-	fmt.Printf("%s  Type: %s\n", indentStr, nodeTypeToString[node.Type])
-	fmt.Printf("%s  Range: [%d, %d]\n", indentStr, node.Range[0], node.Range[1])
-	if node.Loc != nil {
-		fmt.Printf("%s  Loc: %v\n", indentStr, node.Loc)
+	fmt.Printf("%s  Start: %d\n", indentStr, node.start)
+	fmt.Printf("%s  End: %d\n", indentStr, node.end)
+	fmt.Printf("%s  Type: %s\n", indentStr, nodeTypeToString[node.type_])
+	fmt.Printf("%s  Range: [%d, %d]\n", indentStr, node.range_[0], node.range_[1])
+	if node.location != nil {
+		fmt.Printf("%s  Loc: %v\n", indentStr, node.location)
 	}
-	if node.SourceFile != nil {
-		fmt.Printf("%s  SourceFile: %s\n", indentStr, *node.SourceFile)
+	if node.sourceFile != nil {
+		fmt.Printf("%s  SourceFile: %s\n", indentStr, *node.sourceFile)
 	}
 
 	// String fields
-	if node.Name != "" {
-		fmt.Printf("%s  Name: %s\n", indentStr, node.Name)
+	if node.name != "" {
+		fmt.Printf("%s  Name: %s\n", indentStr, node.name)
 	}
-	if node.Raw != "" {
-		fmt.Printf("%s  Raw: %s\n", indentStr, node.Raw)
+	if node.raw != "" {
+		fmt.Printf("%s  Raw: %s\n", indentStr, node.raw)
 	}
-	if node.Bigint != "" {
-		fmt.Printf("%s  Bigint: %s\n", indentStr, node.Bigint)
+	if node.bigint != "" {
+		fmt.Printf("%s  Bigint: %s\n", indentStr, node.bigint)
 	}
-	if node.Directive != "" {
-		fmt.Printf("%s  Directive: %s\n", indentStr, node.Directive)
+	if node.directive != "" {
+		fmt.Printf("%s  Directive: %s\n", indentStr, node.directive)
 	}
 
 	// Value field (type any)
-	if node.Value != nil {
-		switch v := node.Value.(type) {
+	if node.value != nil {
+		switch v := node.value.(type) {
 		case string:
 			fmt.Printf("%s  Value: (string) %s\n", indentStr, v)
 		case bool:
@@ -173,8 +173,8 @@ func printNode(node *Node, indent int) {
 	}
 
 	// Regex
-	if node.Regex != nil {
-		fmt.Printf("%s  Regex: Pattern=%s, Flags=%s\n", indentStr, node.Regex.Pattern, node.Regex.Flags)
+	if node.regex != nil {
+		fmt.Printf("%s  Regex: Pattern=%s, Flags=%s\n", indentStr, node.regex.Pattern, node.regex.Flags)
 	}
 
 	sourceTypeString := map[SourceType]string{
@@ -183,290 +183,284 @@ func printNode(node *Node, indent int) {
 	}
 
 	// SourceType
-	fmt.Printf("%s  SourceType: %s\n", indentStr, sourceTypeString[node.SourceType])
+	fmt.Printf("%s  SourceType: %s\n", indentStr, sourceTypeString[node.sourceType])
 
 	// Boolean fields
-	if node.IsGenerator {
-		fmt.Printf("%s  IsGenerator: %t\n", indentStr, node.IsGenerator)
+	if node.isGenerator {
+		fmt.Printf("%s  IsGenerator: %t\n", indentStr, node.isGenerator)
 	}
-	if node.IsExpression {
-		fmt.Printf("%s  IsExpression: %t\n", indentStr, node.IsExpression)
+	if node.isExpression {
+		fmt.Printf("%s  IsExpression: %t\n", indentStr, node.isExpression)
 	}
-	if node.IsAsync {
-		fmt.Printf("%s  IsAsync: %t\n", indentStr, node.IsAsync)
+	if node.isAsync {
+		fmt.Printf("%s  IsAsync: %t\n", indentStr, node.isAsync)
 	}
-	if node.Delegate {
-		fmt.Printf("%s  Delegate: %t\n", indentStr, node.Delegate)
+	if node.delegate {
+		fmt.Printf("%s  Delegate: %t\n", indentStr, node.delegate)
 	}
-	if node.IsMethod {
-		fmt.Printf("%s  IsMethod: %t\n", indentStr, node.IsMethod)
+	if node.isMethod {
+		fmt.Printf("%s  IsMethod: %t\n", indentStr, node.isMethod)
 	}
-	if node.Shorthand {
-		fmt.Printf("%s  Shorthand: %t\n", indentStr, node.Shorthand)
+	if node.shorthand {
+		fmt.Printf("%s  Shorthand: %t\n", indentStr, node.shorthand)
 	}
-	if node.Computed {
-		fmt.Printf("%s  Computed: %t\n", indentStr, node.Computed)
+	if node.computed {
+		fmt.Printf("%s  Computed: %t\n", indentStr, node.computed)
 	}
-	if node.Prefix {
-		fmt.Printf("%s  Prefix: %t\n", indentStr, node.Prefix)
+	if node.prefix {
+		fmt.Printf("%s  Prefix: %t\n", indentStr, node.prefix)
 	}
-	if node.Optional {
-		fmt.Printf("%s  Optional: %t\n", indentStr, node.Optional)
+	if node.optional {
+		fmt.Printf("%s  Optional: %t\n", indentStr, node.optional)
 	}
-	if node.Await {
-		fmt.Printf("%s  Await: %t\n", indentStr, node.Await)
+	if node.await {
+		fmt.Printf("%s  Await: %t\n", indentStr, node.await)
 	}
-	if node.IsStatic {
-		fmt.Printf("%s  IsStatic: %t\n", indentStr, node.IsStatic)
+	if node.isStatic {
+		fmt.Printf("%s  IsStatic: %t\n", indentStr, node.isStatic)
 	}
-	if node.Tail {
-		fmt.Printf("%s  Tail: %t\n", indentStr, node.Tail)
+	if node.tail {
+		fmt.Printf("%s  Tail: %t\n", indentStr, node.tail)
 	}
 
-	fmt.Printf("%s  UnaryOperator: %s\n", indentStr, node.UnaryOperator)
+	fmt.Printf("%s  UnaryOperator: %s\n", indentStr, node.unaryOperator)
 
-	fmt.Printf("%s  UpdateOperator: %s\n", indentStr, node.UpdateOperator)
+	fmt.Printf("%s  UpdateOperator: %s\n", indentStr, node.updateOperator)
 
-	fmt.Printf("%s  BinaryOperator: %s\n", indentStr, node.BinaryOperator)
+	fmt.Printf("%s  BinaryOperator: %s\n", indentStr, node.binaryOperator)
 
-	if node.AssignmentOperator != nil {
-		fmt.Printf("%s  AssignmentOperator: %s\n", indentStr, *node.AssignmentOperator)
-	}
-	if node.LogicalOperator != nil {
-		fmt.Printf("%s  LogicalOperator: %s\n", indentStr, *node.LogicalOperator)
-	}
-	if node.IsDelegate != nil {
-		fmt.Printf("%s  IsDelegate: %t\n", indentStr, *node.IsDelegate)
+	fmt.Printf("%s  AssignmentOperator: %s\n", indentStr, node.assignmentOperator)
+
+	fmt.Printf("%s  LogicalOperator: %s\n", indentStr, node.logicalOperator)
+
+	if node.isDelegate != nil {
+		fmt.Printf("%s  IsDelegate: %t\n", indentStr, *node.isDelegate)
 	}
 
 	// Kind
-	if node.Kind != KIND_NOT_INITIALIZED {
-		fmt.Printf("%s  Kind: %s\n", indentStr, kindToString[node.Kind])
+	if node.kind != KIND_NOT_INITIALIZED {
+		fmt.Printf("%s  Kind: %s\n", indentStr, kindToString[node.kind])
 	}
 
 	// Node fields
-	if node.Id != nil {
+	if node.identifier != nil {
 		fmt.Printf("%s  Id:\n", indentStr)
-		printNode(node.Id, indent+2)
+		printNode(node.identifier, indent+2)
 	}
-	if node.Expression != nil {
+	if node.expression != nil {
 		fmt.Printf("%s  Expression:\n", indentStr)
-		printNode(node.Expression, indent+2)
+		printNode(node.expression, indent+2)
 	}
-	if node.Object != nil {
+	if node.object != nil {
 		fmt.Printf("%s  Object:\n", indentStr)
-		printNode(node.Object, indent+2)
+		printNode(node.object, indent+2)
 	}
-	if node.Argument != nil {
+	if node.argument != nil {
 		fmt.Printf("%s  Argument:\n", indentStr)
-		printNode(node.Argument, indent+2)
+		printNode(node.argument, indent+2)
 	}
-	if node.Label != nil {
+	if node.label != nil {
 		fmt.Printf("%s  Label:\n", indentStr)
-		printNode(node.Label, indent+2)
+		printNode(node.label, indent+2)
 	}
-	if node.Test != nil {
+	if node.test != nil {
 		fmt.Printf("%s  Test:\n", indentStr)
-		printNode(node.Test, indent+2)
+		printNode(node.test, indent+2)
 	}
-	if node.Consequent != nil {
+	if node.consequent != nil {
 		fmt.Printf("%s  Consequent:\n", indentStr)
-		printNode(node.Consequent, indent+2)
+		printNode(node.consequent, indent+2)
 	}
-	if node.Alternate != nil {
+	if node.alternate != nil {
 		fmt.Printf("%s  Alternate:\n", indentStr)
-		printNode(node.Alternate, indent+2)
+		printNode(node.alternate, indent+2)
 	}
-	if node.Discriminant != nil {
+	if node.discriminant != nil {
 		fmt.Printf("%s  Discriminant:\n", indentStr)
-		printNode(node.Discriminant, indent+2)
+		printNode(node.discriminant, indent+2)
 	}
-	if node.Block != nil {
+	if node.block != nil {
 		fmt.Printf("%s  Block:\n", indentStr)
-		printNode(node.Block, indent+2)
+		printNode(node.block, indent+2)
 	}
-	if node.Handler != nil {
+	if node.handler != nil {
 		fmt.Printf("%s  Handler:\n", indentStr)
-		printNode(node.Handler, indent+2)
+		printNode(node.handler, indent+2)
 	}
-	if node.Finalizer != nil {
+	if node.finalizer != nil {
 		fmt.Printf("%s  Finalizer:\n", indentStr)
-		printNode(node.Finalizer, indent+2)
+		printNode(node.finalizer, indent+2)
 	}
-	if node.Param != nil {
+	if node.param != nil {
 		fmt.Printf("%s  Param:\n", indentStr)
-		printNode(node.Param, indent+2)
+		printNode(node.param, indent+2)
 	}
-	if node.Init != nil {
+	if node.initializer != nil {
 		fmt.Printf("%s  Init:\n", indentStr)
-		printNode(node.Init, indent+2)
+		printNode(node.initializer, indent+2)
 	}
-	if node.Update != nil {
+	if node.update != nil {
 		fmt.Printf("%s  Update:\n", indentStr)
-		printNode(node.Update, indent+2)
+		printNode(node.update, indent+2)
 	}
-	if node.Key != nil {
+	if node.key != nil {
 		fmt.Printf("%s  Key:\n", indentStr)
-		printNode(node.Key, indent+2)
+		printNode(node.key, indent+2)
 	}
-	if node.Left != nil {
+	if node.left != nil {
 		fmt.Printf("%s  Left:\n", indentStr)
-		printNode(node.Left, indent+2)
+		printNode(node.left, indent+2)
 	}
-	if node.Rigth != nil { // Note: Typo in struct (Rigth -> Right)
+	if node.rigth != nil { // Note: Typo in struct (Rigth -> Right)
 		fmt.Printf("%s  Rigth:\n", indentStr)
-		printNode(node.Rigth, indent+2)
+		printNode(node.rigth, indent+2)
 	}
-	if node.MemberProperty != nil {
+	if node.memberProperty != nil {
 		fmt.Printf("%s  MemberProperty:\n", indentStr)
-		printNode(node.MemberProperty, indent+2)
+		printNode(node.memberProperty, indent+2)
 	}
-	if node.Callee != nil {
+	if node.callee != nil {
 		fmt.Printf("%s  Callee:\n", indentStr)
-		printNode(node.Callee, indent+2)
+		printNode(node.callee, indent+2)
 	}
-	if node.Quasi != nil {
+	if node.quasi != nil {
 		fmt.Printf("%s  Quasi:\n", indentStr)
-		printNode(node.Quasi, indent+2)
+		printNode(node.quasi, indent+2)
 	}
-	if node.Tag != nil {
+	if node.tag != nil {
 		fmt.Printf("%s  Tag:\n", indentStr)
-		printNode(node.Tag, indent+2)
+		printNode(node.tag, indent+2)
 	}
-	if node.SuperClass != nil {
+	if node.superClass != nil {
 		fmt.Printf("%s  SuperClass:\n", indentStr)
-		printNode(node.SuperClass, indent+2)
+		printNode(node.superClass, indent+2)
 	}
-	if node.ClassBody != nil {
-		fmt.Printf("%s  ClassBody:\n", indentStr)
-		printNode(node.ClassBody, indent+2)
-	}
-	if node.Meta != nil {
+	if node.meta != nil {
 		fmt.Printf("%s  Meta:\n", indentStr)
-		printNode(node.Meta, indent+2)
+		printNode(node.meta, indent+2)
 	}
-	if node.Property != nil {
+	if node.property != nil {
 		fmt.Printf("%s  Property:\n", indentStr)
-		printNode(node.Property, indent+2)
+		printNode(node.property, indent+2)
 	}
-	if node.Source != nil {
+	if node.source != nil {
 		fmt.Printf("%s  Source:\n", indentStr)
-		printNode(node.Source, indent+2)
+		printNode(node.source, indent+2)
 	}
-	if node.Imported != nil {
+	if node.imported != nil {
 		fmt.Printf("%s  Imported:\n", indentStr)
-		printNode(node.Imported, indent+2)
+		printNode(node.imported, indent+2)
 	}
-	if node.Local != nil {
+	if node.local != nil {
 		fmt.Printf("%s  Local:\n", indentStr)
-		printNode(node.Local, indent+2)
+		printNode(node.local, indent+2)
 	}
-	if node.Declaration != nil {
+	if node.declaration != nil {
 		fmt.Printf("%s  Declaration:\n", indentStr)
-		printNode(node.Declaration, indent+2)
+		printNode(node.declaration, indent+2)
 	}
-	if node.Exported != nil {
+	if node.exported != nil {
 		fmt.Printf("%s  Exported:\n", indentStr)
-		printNode(node.Exported, indent+2)
+		printNode(node.exported, indent+2)
 	}
-	if node.Options != nil {
+	if node.options != nil {
 		fmt.Printf("%s  Options:\n", indentStr)
-		printNode(node.Options, indent+2)
+		printNode(node.options, indent+2)
 	}
-	if node.TmplValue != nil {
-		fmt.Printf("%s  TmplValue: %v\n", indentStr, node.TmplValue)
+	if node.tmplValue != nil {
+		fmt.Printf("%s  TmplValue: %v\n", indentStr, node.tmplValue)
 	}
 
 	// Slice of nodes
-	if len(node.Body) > 0 {
-		fmt.Printf("%s  Body: (%d elements)\n", indentStr, len(node.Body))
-		for i, n := range node.Body {
+	if len(node.body) > 0 {
+		fmt.Printf("%s  Body: (%d elements)\n", indentStr, len(node.body))
+		for i, n := range node.body {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Params) > 0 {
-		fmt.Printf("%s  Params: (%d elements)\n", indentStr, len(node.Params))
-		for i, n := range node.Params {
+	if len(node.params) > 0 {
+		fmt.Printf("%s  Params: (%d elements)\n", indentStr, len(node.params))
+		for i, n := range node.params {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Cases) > 0 {
-		fmt.Printf("%s  Cases: (%d elements)\n", indentStr, len(node.Cases))
-		for i, n := range node.Cases {
+	if len(node.cases) > 0 {
+		fmt.Printf("%s  Cases: (%d elements)\n", indentStr, len(node.cases))
+		for i, n := range node.cases {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.ConsequentSlice) > 0 {
-		fmt.Printf("%s  ConsequentSlice: (%d elements)\n", indentStr, len(node.ConsequentSlice))
-		for i, n := range node.ConsequentSlice {
+	if len(node.consequentSlice) > 0 {
+		fmt.Printf("%s  ConsequentSlice: (%d elements)\n", indentStr, len(node.consequentSlice))
+		for i, n := range node.consequentSlice {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Declarations) > 0 {
-		fmt.Printf("%s  Declarations: (%d elements)\n", indentStr, len(node.Declarations))
-		for i, n := range node.Declarations {
+	if len(node.declarations) > 0 {
+		fmt.Printf("%s  Declarations: (%d elements)\n", indentStr, len(node.declarations))
+		for i, n := range node.declarations {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Elements) > 0 {
-		fmt.Printf("%s  Elements: (%d elements)\n", indentStr, len(node.Elements))
-		for i, n := range node.Elements {
+	if len(node.elements) > 0 {
+		fmt.Printf("%s  Elements: (%d elements)\n", indentStr, len(node.elements))
+		for i, n := range node.elements {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Properties) > 0 {
-		fmt.Printf("%s  Properties: (%d elements)\n", indentStr, len(node.Properties))
-		for i, n := range node.Properties {
+	if len(node.properties) > 0 {
+		fmt.Printf("%s  Properties: (%d elements)\n", indentStr, len(node.properties))
+		for i, n := range node.properties {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Arguments) > 0 {
-		fmt.Printf("%s  Arguments: (%d elements)\n", indentStr, len(node.Arguments))
-		for i, n := range node.Arguments {
+	if len(node.arguments) > 0 {
+		fmt.Printf("%s  Arguments: (%d elements)\n", indentStr, len(node.arguments))
+		for i, n := range node.arguments {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Expressions) > 0 {
-		fmt.Printf("%s  Expressions: (%d elements)\n", indentStr, len(node.Expressions))
-		for i, n := range node.Expressions {
+	if len(node.expressions) > 0 {
+		fmt.Printf("%s  Expressions: (%d elements)\n", indentStr, len(node.expressions))
+		for i, n := range node.expressions {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Quasis) > 0 {
-		fmt.Printf("%s  Quasis: (%d elements)\n", indentStr, len(node.Quasis))
-		for i, n := range node.Quasis {
+	if len(node.quasis) > 0 {
+		fmt.Printf("%s  Quasis: (%d elements)\n", indentStr, len(node.quasis))
+		for i, n := range node.quasis {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Specifiers) > 0 {
-		fmt.Printf("%s  Specifiers: (%d elements)\n", indentStr, len(node.Specifiers))
-		for i, n := range node.Specifiers {
+	if len(node.specifierss) > 0 {
+		fmt.Printf("%s  Specifiers: (%d elements)\n", indentStr, len(node.specifierss))
+		for i, n := range node.specifierss {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
-	if len(node.Attributes) > 0 {
-		fmt.Printf("%s  Attributes: (%d elements)\n", indentStr, len(node.Attributes))
-		for i, n := range node.Attributes {
+	if len(node.attributes) > 0 {
+		fmt.Printf("%s  Attributes: (%d elements)\n", indentStr, len(node.attributes))
+		for i, n := range node.attributes {
 			fmt.Printf("%s    [%d]:\n", indentStr, i)
 			printNode(n, indent+4)
 		}
 	}
 
 	// BodyNode (single node, after Body slice)
-	if node.BodyNode != nil {
+	if node.bodyNode != nil {
 		fmt.Printf("%s  BodyNode:\n", indentStr)
-		printNode(node.BodyNode, indent+2)
+		printNode(node.bodyNode, indent+2)
 	}
 }
 

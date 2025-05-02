@@ -193,7 +193,8 @@ func (p *Parser) inGenerator() bool {
 }
 
 func (p *Parser) canAwait() bool {
-	for _, scope := range p.ScopeStack {
+	for i := len(p.ScopeStack) - 1; i >= 0; i-- {
+		scope := p.ScopeStack[i]
 		flags := scope.Flags
 
 		if flags&(SCOPE_CLASS_STATIC_BLOCK|SCOPE_CLASS_FIELD_INIT) > 0 {

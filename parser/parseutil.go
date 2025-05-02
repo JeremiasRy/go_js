@@ -38,7 +38,7 @@ func (this *Parser) canInsertSemicolon() bool {
 
 func (this *Parser) semicolon() error {
 	if !this.eat(TOKEN_SEMI) && !this.insertSemicolon() {
-		return this.unexpected("Expected "+tokenToString[TOKEN_SEMI], nil)
+		return this.unexpected("Unexpected token", nil)
 	}
 	return nil
 }
@@ -190,9 +190,9 @@ func (this *Parser) strictDirective(start int) bool {
 }
 
 func (this *Parser) isSimpleAssignTarget(expr *Node) bool {
-	if expr.Type == NODE_PARENTHESIZED_EXPRESSION {
-		return this.isSimpleAssignTarget(expr.Expression)
+	if expr.type_ == NODE_PARENTHESIZED_EXPRESSION {
+		return this.isSimpleAssignTarget(expr.expression)
 	}
 
-	return expr.Type == NODE_IDENTIFIER || expr.Type == NODE_MEMBER_EXPRESSION
+	return expr.type_ == NODE_IDENTIFIER || expr.type_ == NODE_MEMBER_EXPRESSION
 }

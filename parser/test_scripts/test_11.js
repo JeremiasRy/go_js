@@ -1,0 +1,4 @@
+f = async function* () {
+    await a;
+    yield b;
+}
