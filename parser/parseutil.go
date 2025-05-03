@@ -190,9 +190,9 @@ func (this *Parser) strictDirective(start int) bool {
 }
 
 func (this *Parser) isSimpleAssignTarget(expr *Node) bool {
-	if expr.type_ == NODE_PARENTHESIZED_EXPRESSION {
-		return this.isSimpleAssignTarget(expr.expression)
+	if expr.Type == NODE_PARENTHESIZED_EXPRESSION {
+		return this.isSimpleAssignTarget(expr.Expression)
 	}
 
-	return expr.type_ == NODE_IDENTIFIER || expr.type_ == NODE_MEMBER_EXPRESSION
+	return expr.Type == NODE_IDENTIFIER || expr.Type == NODE_MEMBER_EXPRESSION
 }

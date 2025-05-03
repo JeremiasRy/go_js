@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"math"
 	"regexp"
 	"strconv"
@@ -97,6 +98,16 @@ const (
 	TOKEN_VOID
 	TOKEN_DELETE
 )
+
+func (t Token) MarshalJSON() ([]byte, error) {
+	name, ok := tokenToString[t]
+
+	if !ok {
+		name = "UnknownToken"
+	}
+
+	return json.Marshal(name)
+}
 
 type Binop struct {
 	prec int

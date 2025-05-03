@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"go_js/parser"
 	"log"
 	"os"
@@ -24,5 +25,6 @@ func main() {
 		log.Fatal(err)
 	}
 
-	parser.PrintNode(node)
+	bJson, _ := json.MarshalIndent(node, "", "  ")
+	println(string(bJson))
 }

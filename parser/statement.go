@@ -8,22 +8,22 @@ import (
 
 func (this *Parser) parseTopLevel(node *Node) (*Node, error) {
 	exports := map[string]*Node{}
-	node.body = []*Node{}
+	node.Body = []*Node{}
 	for this.Type.identifier != TOKEN_EOF {
 		stmt, err := this.parseStatement("", true, exports)
 		if err != nil {
 			return nil, err
 		}
-		node.body = append(node.body, stmt)
+		node.Body = append(node.Body, stmt)
 	}
 
 	if this.InModule {
 		for k, _ := range this.UndefinedExports { // let's just aggregate all of the undefined exports since now it'll just return at first
-			return nil, this.raiseRecoverable(this.UndefinedExports[k].start, "Export "+k+" not defined")
+			return nil, this.raiseRecoverable(this.UndefinedExports[k].Start, "Export "+k+" not defined")
 		}
 	}
 
-	this.adaptDirectivePrologue(node.body)
+	this.adaptDirectivePrologue(node.Body)
 	return this.finishNode(node, NODE_PROGRAM), nil
 }
 
@@ -265,7 +265,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 			return nil, err
 		}
 
-		if startType.identifier == TOKEN_NAME && expr.type_ == NODE_IDENTIFIER && this.eat(TOKEN_COLON) {
+		if startType.identifier == TOKEN_NAME && expr.Type == NODE_IDENTIFIER && this.eat(TOKEN_COLON) {
 
 			if name, ok := maybeName.(string); ok {
 				labeledStatement, err := this.parseLabeledStatement(node, name, expr, context)
@@ -293,7 +293,7 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 func (this *Parser) parseLabeledStatement(node *Node, maybeName string, expr *Node, context string) (*Node, error) {
 	for _, label := range this.Labels {
 		if label.Name == maybeName {
-			return nil, this.raise(expr.start, "Label '"+maybeName+"' is already declared")
+			return nil, this.raise(expr.Start, "Label '"+maybeName+"' is already declared")
 		}
 	}
 
@@ -306,7 +306,7 @@ func (this *Parser) parseLabeledStatement(node *Node, maybeName string, expr *No
 		}
 	}
 	for i := len(this.Labels) - 1; i >= 0; i-- {
-		if this.Labels[i].StatementStart == node.start {
+		if this.Labels[i].StatementStart == node.Start {
 			this.Labels[i].StatementStart = this.start
 			this.Labels[i].Kind = kind
 		} else {
@@ -325,9 +325,9 @@ func (this *Parser) parseLabeledStatement(node *Node, maybeName string, expr *No
 		return nil, err
 	}
 
-	node.bodyNode = statement
+	node.BodyNode = statement
 	this.Labels = this.Labels[:len(this.Labels)-1]
-	node.label = expr
+	node.Label = expr
 	return this.finishNode(node, NODE_LABELED_STATEMENT), nil
 }
 
@@ -379,10 +379,10 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 			return nil, err
 		}
 
-		node.declaration = decl
+		node.Declaration = decl
 
-		if node.declaration.type_ == NODE_VARIABLE_DECLARATION {
-			err := this.checkVariableExport(exports, node.declaration.declarations)
+		if node.Declaration.Type == NODE_VARIABLE_DECLARATION {
+			err := this.checkVariableExport(exports, node.Declaration.Declarations)
 			if err != nil {
 				return nil, err
 			}
@@ -390,27 +390,27 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 			err := this.checkExport(exports, struct {
 				s string
 				n *Node
-			}{n: node.declaration.identifier}, node.declaration.identifier.start)
+			}{n: node.Declaration.Identifier}, node.Declaration.Identifier.Start)
 			if err != nil {
 				return nil, err
 			}
 		}
 
-		node.specifierss = []*Node{}
-		node.source = nil
+		node.Specifiers = []*Node{}
+		node.Source = nil
 
 		if this.getEcmaVersion() >= 16 {
-			node.attributes = []*Node{}
+			node.Attributes = []*Node{}
 		}
 	} else {
-		node.declaration = nil
+		node.Declaration = nil
 		specifiers, err := this.parseExportSpecifiers(exports)
 
 		if err != nil {
 			return nil, err
 		}
 
-		node.specifierss = specifiers
+		node.Specifiers = specifiers
 
 		if this.eatContextual("from") {
 			if this.Type.identifier == TOKEN_STRING {
@@ -422,38 +422,38 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 				return nil, err
 			}
 
-			node.source = exprAtom
+			node.Source = exprAtom
 			if this.getEcmaVersion() >= 16 {
 				withClause, err := this.parseWithClause()
 
 				if err != nil {
 					return nil, err
 				}
-				node.attributes = withClause
+				node.Attributes = withClause
 			}
 		} else {
 
-			for _, spec := range node.specifierss {
+			for _, spec := range node.Specifiers {
 				err := this.checkUnreserved(struct {
 					start int
 					end   int
 					name  string
-				}{start: spec.local.start, end: spec.local.end, name: spec.local.name})
+				}{start: spec.Local.Start, end: spec.Local.End, name: spec.Local.Name})
 
 				if err != nil {
 					return nil, err
 				}
 
-				this.checkLocalExport(spec.local)
+				this.checkLocalExport(spec.Local)
 
-				if spec.local.type_ == NODE_LITERAL {
-					return nil, this.raise(spec.local.start, "A string literal cannot be used as an exported binding without `from`.")
+				if spec.Local.Type == NODE_LITERAL {
+					return nil, this.raise(spec.Local.Start, "A string literal cannot be used as an exported binding without `from`.")
 				}
 			}
 
-			node.source = nil
+			node.Source = nil
 			if this.getEcmaVersion() >= 16 {
-				node.attributes = []*Node{}
+				node.Attributes = []*Node{}
 			}
 		}
 		err = this.semicolon()
@@ -465,9 +465,9 @@ func (this *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, er
 }
 
 func (this *Parser) checkLocalExport(opts *Node) {
-	if slices.Index(this.ScopeStack[0].Lexical, opts.name) == -1 &&
-		slices.Index(this.ScopeStack[0].Var, opts.name) == -1 {
-		this.UndefinedExports[opts.name] = opts
+	if slices.Index(this.ScopeStack[0].Lexical, opts.Name) == -1 &&
+		slices.Index(this.ScopeStack[0].Var, opts.Name) == -1 {
+		this.UndefinedExports[opts.Name] = opts
 	}
 }
 
@@ -507,7 +507,7 @@ func (this *Parser) parseExportSpecifier(exports map[string]*Node) (*Node, error
 	if err != nil {
 		return nil, err
 	}
-	node.local = moduleExportName
+	node.Local = moduleExportName
 
 	if this.eatContextual("as") {
 		moduleExportName, err := this.parseModuleExportName()
@@ -515,9 +515,9 @@ func (this *Parser) parseExportSpecifier(exports map[string]*Node) (*Node, error
 			return nil, err
 		}
 
-		node.exported = moduleExportName
+		node.Exported = moduleExportName
 	} else {
-		node.exported = node.local
+		node.Exported = node.Local
 	}
 	this.checkExport(
 		exports,
@@ -525,9 +525,9 @@ func (this *Parser) parseExportSpecifier(exports map[string]*Node) (*Node, error
 			s string
 			n *Node
 		}{
-			n: node.exported,
+			n: node.Exported,
 		},
-		node.exported.start,
+		node.Exported.Start,
 	)
 
 	return this.finishNode(node, NODE_EXPORT_SPECIFIER), nil
@@ -541,9 +541,9 @@ func (this *Parser) parseModuleExportName() (*Node, error) {
 			return nil, err
 		}
 
-		if val, ok := stringLiteral.value.(string); ok {
+		if val, ok := stringLiteral.Value.(string); ok {
 			if loneSurrogate.Match([]byte(val)) {
-				return nil, this.raise(stringLiteral.start, "An export name cannot include a lone surrogate.")
+				return nil, this.raise(stringLiteral.Start, "An export name cannot include a lone surrogate.")
 			}
 			return stringLiteral, nil
 		}
@@ -586,16 +586,16 @@ func (this *Parser) parseWithClause() ([]*Node, error) {
 		}
 		keyName := ""
 
-		if attr.key.type_ == NODE_IDENTIFIER {
-			keyName = attr.key.name
+		if attr.Key.Type == NODE_IDENTIFIER {
+			keyName = attr.Key.Name
 		} else {
-			if val, ok := attr.key.value.(string); ok {
+			if val, ok := attr.Key.Value.(string); ok {
 				keyName = val
 			}
 		}
 
 		if _, found := attributeKeys[keyName]; found {
-			return nil, this.raiseRecoverable(attr.key.start, "Duplicate attribute key '"+keyName+"'")
+			return nil, this.raiseRecoverable(attr.Key.Start, "Duplicate attribute key '"+keyName+"'")
 		}
 		attributeKeys[keyName] = struct{}{}
 		nodes = append(nodes, attr)
@@ -612,14 +612,14 @@ func (this *Parser) parseImportAttribute() (*Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		node.key = exprAtom
+		node.Key = exprAtom
 	} else {
 		ident, err := this.parseIdent(this.options.AllowReserved) // questions to be answered: this.parseIdent(this.options.allowReserved !== "never"), we'll figure it out :)
 
 		if err != nil {
 			return nil, err
 		}
-		node.key = ident
+		node.Key = ident
 	}
 	err := this.expect(TOKEN_COLON)
 	if err != nil {
@@ -636,7 +636,7 @@ func (this *Parser) parseImportAttribute() (*Node, error) {
 		return nil, err
 	}
 
-	node.value = exprAtom
+	node.Value = exprAtom
 	return this.finishNode(node, NODE_IMPORT_ATTRIBUTE), nil
 }
 
@@ -646,7 +646,7 @@ func (this *Parser) checkVariableExport(exports map[string]*Node, declarations [
 	}
 
 	for _, decl := range declarations {
-		err := this.checkPatternExport(exports, decl.identifier)
+		err := this.checkPatternExport(exports, decl.Identifier)
 
 		if err != nil {
 			return err
@@ -656,23 +656,23 @@ func (this *Parser) checkVariableExport(exports map[string]*Node, declarations [
 }
 
 func (this *Parser) checkPatternExport(exports map[string]*Node, pat *Node) error {
-	t := pat.type_
+	t := pat.Type
 
 	switch t {
 	case NODE_IDENTIFIER:
 		this.checkExport(exports, struct {
 			s string
 			n *Node
-		}{n: pat}, pat.start)
+		}{n: pat}, pat.Start)
 	case NODE_OBJECT_PATTERN:
-		for _, prop := range pat.properties {
+		for _, prop := range pat.Properties {
 			err := this.checkPatternExport(exports, prop)
 			if err != nil {
 				return err
 			}
 		}
 	case NODE_ARRAY_PATTERN:
-		for _, elt := range pat.elements {
+		for _, elt := range pat.Elements {
 			if elt != nil {
 				err := this.checkPatternExport(exports, elt)
 				if err != nil {
@@ -681,7 +681,7 @@ func (this *Parser) checkPatternExport(exports map[string]*Node, pat *Node) erro
 			}
 		}
 	case NODE_PROPERTY:
-		if val, ok := pat.value.(*Node); ok {
+		if val, ok := pat.Value.(*Node); ok {
 			err := this.checkPatternExport(exports, val)
 			if err != nil {
 				return err
@@ -691,12 +691,12 @@ func (this *Parser) checkPatternExport(exports map[string]*Node, pat *Node) erro
 		}
 	case NODE_ASSIGNMENT_PATTERN:
 
-		err := this.checkPatternExport(exports, pat.left)
+		err := this.checkPatternExport(exports, pat.Left)
 		if err != nil {
 			return err
 		}
 	case NODE_REST_ELEMENT:
-		err := this.checkPatternExport(exports, pat.argument)
+		err := this.checkPatternExport(exports, pat.Argument)
 		if err != nil {
 			return err
 		}
@@ -732,7 +732,7 @@ func (this *Parser) checkExport(exports map[string]*Node, val struct {
 	name := ""
 
 	if len(val.s) == 0 {
-		name = val.n.name
+		name = val.n.Name
 	} else {
 		name = val.s
 	}
@@ -752,14 +752,14 @@ func (this *Parser) parseExportAllDeclaration(node *Node, exports map[string]*No
 				return nil, err
 			}
 
-			node.exported = moduleExportName
+			node.Exported = moduleExportName
 
 			this.checkExport(exports, struct {
 				s string
 				n *Node
-			}{n: node.exported}, this.LastTokStart)
+			}{n: node.Exported}, this.LastTokStart)
 		} else {
-			node.exported = nil
+			node.Exported = nil
 		}
 	}
 	err := this.expectContextual("from")
@@ -775,13 +775,13 @@ func (this *Parser) parseExportAllDeclaration(node *Node, exports map[string]*No
 	if err != nil {
 		return nil, err
 	}
-	node.source = exprAtom
+	node.Source = exprAtom
 	if this.getEcmaVersion() >= 16 {
 		attr, err := this.parseWithClause()
 		if err != nil {
 			return nil, err
 		}
-		node.attributes = attr
+		node.Attributes = attr
 	}
 
 	err = this.semicolon()
@@ -803,19 +803,19 @@ func (this *Parser) parseImport(node *Node) (*Node, error) {
 
 	// import '...'
 	if this.Type.identifier == TOKEN_STRING {
-		node.specifierss = []*Node{}
+		node.Specifiers = []*Node{}
 		exprAtom, err := this.parseExprAtom(nil, "", false)
 		if err != nil {
 			return nil, err
 		}
-		node.source = exprAtom
+		node.Source = exprAtom
 	} else {
 		importSpecifiers, err := this.parseImportSpecifiers()
 		if err != nil {
 			return nil, err
 		}
 
-		node.specifierss = importSpecifiers
+		node.Specifiers = importSpecifiers
 		err = this.expectContextual("from")
 		if err != nil {
 			return nil, err
@@ -825,7 +825,7 @@ func (this *Parser) parseImport(node *Node) (*Node, error) {
 			if err != nil {
 				return nil, err
 			}
-			node.source = exprAtom
+			node.Source = exprAtom
 		} else {
 			return nil, this.unexpected("Expected TOKEN_STRING", nil)
 		}
@@ -835,7 +835,7 @@ func (this *Parser) parseImport(node *Node) (*Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		node.attributes = withClause
+		node.Attributes = withClause
 	}
 	err := this.semicolon()
 	if err != nil {
@@ -898,26 +898,26 @@ func (this *Parser) parseImportSpecifier() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.imported = moduleExportName
+	node.Imported = moduleExportName
 	if this.eatContextual("as") {
 		ident, err := this.parseIdent(false)
 		if err != nil {
 			return nil, err
 		}
-		node.local = ident
+		node.Local = ident
 	} else {
 		err := this.checkUnreserved(struct {
 			start int
 			end   int
 			name  string
-		}{start: node.imported.start, end: node.imported.end, name: node.imported.name})
+		}{start: node.Imported.Start, end: node.Imported.End, name: node.Imported.Name})
 		if err != nil {
 			return nil, err
 		}
 
-		node.local = node.imported
+		node.Local = node.Imported
 	}
-	err = this.checkLValSimple(node.local, BIND_LEXICAL, struct {
+	err = this.checkLValSimple(node.Local, BIND_LEXICAL, struct {
 		check bool
 		hash  map[string]bool
 	}{check: false})
@@ -943,8 +943,8 @@ func (this *Parser) parseImportNamespaceSpecifier() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.local = ident
-	err = this.checkLValSimple(node.local, BIND_LEXICAL, struct {
+	node.Local = ident
+	err = this.checkLValSimple(node.Local, BIND_LEXICAL, struct {
 		check bool
 		hash  map[string]bool
 	}{check: false})
@@ -962,8 +962,8 @@ func (this *Parser) parseImportDefaultSpecifier() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.local = ident
-	err = this.checkLValSimple(node.local, BIND_LEXICAL, struct {
+	node.Local = ident
+	err = this.checkLValSimple(node.Local, BIND_LEXICAL, struct {
 		check bool
 		hash  map[string]bool
 	}{check: false})
@@ -976,7 +976,7 @@ func (this *Parser) parseImportDefaultSpecifier() (*Node, error) {
 }
 
 func (this *Parser) parseExpressionStatement(node *Node, expr *Node) (*Node, error) {
-	node.expression = expr
+	node.Expression = expr
 	err := this.semicolon()
 	if err != nil {
 		return nil, err
@@ -998,9 +998,9 @@ func (this *Parser) parseWithStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.object = parenthesizedExpr
+	node.Object = parenthesizedExpr
 	stmt, err := this.parseStatement("with", false, nil)
-	node.bodyNode = stmt
+	node.BodyNode = stmt
 	return this.finishNode(node, NODE_WITH_STATEMENT), nil
 }
 
@@ -1010,7 +1010,7 @@ func (this *Parser) parseWhileStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.test = parenthesizedExpression
+	node.Test = parenthesizedExpression
 	this.Labels = append(this.Labels, Label{Kind: "loop"})
 
 	stmt, err := this.parseStatement("while", false, nil)
@@ -1018,7 +1018,7 @@ func (this *Parser) parseWhileStatement(node *Node) (*Node, error) {
 		return nil, err
 	}
 
-	node.bodyNode = stmt
+	node.BodyNode = stmt
 	this.Labels = this.Labels[:len(this.Labels)-1]
 
 	return this.finishNode(node, NODE_WHILE_STATEMENT), nil
@@ -1044,8 +1044,8 @@ func (this *Parser) parseTryStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.block = blok
-	node.handler = nil
+	node.Block = blok
+	node.Handler = nil
 	if this.Type.identifier == TOKEN_CATCH {
 		clause := this.startNode()
 		this.next(false)
@@ -1054,12 +1054,12 @@ func (this *Parser) parseTryStatement(node *Node) (*Node, error) {
 			if err != nil {
 				return nil, err
 			}
-			clause.param = catchClauseParam
+			clause.Param = catchClauseParam
 		} else {
 			if this.getEcmaVersion() < 10 {
 				return nil, this.unexpected("Wrong ecma version", nil)
 			}
-			clause.param = nil
+			clause.Param = nil
 			this.enterScope(0)
 		}
 		block, err := this.parseBlock(false, nil, false)
@@ -1067,22 +1067,22 @@ func (this *Parser) parseTryStatement(node *Node) (*Node, error) {
 			return nil, err
 		}
 
-		clause.bodyNode = block
+		clause.BodyNode = block
 		this.exitScope()
-		node.handler = this.finishNode(clause, NODE_CATCH_CLAUSE)
+		node.Handler = this.finishNode(clause, NODE_CATCH_CLAUSE)
 	}
 	if this.eat(TOKEN_FINALLY) {
 		block, err := this.parseBlock(false, nil, false)
 		if err != nil {
 			return nil, err
 		}
-		node.finalizer = block
+		node.Finalizer = block
 	} else {
-		node.finalizer = nil
+		node.Finalizer = nil
 	}
 
-	if node.handler == nil && node.finalizer == nil {
-		return nil, this.raise(node.start, "Missing catch or finally clause")
+	if node.Handler == nil && node.Finalizer == nil {
+		return nil, this.raise(node.Start, "Missing catch or finally clause")
 	}
 
 	return this.finishNode(node, NODE_TRY_STATEMENT), nil
@@ -1094,7 +1094,7 @@ func (this *Parser) parseCatchClauseParam() (*Node, error) {
 		return nil, err
 	}
 
-	simple := param.type_ == NODE_IDENTIFIER
+	simple := param.Type == NODE_IDENTIFIER
 	if simple {
 		this.enterScope(SCOPE_SIMPLE_CATCH)
 	} else {
@@ -1136,7 +1136,7 @@ func (this *Parser) parseThrowStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.argument = expr
+	node.Argument = expr
 	err = this.semicolon()
 	if err != nil {
 		return nil, err
@@ -1151,8 +1151,8 @@ func (this *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.discriminant = expr
-	node.cases = []*Node{}
+	node.Discriminant = expr
+	node.Cases = []*Node{}
 	err = this.expect(TOKEN_BRACEL)
 	if err != nil {
 		return nil, err
@@ -1170,26 +1170,26 @@ func (this *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 		if this.Type.identifier == TOKEN_CASE || this.Type.identifier == TOKEN_DEFAULT {
 			isCase := this.Type.identifier == TOKEN_CASE
 			if cur != nil {
-				return this.finishNode(cur, NODE_SWITCH_CASE), nil
+				this.finishNode(cur, NODE_SWITCH_CASE)
 			}
 			cur = this.startNode()
-			node.cases = append(node.cases, cur)
+			node.Cases = append(node.Cases, cur)
 
-			cur.consequentSlice = []*Node{}
+			cur.ConsequentSlice = []*Node{}
 			this.next(false)
 			if isCase {
 				test, err := this.parseExpression("", nil)
 				if err != nil {
 					return nil, err
 				}
-				cur.test = test
+				cur.Test = test
 
 			} else {
 				if sawDefault {
 					return nil, this.raiseRecoverable(this.LastTokStart, "Multiple default clauses")
 				}
 				sawDefault = true
-				cur.test = nil
+				cur.Test = nil
 			}
 			err = this.expect(TOKEN_COLON)
 			if err != nil {
@@ -1200,18 +1200,17 @@ func (this *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 				return nil, this.unexpected("cur cant be nil", nil)
 			}
 			stmt, err := this.parseStatement("", false, nil)
-
 			if err != nil {
 				return nil, err
 			}
 
-			cur.consequentSlice = append(cur.consequentSlice, stmt)
-
+			cur.ConsequentSlice = append(cur.ConsequentSlice, stmt)
 		}
+		sawDefault = false
 	}
 	this.exitScope()
 	if cur != nil {
-		return this.finishNode(cur, NODE_SWITCH_CASE), nil
+		this.finishNode(cur, NODE_SWITCH_CASE)
 	}
 	this.next(false)
 	this.Labels = this.Labels[:len(this.Labels)-1]
@@ -1230,13 +1229,13 @@ func (this *Parser) parseReturnStatement(node *Node) (*Node, error) {
 	// possibility to insert one.
 
 	if this.eat(TOKEN_SEMI) || this.insertSemicolon() {
-		node.argument = nil
+		node.Argument = nil
 	} else {
 		expr, err := this.parseExpression("", nil)
 		if err != nil {
 			return nil, err
 		}
-		node.argument = expr
+		node.Argument = expr
 		err = this.semicolon()
 		if err != nil {
 			return nil, err
@@ -1294,20 +1293,20 @@ func (this *Parser) parseIfStatement(node *Node) (*Node, error) {
 		return nil, err
 	}
 
-	node.test = test
+	node.Test = test
 	// allow function declarations in branches, but only in non-strict mode
 	statement, err := this.parseStatement("if", false, nil)
 	if err != nil {
 		return nil, err
 	}
-	node.consequent = statement
+	node.Consequent = statement
 
 	if this.eat(TOKEN_ELSE) {
 		alternate, err := this.parseStatement("if", false, nil)
 		if err != nil {
 			return nil, err
 		}
-		node.alternate = alternate
+		node.Alternate = alternate
 	}
 
 	return this.finishNode(node, NODE_IF_STATEMENT), nil
@@ -1391,14 +1390,14 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 
 		this.finishNode(init, NODE_VARIABLE_DECLARATION)
 
-		if (this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) && len(init.declarations) == 1 {
+		if (this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) && len(init.Declarations) == 1 {
 			if this.getEcmaVersion() >= 9 {
 				if this.Type.identifier == TOKEN_IN {
 					if awaitAt > -1 {
 						return nil, this.unexpected("", &awaitAt)
 					}
 				} else {
-					node.await = awaitAt > -1
+					node.Await = awaitAt > -1
 				}
 			}
 			forIn, err := this.parseForIn(node, init)
@@ -1444,16 +1443,16 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 			if this.Type.identifier == TOKEN_IN {
 				return nil, this.unexpected("", &awaitAt)
 			}
-			node.await = true
+			node.Await = true
 		} else if isForOf && this.getEcmaVersion() >= 8 {
-			if init.start == initPos && !containsEsc && init.type_ == NODE_IDENTIFIER && init.name == "async" {
+			if init.Start == initPos && !containsEsc && init.Type == NODE_IDENTIFIER && init.Name == "async" {
 				return nil, this.unexpected("", nil)
 			} else if this.getEcmaVersion() >= 9 {
-				node.await = false
+				node.Await = false
 			}
 		}
 		if startsWithLet && isForOf {
-			return nil, this.raise(init.start, "The left-hand side of a for-of loop may not start with 'let'.")
+			return nil, this.raise(init.Start, "The left-hand side of a for-of loop may not start with 'let'.")
 		}
 		_, err := this.toAssignable(init, false, refDestructuringErrors)
 		if err != nil {
@@ -1494,7 +1493,7 @@ func (this *Parser) parseForStatement(node *Node) (*Node, error) {
 }
 
 func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
-	node.initializer = init
+	node.Initializer = init
 	err := this.expect(TOKEN_SEMI)
 
 	if err != nil {
@@ -1502,7 +1501,7 @@ func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
 	}
 
 	if this.Type.identifier == TOKEN_SEMI {
-		node.test = nil
+		node.Test = nil
 	} else {
 		expr, err := this.parseExpression("", nil)
 
@@ -1510,7 +1509,7 @@ func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
 			return nil, err
 		}
 
-		node.test = expr
+		node.Test = expr
 	}
 
 	err = this.expect(TOKEN_SEMI)
@@ -1520,14 +1519,14 @@ func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
 	}
 
 	if this.Type.identifier == TOKEN_PARENR {
-		node.update = nil
+		node.Update = nil
 	} else {
 		expr, err := this.parseExpression("", nil)
 
 		if err != nil {
 			return nil, err
 		}
-		node.update = expr
+		node.Update = expr
 	}
 
 	err = this.expect(TOKEN_PARENR)
@@ -1540,7 +1539,7 @@ func (this *Parser) parseFor(node *Node, init *Node) (*Node, error) {
 		return nil, err
 	}
 
-	node.bodyNode = stmt
+	node.BodyNode = stmt
 	this.exitScope()
 	this.Labels = this.Labels[:len(this.Labels)-1]
 	return this.finishNode(node, NODE_FOR_STATEMENT), nil
@@ -1550,22 +1549,22 @@ func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 	isForIn := this.Type.identifier == TOKEN_IN
 	this.next(false)
 
-	if init.type_ == NODE_VARIABLE_DECLARATION && init.declarations[0].initializer != nil && (!isForIn || this.getEcmaVersion() < 8 || this.Strict || init.kind != KIND_DECLARATION_VAR || init.declarations[0].identifier.type_ != NODE_IDENTIFIER) {
-		return nil, this.raise(init.start, `for-in or for-of loop variable declaration may not have an initializer`)
+	if init.Type == NODE_VARIABLE_DECLARATION && init.Declarations[0].Initializer != nil && (!isForIn || this.getEcmaVersion() < 8 || this.Strict || init.Kind != KIND_DECLARATION_VAR || init.Declarations[0].Identifier.Type != NODE_IDENTIFIER) {
+		return nil, this.raise(init.Start, `for-in or for-of loop variable declaration may not have an initializer`)
 	}
-	node.left = init
+	node.Left = init
 	if isForIn {
 		expr, err := this.parseExpression("", nil)
 		if err != nil {
 			return nil, err
 		}
-		node.rigth = expr
+		node.Right = expr
 	} else {
 		maybeAssign, err := this.parseMaybeAssign("", nil, nil)
 		if err != nil {
 			return nil, err
 		}
-		node.rigth = maybeAssign
+		node.Right = maybeAssign
 	}
 
 	err := this.expect(TOKEN_PARENR)
@@ -1577,7 +1576,7 @@ func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.bodyNode = stmt
+	node.BodyNode = stmt
 	this.exitScope()
 	this.Labels = this.Labels[:len(this.Labels)-1]
 
@@ -1589,8 +1588,8 @@ func (this *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 }
 
 func (this *Parser) parseVar(node *Node, isFor bool, kind Kind, allowMissingInitializer bool) (*Node, error) {
-	node.declarations = []*Node{}
-	node.kind = kind
+	node.Declarations = []*Node{}
+	node.Kind = kind
 	for {
 		decl := this.startNode()
 		err := this.parseVarId(decl, kind)
@@ -1608,15 +1607,15 @@ func (this *Parser) parseVar(node *Node, isFor bool, kind Kind, allowMissingInit
 			if err != nil {
 				return nil, err
 			}
-			decl.initializer = declInit
+			decl.Initializer = declInit
 		} else if !allowMissingInitializer && kind == KIND_DECLARATION_CONST && !(this.Type.identifier == TOKEN_IN || (this.getEcmaVersion() >= 6 && this.isContextual("of"))) {
 			return nil, this.unexpected("Missing initializer in for..of loop", nil)
-		} else if !allowMissingInitializer && decl.identifier.type_ != NODE_IDENTIFIER && !(isFor && (this.Type.identifier == TOKEN_IN || this.isContextual("of"))) {
+		} else if !allowMissingInitializer && decl.Identifier.Type != NODE_IDENTIFIER && !(isFor && (this.Type.identifier == TOKEN_IN || this.isContextual("of"))) {
 			return nil, this.raise(this.LastTokEnd, "Complex binding patterns require an initialization value")
 		} else {
-			decl.initializer = nil
+			decl.Initializer = nil
 		}
-		node.declarations = append(node.declarations, this.finishNode(decl, NODE_VARIABLE_DECLARATOR))
+		node.Declarations = append(node.Declarations, this.finishNode(decl, NODE_VARIABLE_DECLARATOR))
 		if !this.eat(TOKEN_COMMA) {
 			break
 		}
@@ -1629,9 +1628,9 @@ func (this *Parser) parseVarId(decl *Node, kind Kind) error {
 	if err != nil {
 		return err
 	}
-	decl.identifier = declarationIdentifier
+	decl.Identifier = declarationIdentifier
 	if kind == KIND_DECLARATION_VAR {
-		err := this.checkLValPattern(decl.identifier, BIND_VAR, struct {
+		err := this.checkLValPattern(decl.Identifier, BIND_VAR, struct {
 			check bool
 			hash  map[string]bool
 		}{check: false})
@@ -1640,7 +1639,7 @@ func (this *Parser) parseVarId(decl *Node, kind Kind) error {
 			return err
 		}
 	} else {
-		err := this.checkLValPattern(decl.identifier, BIND_LEXICAL, struct {
+		err := this.checkLValPattern(decl.Identifier, BIND_LEXICAL, struct {
 			check bool
 			hash  map[string]bool
 		}{check: false})
@@ -1667,7 +1666,7 @@ func (this *Parser) parseDoStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.bodyNode = doStatement
+	node.BodyNode = doStatement
 	this.Labels = this.Labels[:len(this.Labels)-1]
 	err = this.expect(TOKEN_WHILE)
 
@@ -1681,7 +1680,7 @@ func (this *Parser) parseDoStatement(node *Node) (*Node, error) {
 		return nil, err
 	}
 
-	node.test = testParenExpression
+	node.Test = testParenExpression
 
 	if this.getEcmaVersion() >= 6 {
 		this.eat(TOKEN_SEMI)
@@ -1708,7 +1707,7 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 	isBreak := keyword == "break"
 	this.next(false)
 	if this.eat(TOKEN_SEMI) || this.insertSemicolon() {
-		node.label = nil
+		node.Label = nil
 	} else if this.Type.identifier != TOKEN_NAME {
 		return nil, this.unexpected("", nil)
 	} else {
@@ -1717,7 +1716,7 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 		if err != nil {
 			return nil, err
 		}
-		node.label = ident
+		node.Label = ident
 		err = this.semicolon()
 		if err != nil {
 			return nil, err
@@ -1729,18 +1728,18 @@ func (this *Parser) parseBreakContinueStatement(node *Node, keyword string) (*No
 	i := 0
 	for i < len(this.Labels) {
 		lab := this.Labels[i]
-		if node.label == nil || lab.Name == node.label.name {
+		if node.Label == nil || lab.Name == node.Label.Name {
 			if len(lab.Kind) != 0 && isBreak || lab.Kind == "loop" {
 				break
 			}
-			if node.label != nil && isBreak {
+			if node.Label != nil && isBreak {
 				break
 			}
 		}
 	}
 
 	if i == len(this.Labels) {
-		return nil, this.raise(node.start, "Unsyntactic "+keyword)
+		return nil, this.raise(node.Start, "Unsyntactic "+keyword)
 	}
 
 	if isBreak {
@@ -1754,7 +1753,7 @@ func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStric
 	if node == nil {
 		node = this.startNode()
 	}
-	node.body = []*Node{}
+	node.Body = []*Node{}
 	err := this.expect(TOKEN_BRACEL)
 	if err != nil {
 		return nil, err
@@ -1767,7 +1766,7 @@ func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStric
 		if err != nil {
 			return nil, err
 		}
-		node.body = append(node.body, stmt)
+		node.Body = append(node.Body, stmt)
 	}
 	if exitStrict {
 		this.Strict = false
@@ -1782,7 +1781,7 @@ func (this *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStric
 
 func (this *Parser) adaptDirectivePrologue(statements []*Node) {
 	for i := 0; i < len(statements) && this.isDirectiveCandidate(statements[i]); {
-		statements[i].directive = statements[i].expression.raw[1 : len(statements[i].expression.raw)-2]
+		statements[i].Directive = statements[i].Expression.Raw[1 : len(statements[i].Expression.Raw)-2]
 		i++
 	}
 }
@@ -1790,11 +1789,11 @@ func (this *Parser) adaptDirectivePrologue(statements []*Node) {
 func (this *Parser) isDirectiveCandidate(statement *Node) bool {
 	literalAndString := false
 
-	if statement.expression != nil && statement.expression.type_ == NODE_LITERAL {
-		_, ok := statement.expression.value.(string)
+	if statement.Expression != nil && statement.Expression.Type == NODE_LITERAL {
+		_, ok := statement.Expression.Value.(string)
 		literalAndString = ok
 	}
-	return this.getEcmaVersion() >= 5 && statement.type_ == NODE_EXPRESSION_STATEMENT && literalAndString && /* Reject parenthesized strings.*/ (this.input[statement.start] == '"' || this.input[statement.start] == '\'')
+	return this.getEcmaVersion() >= 5 && statement.Type == NODE_EXPRESSION_STATEMENT && literalAndString && /* Reject parenthesized strings.*/ (this.input[statement.Start] == '"' || this.input[statement.Start] == '\'')
 }
 
 func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBody bool, isAsync bool, forInit string) (*Node, error) {
@@ -1804,33 +1803,33 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 			return nil, this.unexpected("Token was star and FUNC_HANGING_STATEMENT flag was set", nil)
 		}
 
-		node.isGenerator = this.eat(TOKEN_STAR)
+		node.IsGenerator = this.eat(TOKEN_STAR)
 	}
 	if this.getEcmaVersion() >= 8 {
-		node.isAsync = isAsync
+		node.IsAsync = isAsync
 	}
 
 	if statement&FUNC_STATEMENT == FUNC_STATEMENT {
 
 		if statement&FUNC_NULLABLE_ID == FUNC_NULLABLE_ID && this.Type.identifier != TOKEN_NAME {
-			node.identifier = nil
+			node.Identifier = nil
 		} else {
 			identifier, err := this.parseIdent(false)
 			if err != nil {
 				return nil, err
 			}
-			node.identifier = identifier
+			node.Identifier = identifier
 		}
 	}
-	if node.identifier != nil && !(statement&FUNC_HANGING_STATEMENT == FUNC_HANGING_STATEMENT) {
+	if node.Identifier != nil && !(statement&FUNC_HANGING_STATEMENT == FUNC_HANGING_STATEMENT) {
 		// If it is a regular function declaration in sloppy mode, then it is
 		// subject to Annex B semantics (BIND_FUNCTION). Otherwise, the binding
 		// mode depends on properties of the current scope (see
 		// treatFunctionsAsVar).
 
-		if this.Strict || node.isGenerator || node.isAsync {
+		if this.Strict || node.IsGenerator || node.IsAsync {
 			if this.treatFunctionsAsVar() {
-				err := this.checkLValSimple(node.identifier, BIND_VAR, struct {
+				err := this.checkLValSimple(node.Identifier, BIND_VAR, struct {
 					check bool
 					hash  map[string]bool
 				}{check: false})
@@ -1838,7 +1837,7 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 					return nil, err
 				}
 			} else {
-				err := this.checkLValSimple(node.identifier, BIND_LEXICAL, struct {
+				err := this.checkLValSimple(node.Identifier, BIND_LEXICAL, struct {
 					check bool
 					hash  map[string]bool
 				}{check: false})
@@ -1846,7 +1845,7 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 					return nil, err
 				}
 			}
-			err := this.checkLValSimple(node.identifier, BIND_FUNCTION, struct {
+			err := this.checkLValSimple(node.Identifier, BIND_FUNCTION, struct {
 				check bool
 				hash  map[string]bool
 			}{check: false})
@@ -1860,7 +1859,7 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 	this.YieldPos = 0
 	this.AwaitPos = 0
 	this.AwaitIdentPos = 0
-	this.enterScope(functionFlags(node.isAsync, node.isGenerator))
+	this.enterScope(functionFlags(node.IsAsync, node.IsGenerator))
 
 	if statement&FUNC_STATEMENT != FUNC_STATEMENT {
 		if this.Type.identifier == TOKEN_NAME {
@@ -1868,9 +1867,9 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 			if err != nil {
 				return nil, err
 			}
-			node.identifier = ident
+			node.Identifier = ident
 		} else {
-			node.identifier = nil
+			node.Identifier = nil
 		}
 	}
 
@@ -1905,7 +1904,7 @@ func (this *Parser) parseFunctionParams(node *Node) error {
 		return err
 	}
 
-	node.params = bindingList
+	node.Params = bindingList
 	err = this.checkYieldAwaitInDefaultParams()
 	if err != nil {
 		return err
@@ -1935,31 +1934,31 @@ func (this *Parser) parseClass(node *Node, isStatement bool) (*Node, error) {
 	}
 	classBody := this.startNode()
 	hadConstructor := false
-	classBody.body = []*Node{}
+	classBody.Body = []*Node{}
 	err = this.expect(TOKEN_BRACEL)
 	if err != nil {
 		return nil, err
 	}
 	for this.Type.identifier != TOKEN_BRACER {
-		element, err := this.parseClassElement(node.superClass != nil)
+		element, err := this.parseClassElement(node.SuperClass != nil)
 		if err != nil {
 			return nil, err
 		}
 		if element != nil {
-			classBody.body = append(classBody.body, element)
-			if element.type_ == NODE_METHOD_DEFINITION && element.kind == KIND_CONSTRUCTOR {
+			classBody.Body = append(classBody.Body, element)
+			if element.Type == NODE_METHOD_DEFINITION && element.Kind == KIND_CONSTRUCTOR {
 				if hadConstructor {
-					return nil, this.raiseRecoverable(element.start, "Duplicate constructor in the same class")
+					return nil, this.raiseRecoverable(element.Start, "Duplicate constructor in the same class")
 				}
 				hadConstructor = true
-			} else if element.key != nil && element.key.type_ == NODE_PRIVATE_IDENTIFIER && isPrivateNameConflicted(privateNameMap, element) {
-				return nil, this.raiseRecoverable(element.key.start, "Identifier #"+element.key.name+"has already been declared")
+			} else if element.Key != nil && element.Key.Type == NODE_PRIVATE_IDENTIFIER && isPrivateNameConflicted(privateNameMap, element) {
+				return nil, this.raiseRecoverable(element.Key.Start, "Identifier #"+element.Key.Name+"has already been declared")
 			}
 		}
 	}
 	this.Strict = oldStrict
 	this.next(false)
-	node.bodyNode = this.finishNode(classBody, NODE_CLASS_BODY)
+	node.BodyNode = this.finishNode(classBody, NODE_CLASS_BODY)
 	err = this.exitClassBody()
 
 	if err != nil {
@@ -1988,11 +1987,11 @@ func (this *Parser) exitClassBody() error {
 	}
 
 	for _, id := range privateNameTop.Used {
-		if _, found := privateNameTop.Declared[id.name]; !found {
+		if _, found := privateNameTop.Declared[id.Name]; !found {
 			if parent != nil {
 				parent.Used = append(parent.Used, id)
 			} else {
-				return this.raiseRecoverable(id.start, "Private field #"+id.name+" must be declared in an enclosing class")
+				return this.raiseRecoverable(id.Start, "Private field #"+id.Name+" must be declared in an enclosing class")
 			}
 		}
 	}
@@ -2000,15 +1999,15 @@ func (this *Parser) exitClassBody() error {
 }
 
 func isPrivateNameConflicted(privateNameMap map[string]string, element *Node) bool {
-	name := element.key.name
+	name := element.Key.Name
 	curr := privateNameMap[name]
 
 	next := "true"
-	if element.type_ == NODE_METHOD_DEFINITION && (element.kind == KIND_PROPERTY_GET || element.kind == KIND_PROPERTY_SET) {
-		if element.isStatic {
-			next = "s" + kindStringMap[element.kind]
+	if element.Type == NODE_METHOD_DEFINITION && (element.Kind == KIND_PROPERTY_GET || element.Kind == KIND_PROPERTY_SET) {
+		if element.IsStatic {
+			next = "s" + kindToString[element.Kind]
 		} else {
-			next = "i" + kindStringMap[element.kind]
+			next = "i" + kindToString[element.Kind]
 		}
 	}
 
@@ -2048,7 +2047,7 @@ func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error
 			keyName = "static"
 		}
 	}
-	node.isStatic = isStatic
+	node.IsStatic = isStatic
 
 	if len(keyName) == 0 && ecmaVersion >= 8 && this.eatContextual("async") {
 		if (this.isClassElementNameStart() || this.Type.identifier == TOKEN_STAR) && !this.canInsertSemicolon() {
@@ -2085,10 +2084,10 @@ func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error
 	if len(keyName) != 0 {
 		// 'async', 'get', 'set', or 'static' were not a keyword contextually.
 		// The last token is any of those. Make it the element name.
-		node.computed = false
-		node.key = this.startNodeAt(this.LastTokStart, this.LastTokStartLoc)
-		node.key.name = keyName
-		this.finishNode(node.key, NODE_IDENTIFIER)
+		node.Computed = false
+		node.Key = this.startNodeAt(this.LastTokStart, this.LastTokStartLoc)
+		node.Key.Name = keyName
+		this.finishNode(node.Key, NODE_IDENTIFIER)
 	} else {
 		err := this.parseClassElementName(node)
 		if err != nil {
@@ -2097,17 +2096,17 @@ func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error
 	}
 	// Parse element value
 	if ecmaVersion < 13 || this.Type.identifier == TOKEN_PARENL || kind != KIND_PROPERTY_METHOD || isGenerator || isAsync {
-		isConstructor := !node.isStatic && checkKeyName(node, "constructor")
+		isConstructor := !node.IsStatic && checkKeyName(node, "constructor")
 		allowsDirectSuper := isConstructor && constructorAllowsSuper
 		// Couldn't move this check into the 'parseClassMethod' method for backward compatibility.
 		if isConstructor && kind != KIND_PROPERTY_METHOD {
-			return nil, this.raise(node.key.start, "Constructor can't have get/set modifier")
+			return nil, this.raise(node.Key.Start, "Constructor can't have get/set modifier")
 		}
 
 		if isConstructor {
-			node.kind = KIND_CONSTRUCTOR
+			node.Kind = KIND_CONSTRUCTOR
 		} else {
-			node.kind = kind
+			node.Kind = kind
 		}
 		_, err := this.parseClassMethod(node, isGenerator, isAsync, allowsDirectSuper)
 		if err != nil {
@@ -2124,7 +2123,7 @@ func (this *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error
 }
 
 func (this *Parser) parseClassStaticBlock(node *Node) (*Node, error) {
-	node.body = []*Node{}
+	node.Body = []*Node{}
 
 	oldLabels := this.Labels
 	this.Labels = []Label{}
@@ -2134,7 +2133,7 @@ func (this *Parser) parseClassStaticBlock(node *Node) (*Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		node.body = append(node.body, stmt)
+		node.Body = append(node.Body, stmt)
 	}
 	this.next(false)
 	this.exitScope()
@@ -2145,9 +2144,9 @@ func (this *Parser) parseClassStaticBlock(node *Node) (*Node, error) {
 
 func (this *Parser) parseClassField(field *Node) (*Node, error) {
 	if checkKeyName(field, "constructor") {
-		return nil, this.raise(field.key.start, "Classes can't have a field named 'constructor'")
-	} else if field.isStatic && checkKeyName(field, "prototype") {
-		return nil, this.raise(field.key.start, "Classes can't have a static field named 'prototype'")
+		return nil, this.raise(field.Key.Start, "Classes can't have a field named 'constructor'")
+	} else if field.IsStatic && checkKeyName(field, "prototype") {
+		return nil, this.raise(field.Key.Start, "Classes can't have a static field named 'prototype'")
 	}
 
 	if this.eat(TOKEN_EQ) {
@@ -2157,10 +2156,10 @@ func (this *Parser) parseClassField(field *Node) (*Node, error) {
 		if err != nil {
 			return nil, err
 		}
-		field.value = maybeAssign
+		field.Value = maybeAssign
 		this.exitScope()
 	} else {
-		field.value = nil
+		field.Value = nil
 	}
 	this.semicolon()
 
@@ -2169,16 +2168,16 @@ func (this *Parser) parseClassField(field *Node) (*Node, error) {
 
 func (this *Parser) parseClassMethod(method *Node, isGenerator bool, isAsync bool, allowsDirectSuper bool) (*Node, error) {
 	// Check key and flags
-	key := method.key
-	if method.kind == KIND_CONSTRUCTOR {
+	key := method.Key
+	if method.Kind == KIND_CONSTRUCTOR {
 		if isGenerator {
-			return nil, this.raise(key.start, "Constructor can't be a generator")
+			return nil, this.raise(key.Start, "Constructor can't be a generator")
 		}
 		if isAsync {
-			return nil, this.raise(key.start, "Constructor can't be an async method")
+			return nil, this.raise(key.Start, "Constructor can't be an async method")
 		}
-	} else if method.isStatic && checkKeyName(method, "prototype") {
-		return nil, this.raise(key.start, "Classes may not have a static property named prototype")
+	} else if method.IsStatic && checkKeyName(method, "prototype") {
+		return nil, this.raise(key.Start, "Classes may not have a static property named prototype")
 	}
 
 	// Parse value
@@ -2186,27 +2185,27 @@ func (this *Parser) parseClassMethod(method *Node, isGenerator bool, isAsync boo
 	if err != nil {
 		return nil, err
 	}
-	method.value = value
+	method.Value = value
 
 	// Check value
-	if method.kind == KIND_PROPERTY_GET && len(value.params) != 0 {
-		return nil, this.raiseRecoverable(value.start, "getter should have no params")
+	if method.Kind == KIND_PROPERTY_GET && len(value.Params) != 0 {
+		return nil, this.raiseRecoverable(value.Start, "getter should have no params")
 	}
 
-	if method.kind == KIND_PROPERTY_SET && len(value.params) != 1 {
-		return nil, this.raiseRecoverable(value.start, "setter should have exactly one param")
+	if method.Kind == KIND_PROPERTY_SET && len(value.Params) != 1 {
+		return nil, this.raiseRecoverable(value.Start, "setter should have exactly one param")
 	}
 
-	if method.kind == KIND_PROPERTY_SET && value.params[0].type_ == NODE_REST_ELEMENT {
-		return nil, this.raiseRecoverable(value.params[0].start, "Setter cannot use rest params")
+	if method.Kind == KIND_PROPERTY_SET && value.Params[0].Type == NODE_REST_ELEMENT {
+		return nil, this.raiseRecoverable(value.Params[0].Start, "Setter cannot use rest params")
 	}
 
 	return this.finishNode(method, NODE_METHOD_DEFINITION), nil
 }
 
 func checkKeyName(node *Node, name string) bool {
-	computed, key := node.computed, node.key
-	return !computed && (key.type_ == NODE_IDENTIFIER && key.name == name || key.type_ == NODE_LITERAL && key.value == name)
+	computed, key := node.Computed, node.Key
+	return !computed && (key.Type == NODE_IDENTIFIER && key.Name == name || key.Type == NODE_LITERAL && key.Value == name)
 }
 
 func (this *Parser) parseClassElementName(element *Node) error {
@@ -2214,12 +2213,12 @@ func (this *Parser) parseClassElementName(element *Node) error {
 		if val, ok := this.Value.(string); ok && val == "constructor" {
 			return this.raise(this.start, "Classes can't have an element named '#constructor'")
 		}
-		element.computed = false
+		element.Computed = false
 		privateId, err := this.parsePrivateIdent()
 		if err != nil {
 			return err
 		}
-		element.key = privateId
+		element.Key = privateId
 	} else {
 		_, err := this.parsePropertyName(element)
 		if err != nil {
@@ -2247,9 +2246,9 @@ func (this *Parser) parseClassSuper(node *Node) error {
 		if err != nil {
 			return err
 		}
-		node.superClass = expr
+		node.SuperClass = expr
 	} else {
-		node.superClass = nil
+		node.SuperClass = nil
 	}
 	return nil
 }
@@ -2261,9 +2260,9 @@ func (this *Parser) parseClassId(node *Node, isStatement bool) error {
 		if err != nil {
 			return err
 		}
-		node.identifier = id
+		node.Identifier = id
 		if isStatement {
-			err := this.checkLValSimple(node.identifier, BIND_LEXICAL, struct {
+			err := this.checkLValSimple(node.Identifier, BIND_LEXICAL, struct {
 				check bool
 				hash  map[string]bool
 			}{check: false})
@@ -2275,7 +2274,7 @@ func (this *Parser) parseClassId(node *Node, isStatement bool) error {
 				return this.unexpected("cant be in a statement", nil)
 			}
 
-			node.identifier = nil
+			node.Identifier = nil
 		}
 		return nil
 	}
