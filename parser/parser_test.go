@@ -2301,3 +2301,312 @@ func TestDeviousFunctionDeclarationCallAdd(t *testing.T) {
 		t.Errorf("Nodes are not equal.")
 	}
 }
+
+func TestDesctructuringArrayFunctionParams(t *testing.T) {
+	input := getTestInput("21")
+	expected := &Node{
+		Type:       NODE_PROGRAM,
+		Start:      0,
+		End:        30,
+		SourceType: TYPE_SCRIPT,
+		Body: []*Node{
+			{
+				Type:  NODE_EXPRESSION_STATEMENT,
+				Start: 0,
+				End:   30,
+				Expression: &Node{
+					Type:         NODE_ARROW_FUNCTION_EXPRESSION,
+					Start:        0,
+					End:          30,
+					Identifier:   nil,
+					IsExpression: true,
+					IsGenerator:  false,
+					IsAsync:      false,
+					Params: []*Node{
+						{
+							Type:  NODE_ASSIGNMENT_PATTERN,
+							Start: 1,
+							End:   20,
+							Left: &Node{
+								Type:  NODE_OBJECT_PATTERN,
+								Start: 1,
+								End:   11,
+								Properties: []*Node{
+									{
+										Type:      NODE_PROPERTY,
+										Start:     3,
+										End:       9,
+										IsMethod:  false,
+										Shorthand: false,
+										Computed:  true,
+										Key: &Node{
+											Type:  NODE_IDENTIFIER,
+											Start: 4,
+											End:   5,
+											Name:  "a",
+										},
+										Value: &Node{
+											Type:  NODE_IDENTIFIER,
+											Start: 8,
+											End:   9,
+											Name:  "b",
+										},
+										Kind: KIND_PROPERTY_INIT,
+									},
+								},
+							},
+							Right: &Node{
+								Type:  NODE_ARRAY_EXPRESSION,
+								Start: 14,
+								End:   20,
+								Elements: []*Node{
+									{
+										Type:  NODE_LITERAL,
+										Start: 15,
+										End:   16,
+										Value: 1,
+										Raw:   "1",
+									},
+									{
+										Type:  NODE_LITERAL,
+										Start: 18,
+										End:   19,
+										Value: 2,
+										Raw:   "2",
+									},
+								},
+							},
+						},
+					},
+					BodyNode: &Node{
+						Type:           NODE_BINARY_EXPRESSION,
+						Start:          25,
+						End:            30,
+						BinaryOperator: "+",
+						Left: &Node{
+							Type:  NODE_IDENTIFIER,
+							Start: 25,
+							End:   26,
+							Name:  "a",
+						},
+						Right: &Node{
+							Type:  NODE_IDENTIFIER,
+							Start: 29,
+							End:   30,
+							Name:  "b",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	actual, err := GetAst(input, nil, 0)
+
+	if err != nil {
+		t.Errorf("Failed to get AST: %s", err.Error())
+	}
+
+	if !areNodesEqual(actual, expected) {
+		t.Errorf("Nodes are not equal.")
+	}
+}
+
+func TestRestParameter(t *testing.T) {
+	input := getTestInput("22")
+	expected := &Node{
+		Type:       NODE_PROGRAM,
+		Start:      0,
+		End:        44,
+		SourceType: TYPE_SCRIPT,
+		Body: []*Node{
+			{
+				Type:  NODE_VARIABLE_DECLARATION,
+				Start: 0,
+				End:   44,
+				Kind:  KIND_DECLARATION_CONST,
+				Declarations: []*Node{
+					{
+						Type:  NODE_VARIABLE_DECLARATOR,
+						Start: 6,
+						End:   43,
+						Identifier: &Node{
+							Type:  NODE_OBJECT_PATTERN,
+							Start: 6,
+							End:   20,
+							Properties: []*Node{
+								{
+									Type:      NODE_PROPERTY,
+									Start:     8,
+									End:       9,
+									IsMethod:  false,
+									Shorthand: true,
+									Computed:  false,
+									Key: &Node{
+										Type:  NODE_IDENTIFIER,
+										Start: 8,
+										End:   9,
+										Name:  "a",
+									},
+									Value: &Node{
+										Type:  NODE_IDENTIFIER,
+										Start: 8,
+										End:   9,
+										Name:  "a",
+									},
+									Kind: KIND_PROPERTY_INIT,
+								},
+								{
+									Type:  NODE_REST_ELEMENT,
+									Start: 11,
+									End:   18,
+									Argument: &Node{
+										Type:  NODE_IDENTIFIER,
+										Start: 14,
+										End:   18,
+										Name:  "rest",
+									},
+								},
+							},
+						},
+						Initializer: &Node{
+							Type:  NODE_OBJECT_EXPRESSION,
+							Start: 23,
+							End:   43,
+							Properties: []*Node{
+								{
+									Type:      NODE_PROPERTY,
+									Start:     25,
+									End:       29,
+									IsMethod:  false,
+									Shorthand: false,
+									Computed:  false,
+									Key: &Node{
+										Type:  NODE_IDENTIFIER,
+										Start: 25,
+										End:   26,
+										Name:  "a",
+									},
+									Value: &Node{
+										Type:  NODE_LITERAL,
+										Start: 28,
+										End:   29,
+										Value: 1,
+										Raw:   "1",
+									},
+									Kind: KIND_PROPERTY_INIT,
+								},
+								{
+									Type:      NODE_PROPERTY,
+									Start:     31,
+									End:       35,
+									IsMethod:  false,
+									Shorthand: false,
+									Computed:  false,
+									Key: &Node{
+										Type:  NODE_IDENTIFIER,
+										Start: 31,
+										End:   32,
+										Name:  "b",
+									},
+									Value: &Node{
+										Type:  NODE_LITERAL,
+										Start: 34,
+										End:   35,
+										Value: 2,
+										Raw:   "2",
+									},
+									Kind: KIND_PROPERTY_INIT,
+								},
+								{
+									Type:      NODE_PROPERTY,
+									Start:     37,
+									End:       41,
+									IsMethod:  false,
+									Shorthand: false,
+									Computed:  false,
+									Key: &Node{
+										Type:  NODE_IDENTIFIER,
+										Start: 37,
+										End:   38,
+										Name:  "c",
+									},
+									Value: &Node{
+										Type:  NODE_LITERAL,
+										Start: 40,
+										End:   41,
+										Value: 3,
+										Raw:   "3",
+									},
+									Kind: KIND_PROPERTY_INIT,
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	actual, err := GetAst(input, nil, 0)
+
+	if err != nil {
+		t.Errorf("Failed to get AST: %s", err.Error())
+	}
+
+	if !areNodesEqual(actual, expected) {
+		t.Errorf("Nodes are not equal.")
+	}
+}
+
+func TestUnexpectedKeyword1(t *testing.T) {
+	input := getTestInput("fail_1")
+	_, err := GetAst(input, nil, 0)
+
+	if err == nil {
+		t.Error("Expected parser to return error")
+	}
+
+	if err.Error() != "The keyword yield is reserved (1:29)" {
+		t.Errorf("Expected: `The keyword yield is reserved (1:29)` Got: %s", err.Error())
+	}
+}
+
+func TestUnexpectedKeyword2(t *testing.T) {
+	input := getTestInput("fail_2")
+	_, err := GetAst(input, nil, 0)
+
+	if err == nil {
+		t.Error("Expected parser to return error")
+	}
+	println(err.Error())
+	if err.Error() != "Unexpected token: Unexpected token (1:33)" {
+		t.Errorf("Expected: `Unexpected token: Unexpected token (1:33)` Got: %s", err.Error())
+	}
+}
+
+func TestUnexpectedKeyword3(t *testing.T) {
+	input := getTestInput("fail_3")
+	_, err := GetAst(input, nil, 0)
+
+	if err == nil {
+		t.Error("Expected parser to return error")
+	}
+
+	if err.Error() != "Unexpected token: Unexpected token (1:30)" {
+		t.Errorf("Expected: `Unexpected token: Unexpected token (1:30)` Got: %s", err.Error())
+	}
+}
+
+func TestUnexpectedKeyword4(t *testing.T) {
+	input := getTestInput("fail_4")
+	_, err := GetAst(input, nil, 0)
+
+	if err == nil {
+		t.Error("Expected parser to return error")
+	}
+
+	if err.Error() != "Assignin to rvalue (1:0)" {
+		t.Errorf("Expected: `Assignin to rvalue (1:0)` Got: %s", err.Error())
+	}
+}

@@ -78,7 +78,7 @@ func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 		}
 	}
 	reserved := ""
-	if options.AllowReserved == ALLOW_RESERVED_TRUE {
+	if options.AllowReserved != ALLOW_RESERVED_TRUE {
 		if this.getEcmaVersion() >= 6 {
 			reserved = reservedWords["6"]
 		} else if this.getEcmaVersion() == 5 {
@@ -90,6 +90,7 @@ func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 			reserved += " await"
 		}
 	}
+
 	this.ReservedWords = WordsRegexp(reserved)
 	reservedStrict := reservedWords["strict"]
 

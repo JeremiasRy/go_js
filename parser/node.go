@@ -431,7 +431,7 @@ func (this *Parser) copyNode(node *Node) (*Node, error) {
 		return nil, err
 	}
 	var copyNode Node
-	err = json.Unmarshal(data, copyNode)
+	err = json.Unmarshal(data, &copyNode)
 	if err != nil {
 		return nil, err
 	}

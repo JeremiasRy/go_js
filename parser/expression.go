@@ -1060,8 +1060,8 @@ func (this *Parser) checkUnreserved(opts struct {
 		return nil
 	}
 	var re *regexp.Regexp
-
 	if this.Strict {
+
 		re = this.ReservedWordsStrict
 	} else {
 		re = this.ReservedWords
