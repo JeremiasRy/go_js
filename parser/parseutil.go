@@ -86,7 +86,6 @@ func (this *Parser) checkPatternErrors(refDestructuringErrors *DestructuringErro
 	} else {
 		parens = refDestructuringErrors.parenthesizedBind
 	}
-
 	if parens > -1 {
 		var msg string
 		if isAssign {

@@ -614,7 +614,7 @@ func (this *Parser) parseImportAttribute() (*Node, error) {
 		}
 		node.Key = exprAtom
 	} else {
-		ident, err := this.parseIdent(this.options.AllowReserved) // questions to be answered: this.parseIdent(this.options.allowReserved !== "never"), we'll figure it out :)
+		ident, err := this.parseIdent(this.options.AllowReserved != ALLOW_RESERVED_NEVER)
 
 		if err != nil {
 			return nil, err

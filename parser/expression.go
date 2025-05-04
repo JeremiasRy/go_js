@@ -332,13 +332,13 @@ func (this *Parser) parseSubscript(base *Node, startPos int, startLoc *Location,
 			}
 			node.Property = privIdent
 		} else {
-			ident, err := this.parseIdent(this.options.AllowReserved)
+			ident, err := this.parseIdent(this.options.AllowReserved != ALLOW_RESERVED_NEVER)
 			if err != nil {
 				return nil, err
 			}
 			node.Property = ident
 		}
-		node.Computed = !computed
+		node.Computed = computed
 		if optionalSupported {
 			node.Optional = optional
 		}
@@ -802,6 +802,7 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 
 	case TOKEN_NAME:
 		startPos, startLoc, containsEsc := this.start, this.startLoc, this.ContainsEsc
+
 		id, err := this.parseIdent(false)
 		if err != nil {
 			return nil, err
@@ -1904,7 +1905,7 @@ func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
 		prop.Key = exprAtom
 		return prop.Key, nil
 	} else {
-		ident, err := this.parseIdent(this.options.AllowReserved)
+		ident, err := this.parseIdent(this.options.AllowReserved != ALLOW_RESERVED_NEVER)
 		if err != nil {
 			return nil, err
 		}

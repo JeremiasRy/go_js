@@ -162,6 +162,10 @@ const (
 )
 
 func (k *Kind) MarshalJSON() ([]byte, error) {
+	if *k == KIND_NOT_INITIALIZED {
+		return json.Marshal("null")
+	}
+
 	name, ok := kindToString[*k]
 
 	if !ok {
@@ -272,9 +276,9 @@ type Node struct {
 	Range              [2]int             `json:"range"`
 	Location           *SourceLocation    `json:"location,omitempty"`
 	SourceFile         *string            `json:"sourceFile,omitempty"`
-	Name               string             `json:"name"`
-	Value              any                `json:"value"`
-	Raw                string             `json:"raw"`
+	Name               string             `json:"name,omitempty"`
+	Value              any                `json:"value,omitempty"`
+	Raw                string             `json:"raw,omitempty"`
 	Regex              *Regex             `json:"regex,omitempty"`
 	Bigint             string             `json:"bigint,omitempty"`
 	Body               []*Node            `json:"body,omitempty"`
@@ -282,12 +286,12 @@ type Node struct {
 	SourceType         SourceType         `json:"sourceType,omitempty"`
 	Identifier         *Node              `json:"identifier,omitempty"`
 	Params             []*Node            `json:"params,omitempty"`
-	IsGenerator        bool               `json:"isGenerator"`
-	IsExpression       bool               `json:"isExpression"`
-	IsAsync            bool               `json:"isAsync"`
+	IsGenerator        bool               `json:"isGenerator,omitempty"`
+	IsExpression       bool               `json:"isExpression,omitempty"`
+	IsAsync            bool               `json:"isAsync,omitempty"`
 	Expression         *Node              `json:"expression,omitempty"`
 	Directive          string             `json:"directive,omitempty"`
-	Delegate           bool               `json:"delegate"`
+	Delegate           bool               `json:"delegate,omitempty"`
 	Object             *Node              `json:"object,omitempty"`
 	Argument           *Node              `json:"argument,omitempty"`
 	Label              *Node              `json:"label,omitempty"`
@@ -304,15 +308,15 @@ type Node struct {
 	Initializer        *Node              `json:"initializer,omitempty"`
 	Update             *Node              `json:"update,omitempty"`
 	Declarations       []*Node            `json:"declarations,omitempty"`
-	Kind               Kind               `json:"kind"`
+	Kind               Kind               `json:"kind,omitempty"`
 	Elements           []*Node            `json:"elements,omitempty"`
 	Properties         []*Node            `json:"properties,omitempty"`
 	Key                *Node              `json:"key,omitempty"`
-	IsMethod           bool               `json:"isMethod"`
-	Shorthand          bool               `json:"shorthand"`
-	Computed           bool               `json:"computed"`
+	IsMethod           bool               `json:"isMethod,omitempty"`
+	Shorthand          bool               `json:"shorthand,omitempty"`
+	Computed           bool               `json:"computed,omitempty"`
 	UnaryOperator      UnaryOperator      `json:"unaryOperator,omitempty"`
-	Prefix             bool               `json:"prefix"`
+	Prefix             bool               `json:"prefix,omitempty"`
 	UpdateOperator     UpdateOperator     `json:"updateOperator,omitempty"`
 	BinaryOperator     BinaryOperator     `json:"binaryOperator,omitempty"`
 	Left               *Node              `json:"left,omitempty"`
@@ -320,19 +324,19 @@ type Node struct {
 	AssignmentOperator AssignmentOperator `json:"assignmentOperator,omitempty"`
 	LogicalOperator    LogicalOperator    `json:"logicalOperator,omitempty"`
 	MemberProperty     *Node              `json:"memberProperty,omitempty"`
-	Optional           bool               `json:"optional"`
+	Optional           bool               `json:"optional,omitempty"`
 	Callee             *Node              `json:"callee,omitempty"`
 	Arguments          []*Node            `json:"arguments,omitempty"`
 	Expressions        []*Node            `json:"expressions,omitempty"`
-	Await              bool               `json:"await"`
-	IsDelegate         bool               `json:"isDelegate"`
+	Await              bool               `json:"await,omitempty"`
+	IsDelegate         bool               `json:"isDelegate,omitempty"`
 	Quasis             []*Node            `json:"quasis,omitempty"`
 	Quasi              *Node              `json:"quasi,omitempty"`
 	Tag                *Node              `json:"tag,omitempty"`
-	Tail               bool               `json:"tail"`
+	Tail               bool               `json:"tail,omitempty"`
 	TmplValue          *TemplateValue     `json:"tmplValue,omitempty"`
 	SuperClass         *Node              `json:"superClass,omitempty"`
-	IsStatic           bool               `json:"isStatic"`
+	IsStatic           bool               `json:"isStatic,omitempty"`
 	Meta               *Node              `json:"meta,omitempty"`
 	Property           *Node              `json:"property,omitempty"`
 	Specifiers         []*Node            `json:"specifiers,omitempty"`
@@ -343,6 +347,26 @@ type Node struct {
 	Declaration        *Node              `json:"declaration,omitempty"`
 	Exported           *Node              `json:"exported,omitempty"`
 	Options            *Node              `json:"options,omitempty"`
+}
+
+// Marshal sometimes treat []byte as Base64
+func (n Node) MarshalJSON() ([]byte, error) {
+	type Alias Node
+
+	var jsonValue any
+	if str, ok := n.Value.([]byte); ok {
+		jsonValue = string(str)
+	} else {
+		jsonValue = n.Value
+	}
+
+	return json.Marshal(&struct {
+		*Alias
+		Value any `json:"value,omitempty"`
+	}{
+		Alias: (*Alias)(&n),
+		Value: jsonValue,
+	})
 }
 
 type TemplateValue struct {

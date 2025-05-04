@@ -5,7 +5,7 @@ type Options struct {
 	SourceType                  string
 	OnInsertedSemicolon         interface{}
 	OnTrailingComma             interface{}
-	AllowReserved               bool
+	AllowReserved               AllowReserved
 	AllowReturnOutsideFunction  bool
 	AllowImportExportEverywhere bool
 	AllowAwaitOutsideFunction   bool
@@ -22,12 +22,20 @@ type Options struct {
 	PreserveParens              bool
 }
 
+type AllowReserved uint8
+
+const (
+	ALLOW_RESERVED_TRUE AllowReserved = iota
+	ALLOW_RESERVED_FALSE
+	ALLOW_RESERVED_NEVER
+)
+
 var DefaultOptions = Options{
 	ecmaVersion:                 15,
 	SourceType:                  "script",
 	OnInsertedSemicolon:         nil,
 	OnTrailingComma:             nil,
-	AllowReserved:               false,
+	AllowReserved:               ALLOW_RESERVED_FALSE,
 	AllowReturnOutsideFunction:  false,
 	AllowImportExportEverywhere: false,
 	AllowAwaitOutsideFunction:   false,
@@ -74,15 +82,6 @@ func GetOptions(opts *Options) *Options {
 	case int:
 		if v >= 2015 {
 			options.ecmaVersion = v - 2009
-		}
-	}
-
-	if options.AllowReserved {
-		ecmaVer, ok := options.ecmaVersion.(int)
-		if !ok {
-			options.AllowReserved = true
-		} else {
-			options.AllowReserved = ecmaVer < 5
 		}
 	}
 

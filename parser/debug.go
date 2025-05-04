@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -288,4 +289,18 @@ var tokenToString = map[Token]string{
 	TOKEN_TYPEOF:     "Typeof",
 	TOKEN_VOID:       "Void",
 	TOKEN_DELETE:     "Delete",
+}
+
+func printNode(node *Node) {
+	jsonStr, err := json.MarshalIndent(node, "", "  ")
+
+	if err != nil {
+		fmt.Printf("Failed to print node:\n\n %s\n", err.Error())
+	}
+
+	println(string(jsonStr))
+}
+
+func PrintNode(node *Node) {
+	printNode(node)
 }

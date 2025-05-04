@@ -190,7 +190,7 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 			msg += "Assignin to"
 		}
 
-		this.raise(expr.Start, msg+" rvalue")
+		return this.raise(expr.Start, msg+" rvalue")
 	}
 	return nil
 }
@@ -224,9 +224,8 @@ func (this *Parser) checkLValInnerPattern(expr *Node, bindingType Flags, checkCl
 	case NODE_PROPERTY:
 		// AssignmentProperty has type === "Property"
 		if expr, ok := expr.Value.(*Node); ok {
-			return this.checkLValInnerPattern(expr.Value.(*Node), bindingType, checkClashes)
+			return this.checkLValInnerPattern(expr, bindingType, checkClashes)
 		}
-
 		return this.raise(this.pos, "Expression had invalid Value")
 
 	case NODE_ASSIGNMENT_PATTERN:
