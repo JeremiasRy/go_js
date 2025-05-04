@@ -59,7 +59,8 @@ func NewScope(flags Flags) *Scope {
 }
 
 func (this *Parser) currentThisScope() *Scope {
-	for _, scope := range this.ScopeStack {
+	for i := len(this.ScopeStack) - 1; i >= 0; i-- {
+		scope := this.ScopeStack[i]
 		if scope.Flags&(SCOPE_VAR|SCOPE_CLASS_FIELD_INIT|SCOPE_CLASS_STATIC_BLOCK) != 0 && scope.Flags&SCOPE_ARROW != SCOPE_ARROW {
 			return scope
 		}

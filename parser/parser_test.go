@@ -2559,6 +2559,168 @@ func TestRestParameter(t *testing.T) {
 	}
 }
 
+func TestSuperQuestionMark(t *testing.T) {
+	input := getTestInput("23")
+	expected := &Node{
+		Type:       NODE_PROGRAM,
+		Start:      0,
+		End:        145,
+		SourceType: TYPE_SCRIPT,
+		Body: []*Node{
+			{
+				Type:  NODE_CLASS_DECLARATION,
+				Start: 0,
+				End:   145,
+				Identifier: &Node{
+					Type:  NODE_IDENTIFIER,
+					Start: 6,
+					End:   16,
+					Name:  "SuperArray",
+				},
+				SuperClass: &Node{
+					Type:  NODE_IDENTIFIER,
+					Start: 25,
+					End:   30,
+					Name:  "Array",
+				},
+				BodyNode: &Node{
+					Type:  NODE_CLASS_BODY,
+					Start: 31,
+					End:   145,
+					Body: []*Node{
+						{
+							Type:  NODE_PROPERTY_DEFINITION,
+							Start: 37,
+							End:   46,
+							Key: &Node{
+								Type:  NODE_IDENTIFIER,
+								Start: 37,
+								End:   46,
+								Name:  "strLength",
+							},
+						},
+						{
+							Type:  NODE_METHOD_DEFINITION,
+							Start: 51,
+							End:   143,
+							Key: &Node{
+								Type:  NODE_IDENTIFIER,
+								Start: 51,
+								End:   62,
+								Name:  "constructor",
+							},
+							Kind: KIND_CONSTRUCTOR,
+							Value: &Node{
+								Type:  NODE_FUNCTION_EXPRESSION,
+								Start: 62,
+								End:   143,
+								Params: []*Node{
+									{
+										Type:  NODE_IDENTIFIER,
+										Start: 63,
+										End:   69,
+										Name:  "length",
+									},
+								},
+								BodyNode: &Node{
+									Type:  NODE_BLOCK_STATEMENT,
+									Start: 71,
+									End:   143,
+									Body: []*Node{
+										{
+											Type:  NODE_EXPRESSION_STATEMENT,
+											Start: 81,
+											End:   95,
+											Expression: &Node{
+												Type:  NODE_CALL_EXPRESSION,
+												Start: 81,
+												End:   94,
+												Callee: &Node{
+													Type:  NODE_SUPER,
+													Start: 81,
+													End:   86,
+												},
+												Arguments: []*Node{
+													{
+														Type:  NODE_IDENTIFIER,
+														Start: 87,
+														End:   93,
+														Name:  "length",
+													},
+												},
+											},
+										},
+										{
+											Type:  NODE_EXPRESSION_STATEMENT,
+											Start: 104,
+											End:   137,
+											Expression: &Node{
+												Type:               NODE_ASSIGNMENT_EXPRESSION,
+												Start:              104,
+												End:                137,
+												AssignmentOperator: ASSIGN,
+												Left: &Node{
+													Type:  NODE_MEMBER_EXPRESSION,
+													Start: 104,
+													End:   118,
+													Object: &Node{
+														Type:  NODE_THIS_EXPRESSION,
+														Start: 104,
+														End:   108,
+													},
+													Property: &Node{
+														Type:  NODE_IDENTIFIER,
+														Start: 109,
+														End:   118,
+														Name:  "strLength",
+													},
+												},
+												Right: &Node{
+													Type:  NODE_CHAIN_EXPRESSION,
+													Start: 121,
+													End:   137,
+													Expression: &Node{
+														Type:  NODE_MEMBER_EXPRESSION,
+														Start: 121,
+														End:   137,
+														Object: &Node{
+															Type:  NODE_IDENTIFIER,
+															Start: 121,
+															End:   127,
+															Name:  "length",
+														},
+														Property: &Node{
+															Type:  NODE_IDENTIFIER,
+															Start: 129,
+															End:   137,
+															Name:  "toString",
+														},
+														Optional: true,
+													},
+												},
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	actual, err := GetAst(input, nil, 0)
+
+	if err != nil {
+		t.Errorf("Failed to get AST: %s", err.Error())
+	}
+
+	if !areNodesEqual(actual, expected) {
+		t.Errorf("Nodes are not equal.")
+	}
+}
+
 func TestUnexpectedKeyword1(t *testing.T) {
 	input := getTestInput("fail_1")
 	_, err := GetAst(input, nil, 0)
