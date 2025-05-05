@@ -217,12 +217,12 @@ func (this *Parser) parseStatement(context string, topLevel bool, exports map[st
 			}
 		}
 
-		if this.options.AllowImportExportEverywhere {
+		if !this.options.AllowImportExportEverywhere {
 			if !topLevel {
 				return nil, this.raise(this.start, "'import' and 'export' may only appear at the top level")
 			}
 
-			if this.InModule {
+			if !this.InModule {
 				return nil, this.raise(this.start, "'import' and 'export' may appear only with 'sourceType: module'")
 			}
 		}
@@ -800,7 +800,6 @@ func (this *Parser) expectContextual(name string) error {
 
 func (this *Parser) parseImport(node *Node) (*Node, error) {
 	this.next(false)
-
 	// import '...'
 	if this.Type.identifier == TOKEN_STRING {
 		node.Specifiers = []*Node{}

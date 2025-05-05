@@ -2721,6 +2721,72 @@ func TestSuperQuestionMark(t *testing.T) {
 	}
 }
 
+func TestImportWithAttributes(t *testing.T) {
+	input := getTestInput("24")
+	expected := &Node{
+		Type:  NODE_PROGRAM,
+		Start: 0,
+		End:   51,
+		Body: []*Node{
+			{
+				Type:  NODE_IMPORT_DECLARATION,
+				Start: 0,
+				End:   51,
+				Specifiers: []*Node{
+					{
+						Type:  NODE_IMPORT_DEFAULT_SPECIFIER,
+						Start: 7,
+						End:   11,
+						Local: &Node{
+							Type:  NODE_IDENTIFIER,
+							Start: 7,
+							End:   11,
+							Name:  "json",
+						},
+					},
+				},
+				Source: &Node{
+					Type:  NODE_LITERAL,
+					Start: 17,
+					End:   29,
+					Value: "./foo.json",
+					Raw:   "\"./foo.json\"",
+				},
+				Attributes: []*Node{
+					{
+						Type:  NODE_IMPORT_ATTRIBUTE,
+						Start: 37,
+						End:   49,
+						Key: &Node{
+							Type:  NODE_IDENTIFIER,
+							Start: 37,
+							End:   41,
+							Name:  "type",
+						},
+						Value: &Node{
+							Type:  NODE_LITERAL,
+							Start: 43,
+							End:   49,
+							Value: "json",
+							Raw:   "\"json\"",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	actual, err := GetAst(input, &Options{SourceType: "module"}, 0)
+
+	if err != nil {
+		t.Errorf("Failed to generate AST %s", err.Error())
+	}
+
+	if !areNodesEqual(actual, expected) {
+		t.Errorf("Nodes are not equal.")
+	}
+}
+
 func TestUnexpectedKeyword1(t *testing.T) {
 	input := getTestInput("fail_1")
 	_, err := GetAst(input, nil, 0)
@@ -2741,12 +2807,13 @@ func TestUnexpectedKeyword2(t *testing.T) {
 	if err == nil {
 		t.Error("Expected parser to return error")
 	}
-	println(err.Error())
-	if err.Error() != "Unexpected token: Unexpected token (1:33)" {
-		t.Errorf("Expected: `Unexpected token: Unexpected token (1:33)` Got: %s", err.Error())
+
+	if err.Error() != "Cannot use keyword 'await' outside an async function (1:27)" {
+		t.Errorf("Expected: `Cannot use keyword 'await' outside an async function (1:27)` Got: %s", err.Error())
 	}
 }
 
+// In solitude this tests passes, but with full suite it fails :thinking:
 func TestUnexpectedKeyword3(t *testing.T) {
 	input := getTestInput("fail_3")
 	_, err := GetAst(input, nil, 0)

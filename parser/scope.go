@@ -1,6 +1,8 @@
 package parser
 
-import "slices"
+import (
+	"slices"
+)
 
 type Flags int
 
@@ -83,7 +85,6 @@ func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
 
 func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 	redeclared := false
-
 	scope := this.currentScope()
 	if bindingType == BIND_LEXICAL {
 		redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Functions, name) || slices.Contains(scope.Var, name)
@@ -101,7 +102,8 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 		}
 		scope.Functions = append(scope.Functions, name)
 	} else {
-		for _, scope := range this.ScopeStack {
+		for i := len(this.ScopeStack) - 1; i >= 0; i-- {
+			scope := this.ScopeStack[i]
 			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !this.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
 				redeclared = true
 				break
@@ -119,7 +121,7 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 	}
 
 	if redeclared {
-		return this.raiseRecoverable(pos, `Identifier '${name}' has already been declared`)
+		return this.raiseRecoverable(pos, "Identifier "+name+" has already been declared")
 	}
 	return nil
 }

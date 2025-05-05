@@ -31,7 +31,7 @@ const (
 )
 
 var DefaultOptions = Options{
-	ecmaVersion:                 15,
+	ecmaVersion:                 16,
 	SourceType:                  "script",
 	OnInsertedSemicolon:         nil,
 	OnTrailingComma:             nil,

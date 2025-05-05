@@ -1061,11 +1061,11 @@ func (this *Parser) checkUnreserved(opts struct {
 	}
 	var re *regexp.Regexp
 	if this.Strict {
-
 		re = this.ReservedWordsStrict
 	} else {
 		re = this.ReservedWords
 	}
+
 	if re.Match([]byte(opts.name)) {
 		if !this.inAsync() && opts.name == "await" {
 			return this.raiseRecoverable(opts.start, "Cannot use keyword 'await' outside an async function")
