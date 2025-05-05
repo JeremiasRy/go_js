@@ -119,7 +119,6 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 			}
 		}
 	}
-
 	if redeclared {
 		return this.raiseRecoverable(pos, "Identifier "+name+" has already been declared")
 	}

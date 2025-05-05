@@ -19,7 +19,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	node, err := parser.GetAst(b, nil, 0)
+	node, err := parser.GetAst(b, &parser.Options{SourceType: "module"}, 0)
 	if err != nil {
 		println("Error while parsing file")
 		log.Fatal(err)

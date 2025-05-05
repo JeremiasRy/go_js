@@ -212,7 +212,6 @@ func (this *Parser) checkLValPattern(expr *Node, bindingType Flags, checkClashes
 			}
 		}
 	}
-
 	return this.checkLValSimple(expr, bindingType, checkClashes)
 }
 

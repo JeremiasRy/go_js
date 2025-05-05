@@ -2786,6 +2786,46 @@ func TestImportWithAttributes(t *testing.T) {
 		t.Errorf("Nodes are not equal.")
 	}
 }
+func TestExportKeyword(t *testing.T) {
+	input := getTestInput("25")
+	actual, err := GetAst(input, &Options{SourceType: "module"}, 0)
+	expected := &Node{
+		Type:  NODE_PROGRAM,
+		Start: 0,
+		End:   28,
+		Body: []*Node{
+			{
+				Type:  NODE_EXPORT_NAMED_DECLARATION,
+				Start: 0,
+				End:   28,
+				Declaration: &Node{
+					Type:  NODE_FUNCTION_DECLARATION,
+					Start: 7,
+					End:   28,
+					Identifier: &Node{
+						Type:  NODE_IDENTIFIER,
+						Start: 16,
+						End:   21,
+						Name:  "hello",
+					},
+					BodyNode: &Node{
+						Type:  NODE_BLOCK_STATEMENT,
+						Start: 24,
+						End:   28,
+					},
+				},
+			},
+		},
+	}
+
+	if err != nil {
+		t.Errorf("Failed to generate AST %s", err.Error())
+	}
+
+	if !areNodesEqual(actual, expected) {
+		t.Errorf("Nodes are not equal.")
+	}
+}
 
 func TestUnexpectedKeyword1(t *testing.T) {
 	input := getTestInput("fail_1")
@@ -2822,8 +2862,8 @@ func TestUnexpectedKeyword3(t *testing.T) {
 		t.Error("Expected parser to return error")
 	}
 
-	if err.Error() != "Unexpected token: Unexpected token (1:30)" {
-		t.Errorf("Expected: `Unexpected token: Unexpected token (1:30)` Got: %s", err.Error())
+	if err.Error() != "Cannot use keyword 'await' outside an async function (1:24)" {
+		t.Errorf("Expected: `Cannot use keyword 'await' outside an async function (1:24)` Got: %s", err.Error())
 	}
 }
 

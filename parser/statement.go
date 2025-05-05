@@ -1844,6 +1844,7 @@ func (this *Parser) parseFunction(node *Node, statement Flags, allowExpressionBo
 					return nil, err
 				}
 			}
+		} else {
 			err := this.checkLValSimple(node.Identifier, BIND_FUNCTION, struct {
 				check bool
 				hash  map[string]bool
