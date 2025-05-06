@@ -1,42 +1,42 @@
 package parser
 
-func (this *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	if this.getEcmaVersion() >= 6 && node != nil {
+func (p *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	if p.getEcmaVersion() >= 6 && node != nil {
 		switch node.Type {
 		case NODE_IDENTIFIER:
-			if this.inAsync() && node.Name == "await" {
-				return nil, this.raise(node.Start, "Cannot use 'await' as identifier inside an async function")
+			if p.inAsync() && node.Name == "await" {
+				return nil, p.raise(node.Start, "Cannot use 'await' as identifier inside an async function")
 			}
 
 		case NODE_OBJECT_PATTERN, NODE_ARRAY_PATTERN, NODE_ASSIGNMENT_PATTERN, NODE_REST_ELEMENT:
 		case NODE_OBJECT_EXPRESSION:
 			node.Type = NODE_OBJECT_PATTERN
 			if refDestructuringErrors != nil {
-				if err := this.checkPatternErrors(refDestructuringErrors, true); err != nil {
+				if err := p.checkPatternErrors(refDestructuringErrors, true); err != nil {
 					return nil, err
 				}
 			}
 
 			for _, prop := range node.Properties {
-				_, err := this.toAssignable(prop, isBinding, nil)
+				_, err := p.toAssignable(prop, isBinding, nil)
 
 				if err != nil {
 					return nil, err
 				}
 				if prop.Type == NODE_REST_ELEMENT &&
 					(prop.Argument.Type == NODE_ARRAY_PATTERN || prop.Argument.Type == NODE_OBJECT_PATTERN) {
-					return nil, this.raise(prop.Alternate.Start, "Unexpected token")
+					return nil, p.raise(prop.Alternate.Start, "Unexpected token")
 				}
 			}
 
 		case NODE_PROPERTY:
 			// AssignmentProperty has type == "Property"
 			if node.Kind != KIND_PROPERTY_INIT {
-				return nil, this.raise(node.Key.Start, "Object pattern can't contain getter or setter")
+				return nil, p.raise(node.Key.Start, "Object pattern can't contain getter or setter")
 			}
 
 			if val, ok := node.Value.(*Node); ok {
-				_, err := this.toAssignable(val, isBinding, nil)
+				_, err := p.toAssignable(val, isBinding, nil)
 				if err != nil {
 					return nil, err
 				}
@@ -47,47 +47,47 @@ func (this *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErr
 		case NODE_ARRAY_EXPRESSION:
 			node.Type = NODE_ARRAY_PATTERN
 			if refDestructuringErrors != nil {
-				err := this.checkPatternErrors(refDestructuringErrors, true)
+				err := p.checkPatternErrors(refDestructuringErrors, true)
 
 				if err != nil {
 					return nil, err
 				}
 			}
-			_, err := this.toAssignableList(node.Elements, isBinding)
+			_, err := p.toAssignableList(node.Elements, isBinding)
 			if err != nil {
 				return nil, err
 			}
 
 		case NODE_SPREAD_ELEMENT:
 			node.Type = NODE_REST_ELEMENT
-			_, err := this.toAssignable(node.Argument, isBinding, nil)
+			_, err := p.toAssignable(node.Argument, isBinding, nil)
 			if err != nil {
 				return nil, err
 			}
 			if node.Argument.Type == NODE_ASSIGNMENT_PATTERN {
-				return nil, this.raise(node.Argument.Start, "Rest elements cannot have a default value")
+				return nil, p.raise(node.Argument.Start, "Rest elements cannot have a default value")
 			}
 
 		case NODE_ASSIGNMENT_EXPRESSION:
 			if node.AssignmentOperator != ASSIGN {
-				return nil, this.raise(node.Left.End, "Only '=' operator can be used for specifying default value.")
+				return nil, p.raise(node.Left.End, "Only '=' operator can be used for specifying default value.")
 			}
 			node.Type = NODE_ASSIGNMENT_PATTERN
 			node.AssignmentOperator = ""
-			_, err := this.toAssignable(node.Left, isBinding, nil)
+			_, err := p.toAssignable(node.Left, isBinding, nil)
 
 			if err != nil {
 				return nil, err
 			}
 
 		case NODE_PARENTHESIZED_EXPRESSION:
-			_, err := this.toAssignable(node.Expression, isBinding, refDestructuringErrors)
+			_, err := p.toAssignable(node.Expression, isBinding, refDestructuringErrors)
 			if err != nil {
 				return nil, err
 			}
 
 		case NODE_CHAIN_EXPRESSION:
-			return nil, this.raiseRecoverable(node.Start, "Optional chaining cannot appear in left-hand side")
+			return nil, p.raiseRecoverable(node.Start, "Optional chaining cannot appear in left-hand side")
 
 		case NODE_MEMBER_EXPRESSION:
 			if !isBinding {
@@ -96,10 +96,10 @@ func (this *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErr
 			fallthrough
 
 		default:
-			return nil, this.raise(node.Start, "Assigning to rvalue")
+			return nil, p.raise(node.Start, "Assigning to rvalue")
 		}
 	} else if refDestructuringErrors != nil {
-		err := this.checkPatternErrors(refDestructuringErrors, true)
+		err := p.checkPatternErrors(refDestructuringErrors, true)
 		if err != nil {
 			return nil, err
 		}
@@ -107,13 +107,13 @@ func (this *Parser) toAssignable(node *Node, isBinding bool, refDestructuringErr
 	return node, nil
 }
 
-func (this *Parser) toAssignableList(exprList []*Node, isBinding bool) ([]*Node, error) {
+func (p *Parser) toAssignableList(exprList []*Node, isBinding bool) ([]*Node, error) {
 	end := len(exprList)
 
 	for i := 0; i < end; i++ {
 		elt := exprList[i]
 		if elt != nil {
-			_, err := this.toAssignable(elt, isBinding, nil)
+			_, err := p.toAssignable(elt, isBinding, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -122,8 +122,8 @@ func (this *Parser) toAssignableList(exprList []*Node, isBinding bool) ([]*Node,
 
 	if end != 0 {
 		last := exprList[end-1]
-		if this.getEcmaVersion() == 6 && isBinding && last != nil && last.Type == NODE_REST_ELEMENT && last.Argument.Type != NODE_IDENTIFIER {
-			return nil, this.unexpected(`if this.getEcmaVersion() == 6 && isBinding && last != nil && last.Type == NODE_REST_ELEMENT && last.Argument.Type != NODE_IDENTIFIER`, &last.Argument.Start)
+		if p.getEcmaVersion() == 6 && isBinding && last != nil && last.Type == NODE_REST_ELEMENT && last.Argument.Type != NODE_IDENTIFIER {
+			return nil, p.unexpected(`if p.getEcmaVersion() == 6 && isBinding && last != nil && last.Type == NODE_REST_ELEMENT && last.Argument.Type != NODE_IDENTIFIER`, &last.Argument.Start)
 		}
 
 	}
@@ -131,7 +131,7 @@ func (this *Parser) toAssignableList(exprList []*Node, isBinding bool) ([]*Node,
 }
 
 // send 0 for bindingType if not used in acorn function calls
-func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes struct {
+func (p *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes struct {
 	check bool
 	hash  map[string]bool
 }) error {
@@ -139,7 +139,7 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 
 	switch expr.Type {
 	case NODE_IDENTIFIER:
-		if this.Strict && this.ReservedWordsStrictBind.Match([]byte(expr.Name)) {
+		if p.Strict && p.ReservedWordsStrictBind.Match([]byte(expr.Name)) {
 			msg := ""
 			if isBind {
 				msg += "Binding "
@@ -148,39 +148,39 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 			}
 
 			msg += expr.Name
-			return this.raiseRecoverable(expr.Start, msg+" in strict mode")
+			return p.raiseRecoverable(expr.Start, msg+" in strict mode")
 		}
 
 		if isBind {
 			if bindingType == BIND_LEXICAL && expr.Name == "let" {
-				return this.raiseRecoverable(expr.Start, "let is disallowed as a lexically bound name")
+				return p.raiseRecoverable(expr.Start, "let is disallowed as a lexically bound name")
 			}
 
 			if checkClashes.check {
 				if _, has := checkClashes.hash[expr.Name]; has {
-					return this.raiseRecoverable(expr.Start, "Argument name clash")
+					return p.raiseRecoverable(expr.Start, "Argument name clash")
 				}
 
 				checkClashes.hash[expr.Name] = true
 			}
 			if bindingType != BIND_OUTSIDE {
-				return this.declareName(expr.Name, bindingType, expr.Start)
+				return p.declareName(expr.Name, bindingType, expr.Start)
 			}
 		}
 
 	case NODE_CHAIN_EXPRESSION:
-		return this.raiseRecoverable(expr.Start, "Optional chaining cannot appear in left-hand side")
+		return p.raiseRecoverable(expr.Start, "Optional chaining cannot appear in left-hand side")
 
 	case NODE_MEMBER_EXPRESSION:
 		if isBind {
-			return this.raiseRecoverable(expr.Start, "Binding member expression")
+			return p.raiseRecoverable(expr.Start, "Binding member expression")
 		}
 
 	case NODE_PARENTHESIZED_EXPRESSION:
 		if isBind {
-			return this.raiseRecoverable(expr.Start, "Binding parenthesized expression")
+			return p.raiseRecoverable(expr.Start, "Binding parenthesized expression")
 		}
-		return this.checkLValSimple(expr.Expression, bindingType, checkClashes)
+		return p.checkLValSimple(expr.Expression, bindingType, checkClashes)
 
 	default:
 		msg := ""
@@ -190,32 +190,32 @@ func (this *Parser) checkLValSimple(expr *Node, bindingType Flags, checkClashes 
 			msg += "Assignin to"
 		}
 
-		return this.raise(expr.Start, msg+" rvalue")
+		return p.raise(expr.Start, msg+" rvalue")
 	}
 	return nil
 }
 
-func (this *Parser) checkLValPattern(expr *Node, bindingType Flags, checkClashes struct {
+func (p *Parser) checkLValPattern(expr *Node, bindingType Flags, checkClashes struct {
 	check bool
 	hash  map[string]bool
 }) error {
 	switch expr.Type {
 	case NODE_OBJECT_PATTERN:
 		for _, prop := range expr.Properties {
-			return this.checkLValInnerPattern(prop, bindingType, checkClashes)
+			return p.checkLValInnerPattern(prop, bindingType, checkClashes)
 		}
 
 	case NODE_ARRAY_PATTERN:
 		for _, elem := range expr.Elements {
 			if elem != nil {
-				return this.checkLValInnerPattern(elem, bindingType, checkClashes)
+				return p.checkLValInnerPattern(elem, bindingType, checkClashes)
 			}
 		}
 	}
-	return this.checkLValSimple(expr, bindingType, checkClashes)
+	return p.checkLValSimple(expr, bindingType, checkClashes)
 }
 
-func (this *Parser) checkLValInnerPattern(expr *Node, bindingType Flags, checkClashes struct {
+func (p *Parser) checkLValInnerPattern(expr *Node, bindingType Flags, checkClashes struct {
 	check bool
 	hash  map[string]bool
 }) error {
@@ -223,41 +223,41 @@ func (this *Parser) checkLValInnerPattern(expr *Node, bindingType Flags, checkCl
 	case NODE_PROPERTY:
 		// AssignmentProperty has type === "Property"
 		if expr, ok := expr.Value.(*Node); ok {
-			return this.checkLValInnerPattern(expr, bindingType, checkClashes)
+			return p.checkLValInnerPattern(expr, bindingType, checkClashes)
 		}
-		return this.raise(this.pos, "Expression had invalid Value")
+		return p.raise(p.pos, "Expression had invalid Value")
 
 	case NODE_ASSIGNMENT_PATTERN:
-		return this.checkLValPattern(expr.Left, bindingType, checkClashes)
+		return p.checkLValPattern(expr.Left, bindingType, checkClashes)
 
 	case NODE_REST_ELEMENT:
-		return this.checkLValPattern(expr.Argument, bindingType, checkClashes)
+		return p.checkLValPattern(expr.Argument, bindingType, checkClashes)
 	}
 
-	return this.checkLValPattern(expr, bindingType, checkClashes)
+	return p.checkLValPattern(expr, bindingType, checkClashes)
 }
 
-func (this *Parser) parseSpread(refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	node := this.startNode()
-	this.next(false)
-	maybeAsssign, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
+func (p *Parser) parseSpread(refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	node := p.startNode()
+	p.next(false)
+	maybeAsssign, err := p.parseMaybeAssign("", refDestructuringErrors, nil)
 	if err != nil {
 		return nil, err
 	}
 	node.Argument = maybeAsssign
-	return this.finishNode(node, NODE_SPREAD_ELEMENT), nil
+	return p.finishNode(node, NODE_SPREAD_ELEMENT), nil
 }
 
-func (this *Parser) parseRestBinding() (*Node, error) {
-	node := this.startNode()
-	this.next(false)
+func (p *Parser) parseRestBinding() (*Node, error) {
+	node := p.startNode()
+	p.next(false)
 
 	// RestElement inside of a function parameter must be an identifier
-	if this.getEcmaVersion() == 6 && this.Type.identifier != TOKEN_NAME {
-		return nil, this.unexpected("", nil)
+	if p.getEcmaVersion() == 6 && p.Type.identifier != TOKEN_NAME {
+		return nil, p.unexpected("", nil)
 	}
 
-	bindingAtom, err := this.parseBindingAtom()
+	bindingAtom, err := p.parseBindingAtom()
 
 	if err != nil {
 		return nil, err
@@ -265,88 +265,88 @@ func (this *Parser) parseRestBinding() (*Node, error) {
 
 	node.Argument = bindingAtom
 
-	return this.finishNode(node, NODE_REST_ELEMENT), nil
+	return p.finishNode(node, NODE_REST_ELEMENT), nil
 }
 
-func (this *Parser) parseBindingAtom() (*Node, error) {
-	if this.getEcmaVersion() >= 6 {
-		switch this.Type.identifier {
+func (p *Parser) parseBindingAtom() (*Node, error) {
+	if p.getEcmaVersion() >= 6 {
+		switch p.Type.identifier {
 		case TOKEN_BRACKETL:
-			node := this.startNode()
-			this.next(false)
-			elements, err := this.parseBindingList(TOKEN_BRACKETR, true, true, false)
+			node := p.startNode()
+			p.next(false)
+			elements, err := p.parseBindingList(TOKEN_BRACKETR, true, true, false)
 
 			if err != nil {
 				return nil, err
 			}
 			node.Elements = elements
-			return this.finishNode(node, NODE_ARRAY_PATTERN), nil
+			return p.finishNode(node, NODE_ARRAY_PATTERN), nil
 
 		case TOKEN_BRACEL:
-			obj, err := this.parseObj(true, nil)
+			obj, err := p.parseObj(true, nil)
 			return obj, err
 		}
 	}
-	identifier, err := this.parseIdent(false)
+	identifier, err := p.parseIdent(false)
 	return identifier, err
 }
 
-func (this *Parser) parseMaybeDefault(startPos int, startLoc *Location, left *Node) (*Node, error) {
+func (p *Parser) parseMaybeDefault(startPos int, startLoc *Location, left *Node) (*Node, error) {
 	if left == nil {
-		bindingAtom, err := this.parseBindingAtom()
+		bindingAtom, err := p.parseBindingAtom()
 		if err != nil {
 			return nil, err
 		}
 		left = bindingAtom
 	}
 
-	if this.getEcmaVersion() < 6 || !this.eat(TOKEN_EQ) {
+	if p.getEcmaVersion() < 6 || !p.eat(TOKEN_EQ) {
 		return left, nil
 	}
-	node := this.startNodeAt(startPos, startLoc)
+	node := p.startNodeAt(startPos, startLoc)
 	node.Left = left
-	maybeAssign, err := this.parseMaybeAssign("", nil, nil)
+	maybeAssign, err := p.parseMaybeAssign("", nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	node.Right = maybeAssign
-	return this.finishNode(node, NODE_ASSIGNMENT_PATTERN), nil
+	return p.finishNode(node, NODE_ASSIGNMENT_PATTERN), nil
 }
 
-func (this *Parser) parseBindingList(close Token, allowEmpty bool, allowTrailingComma bool, allowModifiers bool) ([]*Node, error) {
+func (p *Parser) parseBindingList(close Token, allowEmpty bool, allowTrailingComma bool, allowModifiers bool) ([]*Node, error) {
 	elts, first := []*Node{}, true
-	for !this.eat(close) {
+	for !p.eat(close) {
 		if first {
 			first = false
 		} else {
-			err := this.expect(TOKEN_COMMA)
+			err := p.expect(TOKEN_COMMA)
 			if err != nil {
 				return nil, err
 			}
 		}
-		if allowEmpty && this.Type.identifier == TOKEN_COMMA {
+		if allowEmpty && p.Type.identifier == TOKEN_COMMA {
 			elts = append(elts, nil)
 
-		} else if allowTrailingComma && this.afterTrailingComma(close, false) {
+		} else if allowTrailingComma && p.afterTrailingComma(close, false) {
 			break
-		} else if this.Type.identifier == TOKEN_ELLIPSIS {
-			rest, err := this.parseRestBinding()
+		} else if p.Type.identifier == TOKEN_ELLIPSIS {
+			rest, err := p.parseRestBinding()
 			if err != nil {
 				return nil, err
 			}
-			bindingListItem := this.parseBindingListItem(rest)
+			bindingListItem := p.parseBindingListItem(rest)
 
 			elts = append(elts, bindingListItem)
-			if this.Type.identifier == TOKEN_COMMA {
-				return nil, this.raiseRecoverable(this.start, "Comma is not permitted after the rest element")
+			if p.Type.identifier == TOKEN_COMMA {
+				return nil, p.raiseRecoverable(p.start, "Comma is not permitted after the rest element")
 			}
-			err = this.expect(close)
+			err = p.expect(close)
 			if err != nil {
 				return nil, err
 			}
 			break
 		} else {
-			assignableListItem, err := this.parseAssignableListItem(allowModifiers)
+			assignableListItem, err := p.parseAssignableListItem(allowModifiers)
 			if err != nil {
 				return nil, err
 			}
@@ -356,15 +356,15 @@ func (this *Parser) parseBindingList(close Token, allowEmpty bool, allowTrailing
 	return elts, nil
 }
 
-func (this *Parser) parseAssignableListItem(allowModifiers bool) (*Node, error) {
-	elem, err := this.parseMaybeDefault(this.start, this.startLoc, nil)
+func (p *Parser) parseAssignableListItem(allowModifiers bool) (*Node, error) {
+	elem, err := p.parseMaybeDefault(p.start, p.startLoc, nil)
 	if err != nil {
 		return nil, err
 	}
-	this.parseBindingListItem(elem)
+	p.parseBindingListItem(elem)
 	return elem, nil
 }
 
-func (this *Parser) parseBindingListItem(param *Node) *Node {
+func (p *Parser) parseBindingListItem(param *Node) *Node {
 	return param
 }

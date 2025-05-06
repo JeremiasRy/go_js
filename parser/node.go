@@ -395,32 +395,32 @@ func NewNode(parser *Parser, pos int, loc *Location) *Node {
 	return node
 }
 
-func (this *Parser) startNode() *Node {
-	return NewNode(this, this.start, this.startLoc)
+func (p *Parser) startNode() *Node {
+	return NewNode(p, p.start, p.startLoc)
 }
 
-func (this *Parser) startNodeAt(pos int, loc *Location) *Node {
-	return NewNode(this, pos, loc)
+func (p *Parser) startNodeAt(pos int, loc *Location) *Node {
+	return NewNode(p, pos, loc)
 }
 
-func (this *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Location) {
+func (p *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Location) {
 	node.Type = finishType
 	node.End = pos
-	if this.options.Locations {
+	if p.options.Locations {
 		node.Location.End = loc
 	}
 
-	if this.options.Ranges {
+	if p.options.Ranges {
 		node.Range[1] = pos
 	}
 }
 
-func (this *Parser) finishNode(node *Node, finishType NodeType) *Node {
-	this.finishNodeAt(node, finishType, this.LastTokEnd, this.LastTokEndLoc)
+func (p *Parser) finishNode(node *Node, finishType NodeType) *Node {
+	p.finishNodeAt(node, finishType, p.LastTokEnd, p.LastTokEndLoc)
 	return node
 }
 
-func (this *Parser) copyNode(node *Node) (*Node, error) {
+func (p *Parser) copyNode(node *Node) (*Node, error) {
 	if node == nil {
 		return nil, nil
 	}
@@ -441,7 +441,7 @@ func (this *Parser) copyNode(node *Node) (*Node, error) {
 /*
 I think I can skip this?
 
-	this.finishNodeAt = function(node, type, pos, loc) {
+	p.finishNodeAt = function(node, type, pos, loc) {
 	  return finishNodeAt.call(this, node, type, pos, loc)
 	}
 

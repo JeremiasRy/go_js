@@ -6,79 +6,79 @@ import (
 
 var literal = regexp.MustCompile(`^(?:'((?:\\[^]|[^'\\])*?)'|\"((?:\\[^]|[^"\\])*?)")`)
 
-func (this *Parser) eat(token Token) bool {
-	if this.Type.identifier == token {
-		this.next(false)
+func (p *Parser) eat(token Token) bool {
+	if p.Type.identifier == token {
+		p.next(false)
 		return true
 	} else {
 		return false
 	}
 }
 
-func (this *Parser) expect(token Token) error {
-	if this.eat(token) {
+func (p *Parser) expect(token Token) error {
+	if p.eat(token) {
 		return nil
 	}
-	return this.unexpected("Expected "+tokenToString[token], &this.pos)
+	return p.unexpected("Expected "+tokenToString[token], &p.pos)
 }
 
-func (this *Parser) unexpected(msg string, pos *int) error {
+func (p *Parser) unexpected(msg string, pos *int) error {
 	if pos != nil {
-		return this.raise(*pos, "Unexpected token: "+msg)
+		return p.raise(*pos, "Unexpected token: "+msg)
 	} else {
-		return this.raise(this.start, "Unexpected token: "+msg)
+		return p.raise(p.start, "Unexpected token: "+msg)
 	}
 }
 
-func (this *Parser) canInsertSemicolon() bool {
-	return this.Type.identifier == TOKEN_EOF ||
-		this.Type.identifier == TOKEN_BRACER ||
-		lineBreak.Match(this.input[this.LastTokEnd:this.start])
+func (p *Parser) canInsertSemicolon() bool {
+	return p.Type.identifier == TOKEN_EOF ||
+		p.Type.identifier == TOKEN_BRACER ||
+		lineBreak.Match(p.input[p.LastTokEnd:p.start])
 }
 
-func (this *Parser) semicolon() error {
-	if !this.eat(TOKEN_SEMI) && !this.insertSemicolon() {
-		return this.unexpected("Unexpected token", nil)
+func (p *Parser) semicolon() error {
+	if !p.eat(TOKEN_SEMI) && !p.insertSemicolon() {
+		return p.unexpected("Unexpected token", nil)
 	}
 	return nil
 }
 
-func (this *Parser) insertSemicolon() bool {
-	return this.canInsertSemicolon()
+func (p *Parser) insertSemicolon() bool {
+	return p.canInsertSemicolon()
 	/* Not ported:
-	if this.canInsertSemicolon() {
-		if (this.options.onInsertedSemicolon)
-			this.options.onInsertedSemicolon(this.lastTokEnd, this.lastTokEndLoc)
+	if p.canInsertSemicolon() {
+		if (p.options.onInsertedSemicolon)
+			p.options.onInsertedSemicolon(p.lastTokEnd, p.lastTokEndLoc)
 		return true
 	}
 	return false
 	*/
 }
 
-func (this *Parser) isContextual(name string) bool {
-	if value, ok := this.Value.(string); ok {
-		return value == name && !this.ContainsEsc && this.Type.identifier == TOKEN_NAME
+func (p *Parser) isContextual(name string) bool {
+	if value, ok := p.Value.(string); ok {
+		return value == name && !p.ContainsEsc && p.Type.identifier == TOKEN_NAME
 	}
 	return false
 }
 
-func (this *Parser) checkYieldAwaitInDefaultParams() error {
-	if this.YieldPos != 0 && (!(this.AwaitPos != 0) || this.YieldPos < this.AwaitPos) {
-		return this.raise(this.YieldPos, "Yield expression cannot be a default value")
+func (p *Parser) checkYieldAwaitInDefaultParams() error {
+	if p.YieldPos != 0 && (!(p.AwaitPos != 0) || p.YieldPos < p.AwaitPos) {
+		return p.raise(p.YieldPos, "Yield expression cannot be a default value")
 	}
 
-	if this.AwaitPos != 0 {
-		this.raise(this.AwaitPos, "Await expression cannot be a default value")
+	if p.AwaitPos != 0 {
+		p.raise(p.AwaitPos, "Await expression cannot be a default value")
 	}
 	return nil
 }
 
-func (this *Parser) checkPatternErrors(refDestructuringErrors *DestructuringErrors, isAssign bool) error {
+func (p *Parser) checkPatternErrors(refDestructuringErrors *DestructuringErrors, isAssign bool) error {
 	if refDestructuringErrors == nil {
 		return nil
 	}
 	if refDestructuringErrors.trailingComma > -1 {
-		return this.raiseRecoverable(refDestructuringErrors.trailingComma, "Comma is not permitted after the rest element")
+		return p.raiseRecoverable(refDestructuringErrors.trailingComma, "Comma is not permitted after the rest element")
 	}
 	var parens int
 	if isAssign {
@@ -93,22 +93,22 @@ func (this *Parser) checkPatternErrors(refDestructuringErrors *DestructuringErro
 		} else {
 			msg = "Parenthesized pattern"
 		}
-		return this.raiseRecoverable(parens, msg)
+		return p.raiseRecoverable(parens, msg)
 	}
 	return nil
 }
 
-func (this *Parser) afterTrailingComma(tokType Token, notNext bool) bool {
-	if this.Type.identifier == tokType {
+func (p *Parser) afterTrailingComma(tokType Token, notNext bool) bool {
+	if p.Type.identifier == tokType {
 		/*
 					Unimplemented:
 
-			    	if this.options.OnTrailingComma {
-						this.options.onTrailingComma(this.lastTokStart, this.lastTokStartLoc)
+			    	if p.options.OnTrailingComma {
+						p.options.onTrailingComma(p.lastTokStart, p.lastTokStartLoc)
 					}
 		*/
 		if !notNext {
-			this.next(false)
+			p.next(false)
 		}
 
 		return true
@@ -116,19 +116,19 @@ func (this *Parser) afterTrailingComma(tokType Token, notNext bool) bool {
 	return false
 }
 
-func (this *Parser) strictDirective(start int) bool {
-	if this.getEcmaVersion() < 5 {
+func (p *Parser) strictDirective(start int) bool {
+	if p.getEcmaVersion() < 5 {
 		return false
 	}
 
 	for {
-		loc := skipWhiteSpace.FindStringIndex(string(this.input[start:]))
+		loc := skipWhiteSpace.FindStringIndex(string(p.input[start:]))
 		if loc == nil {
 			loc = []int{0, 0}
 		}
 		start += loc[1]
 
-		match := literal.FindStringSubmatch(string(this.input[start:]))
+		match := literal.FindStringSubmatch(string(p.input[start:]))
 		if match == nil {
 			return false
 		}
@@ -141,20 +141,20 @@ func (this *Parser) strictDirective(start int) bool {
 
 		if content == "use strict" {
 			spaceStart := start + len(match[0])
-			loc = skipWhiteSpace.FindStringIndex(string(this.input[spaceStart:]))
+			loc = skipWhiteSpace.FindStringIndex(string(p.input[spaceStart:]))
 			var spaceAfter string
 			var end int
 			if loc == nil {
 				spaceAfter = ""
 				end = spaceStart
 			} else {
-				spaceAfter = string(this.input[spaceStart : spaceStart+loc[1]])
+				spaceAfter = string(p.input[spaceStart : spaceStart+loc[1]])
 				end = spaceStart + loc[1]
 			}
 
 			var next byte
-			if end < len(this.input) {
-				next = this.input[end]
+			if end < len(p.input) {
+				next = p.input[end]
 			} else {
 				next = 0
 			}
@@ -167,7 +167,7 @@ func (this *Parser) strictDirective(start int) bool {
 			if lineBreak.MatchString(spaceAfter) {
 				quote := match[0][0]
 				if next == 0 || !regexp.MustCompile(`[(\[.`+string(quote)+`+\-/*%<>=,?\^&]`).MatchString(string(next)) {
-					if next != '!' || (end+1 < len(this.input) && this.input[end+1] != '=') {
+					if next != '!' || (end+1 < len(p.input) && p.input[end+1] != '=') {
 						return true
 					}
 				}
@@ -176,21 +176,21 @@ func (this *Parser) strictDirective(start int) bool {
 
 		start += len(match[0])
 
-		loc = skipWhiteSpace.FindStringIndex(string(this.input[start:]))
+		loc = skipWhiteSpace.FindStringIndex(string(p.input[start:]))
 		if loc == nil {
 			loc = []int{0, 0}
 		}
 		start += loc[1]
 
-		if start < len(this.input) && this.input[start] == ';' {
+		if start < len(p.input) && p.input[start] == ';' {
 			start++
 		}
 	}
 }
 
-func (this *Parser) isSimpleAssignTarget(expr *Node) bool {
+func (p *Parser) isSimpleAssignTarget(expr *Node) bool {
 	if expr.Type == NODE_PARENTHESIZED_EXPRESSION {
-		return this.isSimpleAssignTarget(expr.Expression)
+		return p.isSimpleAssignTarget(expr.Expression)
 	}
 
 	return expr.Type == NODE_IDENTIFIER || expr.Type == NODE_MEMBER_EXPRESSION

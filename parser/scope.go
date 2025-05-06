@@ -60,9 +60,9 @@ func NewScope(flags Flags) *Scope {
 	}
 }
 
-func (this *Parser) currentThisScope() *Scope {
-	for i := len(this.ScopeStack) - 1; i >= 0; i-- {
-		scope := this.ScopeStack[i]
+func (p *Parser) currentThisScope() *Scope {
+	for i := len(p.ScopeStack) - 1; i >= 0; i-- {
+		scope := p.ScopeStack[i]
 		if scope.Flags&(SCOPE_VAR|SCOPE_CLASS_FIELD_INIT|SCOPE_CLASS_STATIC_BLOCK) != 0 && scope.Flags&SCOPE_ARROW != SCOPE_ARROW {
 			return scope
 		}
@@ -79,39 +79,39 @@ func (p *Parser) currentVarScope() *Scope {
 	}
 }
 
-func (this *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
-	return (scope.Flags&SCOPE_FUNCTION != 0) || (!this.InModule && scope.Flags&SCOPE_TOP != 0)
+func (p *Parser) treatFunctionsAsVarInScope(scope *Scope) bool {
+	return (scope.Flags&SCOPE_FUNCTION != 0) || (!p.InModule && scope.Flags&SCOPE_TOP != 0)
 }
 
-func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
+func (p *Parser) declareName(name string, bindingType Flags, pos int) error {
 	redeclared := false
-	scope := this.currentScope()
+	scope := p.currentScope()
 	if bindingType == BIND_LEXICAL {
 		redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Functions, name) || slices.Contains(scope.Var, name)
 		scope.Lexical = append(scope.Lexical, name)
-		if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
-			delete(this.UndefinedExports, name)
+		if p.InModule && (scope.Flags&SCOPE_TOP != 0) {
+			delete(p.UndefinedExports, name)
 		}
 	} else if bindingType == BIND_SIMPLE_CATCH {
 		scope.Lexical = append(scope.Lexical, name)
 	} else if bindingType == BIND_FUNCTION {
-		if this.treatFunctionsAsVar() {
+		if p.treatFunctionsAsVar() {
 			redeclared = slices.Contains(scope.Lexical, name)
 		} else {
 			redeclared = slices.Contains(scope.Lexical, name) || slices.Contains(scope.Var, name)
 		}
 		scope.Functions = append(scope.Functions, name)
 	} else {
-		for i := len(this.ScopeStack) - 1; i >= 0; i-- {
-			scope := this.ScopeStack[i]
-			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !this.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
+		for i := len(p.ScopeStack) - 1; i >= 0; i-- {
+			scope := p.ScopeStack[i]
+			if slices.Contains(scope.Lexical, name) && !((scope.Flags&SCOPE_SIMPLE_CATCH != 0) && scope.Lexical[0] == name) || !p.treatFunctionsAsVarInScope(scope) && slices.Contains(scope.Functions, name) {
 				redeclared = true
 				break
 			}
 
 			scope.Var = append(scope.Var, name)
-			if this.InModule && (scope.Flags&SCOPE_TOP != 0) {
-				delete(this.UndefinedExports, name)
+			if p.InModule && (scope.Flags&SCOPE_TOP != 0) {
+				delete(p.UndefinedExports, name)
 			}
 
 			if scope.Flags&SCOPE_VAR != 0 {
@@ -120,7 +120,7 @@ func (this *Parser) declareName(name string, bindingType Flags, pos int) error {
 		}
 	}
 	if redeclared {
-		return this.raiseRecoverable(pos, "Identifier "+name+" has already been declared")
+		return p.raiseRecoverable(pos, "Identifier "+name+" has already been declared")
 	}
 	return nil
 }

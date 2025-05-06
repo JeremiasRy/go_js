@@ -12,6 +12,6 @@ func (res *RegExpState) reset(i int, s string, sp string) {
 
 }
 
-func (this *Parser) NewRegExpState() *RegExpState {
+func (p *Parser) NewRegExpState() *RegExpState {
 	return &RegExpState{}
 }

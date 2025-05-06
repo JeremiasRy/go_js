@@ -62,26 +62,26 @@ type Parser struct {
 
 func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 	initEcmaUnicode()
-	this := Parser{}
+	p := Parser{}
 	opts := GetOptions(options)
-	this.options = opts
+	p.options = opts
 	options = opts
-	this.SourceFile = options.SourceFile
+	p.SourceFile = options.SourceFile
 
-	if this.getEcmaVersion() >= 6 {
-		this.Keywords = WordsRegexp(syntaxKeywords["6"])
+	if p.getEcmaVersion() >= 6 {
+		p.Keywords = WordsRegexp(syntaxKeywords["6"])
 	} else {
 		if options.SourceType == "module" {
-			this.Keywords = WordsRegexp(syntaxKeywords["5module"])
+			p.Keywords = WordsRegexp(syntaxKeywords["5module"])
 		} else {
 			WordsRegexp(syntaxKeywords["5"])
 		}
 	}
 	reserved := ""
 	if options.AllowReserved != ALLOW_RESERVED_TRUE {
-		if this.getEcmaVersion() >= 6 {
+		if p.getEcmaVersion() >= 6 {
 			reserved = reservedWords["6"]
-		} else if this.getEcmaVersion() == 5 {
+		} else if p.getEcmaVersion() == 5 {
 			reserved = reservedWords["5"]
 		} else {
 			reserved = reservedWords["3"]
@@ -91,89 +91,89 @@ func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 		}
 	}
 
-	this.ReservedWords = WordsRegexp(reserved)
+	p.ReservedWords = WordsRegexp(reserved)
 	reservedStrict := reservedWords["strict"]
 
 	if len(reserved) != 0 {
 		reservedStrict = reservedStrict + " " + reserved
 	}
-	this.ReservedWordsStrict = WordsRegexp(reservedStrict)
-	this.ReservedWordsStrictBind = WordsRegexp(reservedStrict + " " + reservedWords["strictBind"])
-	this.input = input
+	p.ReservedWordsStrict = WordsRegexp(reservedStrict)
+	p.ReservedWordsStrictBind = WordsRegexp(reservedStrict + " " + reservedWords["strictBind"])
+	p.input = input
 
 	// Used to signal to callers of `readWord1` whether the word
 	// contained any escape sequences. This is needed because words with
 	// escape sequences must not be interpreted as keywords.
-	this.ContainsEsc = false
+	p.ContainsEsc = false
 
 	// Set up token state
 
 	// The current position of the tokenizer in the input.
 	if startPos != 0 {
-		this.pos = startPos
-		this.LineStart = strings.LastIndex(string(this.input[:startPos-1]), "\n") + 1
-		this.CurLine = len(lineBreak.Split(string(this.input[:this.LineStart]), -1))
+		p.pos = startPos
+		p.LineStart = strings.LastIndex(string(p.input[:startPos-1]), "\n") + 1
+		p.CurLine = len(lineBreak.Split(string(p.input[:p.LineStart]), -1))
 	} else {
-		this.pos, this.LineStart = 0, 0
-		this.CurLine = 1
+		p.pos, p.LineStart = 0, 0
+		p.CurLine = 1
 	}
 
 	// Properties of the current token:
 	// Its type
-	this.Type = tokenTypes[TOKEN_EOF]
+	p.Type = tokenTypes[TOKEN_EOF]
 	// For tokens that include more information than their type, the value
-	this.Value = nil
+	p.Value = nil
 	// Its start and end offset
-	this.start, this.End = this.pos, this.pos
+	p.start, p.End = p.pos, p.pos
 	// And, if locations are used, the {line, column} object
 	// corresponding to those offsets
-	this.startLoc, this.EndLoc = this.currentPosition(), this.currentPosition()
+	p.startLoc, p.EndLoc = p.currentPosition(), p.currentPosition()
 
 	// Position information for the previous token
-	this.LastTokEndLoc, this.LastTokStartLoc = nil, nil
-	this.LastTokStart, this.LastTokEnd = this.pos, this.pos
+	p.LastTokEndLoc, p.LastTokStartLoc = nil, nil
+	p.LastTokStart, p.LastTokEnd = p.pos, p.pos
 
 	// The context stack is used to superficially track syntactic
 	// context to predict whether a regular expression is allowed in a
 	// given position.
-	this.Context = this.initialContext()
-	this.ExprAllowed = true
+	p.Context = p.initialContext()
+	p.ExprAllowed = true
 
 	// Figure out if it's a module code.
-	this.InModule = options.SourceType == "module"
-	this.Strict = this.InModule || this.strictDirective(this.pos)
+	p.InModule = options.SourceType == "module"
+	p.Strict = p.InModule || p.strictDirective(p.pos)
 
 	// Used to signify the start of a potential arrow function
-	this.PotentialArrowAt = -1
-	this.PotentialArrowInForAwait = false
+	p.PotentialArrowAt = -1
+	p.PotentialArrowInForAwait = false
 
 	// Positions to delayed-check that yield/await does not exist in default parameters.
-	this.YieldPos, this.AwaitPos, this.AwaitIdentPos = 0, 0, 0
+	p.YieldPos, p.AwaitPos, p.AwaitIdentPos = 0, 0, 0
 	// Labels in scope.
-	this.Labels = []Label{}
+	p.Labels = []Label{}
 	// Thus-far undefined exports.
-	this.UndefinedExports = map[string]*Node{}
+	p.UndefinedExports = map[string]*Node{}
 
 	// If enabled, skip leading hashbang line.
-	if this.pos == 0 && options.AllowHashBang && string(this.input[0:2]) == "#!" {
-		this.skipLineComment(2)
+	if p.pos == 0 && options.AllowHashBang && string(p.input[0:2]) == "#!" {
+		p.skipLineComment(2)
 	}
 
 	// Scope tracking for duplicate variable names (see scope.js)
-	this.ScopeStack = []*Scope{}
-	this.enterScope(SCOPE_TOP)
+	p.ScopeStack = []*Scope{}
+	p.enterScope(SCOPE_TOP)
 
 	// For RegExp validation
-	this.RegexpState = nil
+	p.RegexpState = nil
 
 	// The stack of private names.
 	// Each element has two properties: 'declared' and 'used'.
 	// When it exited from the outermost class definition, all used private names must be declared.
-	this.PrivateNameStack = []*PrivateName{}
-	this.initAllUpdateContext()
+	p.PrivateNameStack = []*PrivateName{}
+	p.initAllUpdateContext()
 
-	this.nextToken()
-	node, err := this.parseTopLevel(this.startNode())
+	p.nextToken()
+	node, err := p.parseTopLevel(p.startNode())
 
 	if err != nil {
 		return nil, err
@@ -228,8 +228,8 @@ func (p *Parser) allowNewDotTarget() bool {
 	return false
 }
 
-func (this *Parser) treatFunctionsAsVar() bool {
-	return this.treatFunctionsAsVarInScope(this.currentScope())
+func (p *Parser) treatFunctionsAsVar() bool {
+	return p.treatFunctionsAsVarInScope(p.currentScope())
 }
 func (p *Parser) getEcmaVersion() int {
 	if ecmaVersion, ok := p.options.ecmaVersion.(int); ok {
@@ -238,55 +238,55 @@ func (p *Parser) getEcmaVersion() int {
 	panic("Ecma verion was set to something weird")
 }
 
-func (this *Parser) raise(pos int, message string) error {
-	loc := getLineInfo(this.input, pos)
+func (p *Parser) raise(pos int, message string) error {
+	loc := getLineInfo(p.input, pos)
 	line := strconv.Itoa(loc.Line)
 	column := strconv.Itoa(loc.Column)
 	message += strings.Join([]string{" (", line, ":", column, ")"}, "")
 
-	if this.SourceFile != nil {
-		message += strings.Join([]string{" in ", *this.SourceFile}, "")
+	if p.SourceFile != nil {
+		message += strings.Join([]string{" in ", *p.SourceFile}, "")
 	}
 
 	return errors.New(message)
 }
 
-func (this *Parser) raiseRecoverable(pos int, message string) error {
-	return this.raise(pos, message)
+func (p *Parser) raiseRecoverable(pos int, message string) error {
+	return p.raise(pos, message)
 }
 
 // #### WHITESPACE
 
-func (this *Parser) skipSpace() error {
+func (p *Parser) skipSpace() error {
 Loop:
-	for this.pos < len(this.input) {
-		ch, size, _ := this.fullCharCodeAtPos()
+	for p.pos < len(p.input) {
+		ch, size, _ := p.fullCharCodeAtPos()
 		switch ch {
 		case 32, 160: // ' '
-			this.pos = this.pos + size
+			p.pos = p.pos + size
 		case 13:
-			if this.input[this.pos+size] == 10 {
-				this.pos = this.pos + size
+			if p.input[p.pos+size] == 10 {
+				p.pos = p.pos + size
 			}
 			fallthrough
 		case 10, 8232, 8233:
-			this.pos = this.pos + size
-			if this.options.Locations {
-				this.CurLine = this.CurLine + 1
-				this.LineStart = this.pos
+			p.pos = p.pos + size
+			if p.options.Locations {
+				p.CurLine = p.CurLine + 1
+				p.LineStart = p.pos
 			}
 		case 47: // '/'
-			switch this.input[this.pos+1] {
+			switch p.input[p.pos+1] {
 			case 42: // '*'
-				this.skipBlockComment()
+				p.skipBlockComment()
 			case 47:
-				this.skipLineComment(2)
+				p.skipLineComment(2)
 			default:
 				break Loop
 			}
 		default:
 			if ch > 8 && ch < 14 || ch >= 5760 && nonASCIIwhitespace.Match(utf8.AppendRune([]byte{}, ch)) {
-				this.pos = this.pos + size
+				p.pos = p.pos + size
 			} else {
 				break Loop
 			}
@@ -295,22 +295,22 @@ Loop:
 	return nil
 }
 
-func (this *Parser) skipBlockComment() error {
-	start := this.pos
-	this.pos += 2 // Skip "/*"
-	end := bytes.Index(this.input[this.pos:], []byte("*/"))
+func (p *Parser) skipBlockComment() error {
+	start := p.pos
+	p.pos += 2 // Skip "/*"
+	end := bytes.Index(p.input[p.pos:], []byte("*/"))
 	if end == -1 {
-		return this.raise(start, "Unterminated comment")
+		return p.raise(start, "Unterminated comment")
 	}
-	this.pos += end + 2 // Move past "*/"
+	p.pos += end + 2 // Move past "*/"
 	return nil
 }
 
 // #### SCOPE RELATED CODE
 
-func (this *Parser) braceIsBlock(prevType Token) bool {
-	parent := this.currentContext().Identifier
-	isExpr := this.currentContext().IsExpr
+func (p *Parser) braceIsBlock(prevType Token) bool {
+	parent := p.currentContext().Identifier
+	isExpr := p.currentContext().IsExpr
 
 	if parent == FUNCTION_EXPRESSION || parent == FUNCTION_STATEMENT {
 		return true
@@ -320,8 +320,8 @@ func (this *Parser) braceIsBlock(prevType Token) bool {
 		return !isExpr
 	}
 
-	if prevType == TOKEN_RETURN || prevType == TOKEN_NAME && this.ExprAllowed {
-		// return lineBreak.test(this.input.slice(this.lastTokEnd, this.start))
+	if prevType == TOKEN_RETURN || prevType == TOKEN_NAME && p.ExprAllowed {
+		// return lineBreak.test(p.input.slice(p.lastTokEnd, p.start))
 	}
 
 	if prevType == TOKEN_ELSE || prevType == TOKEN_SEMI || prevType == TOKEN_EOF || prevType == TOKEN_PARENR || prevType == TOKEN_ARROW {
@@ -336,34 +336,34 @@ func (this *Parser) braceIsBlock(prevType Token) bool {
 		return false
 	}
 
-	return !this.ExprAllowed
+	return !p.ExprAllowed
 }
 
-func (this *Parser) enterScope(flags Flags) {
-	this.ScopeStack = append(this.ScopeStack, NewScope(flags))
+func (p *Parser) enterScope(flags Flags) {
+	p.ScopeStack = append(p.ScopeStack, NewScope(flags))
 }
 
-func (this *Parser) exitScope() {
-	this.ScopeStack = this.ScopeStack[:len(this.ScopeStack)-1]
+func (p *Parser) exitScope() {
+	p.ScopeStack = p.ScopeStack[:len(p.ScopeStack)-1]
 }
 
-func (this *Parser) currentScope() *Scope {
-	return this.ScopeStack[len(this.ScopeStack)-1]
+func (p *Parser) currentScope() *Scope {
+	return p.ScopeStack[len(p.ScopeStack)-1]
 }
 
 // #### CONTEXT RELATED CODE
 
-func (this *Parser) initialContext() []*TokenContext {
+func (p *Parser) initialContext() []*TokenContext {
 	return []*TokenContext{TokenContexts[BRACKET_STATEMENT]}
 }
 
-func (this *Parser) currentContext() *TokenContext {
-	return this.Context[len(this.Context)-1]
+func (p *Parser) currentContext() *TokenContext {
+	return p.Context[len(p.Context)-1]
 }
 
-func (this *Parser) inGeneratorContext() bool {
-	for i := len(this.Context) - 1; i >= 1; i-- {
-		context := this.Context[i]
+func (p *Parser) inGeneratorContext() bool {
+	for i := len(p.Context) - 1; i >= 1; i-- {
+		context := p.Context[i]
 		if context.Token == "function" {
 			return context.Generator
 		}
@@ -371,68 +371,68 @@ func (this *Parser) inGeneratorContext() bool {
 	return false
 }
 
-func (this *Parser) updateContext(prevType *TokenType) {
-	update, current := this.Type, this.Type
+func (p *Parser) updateContext(prevType *TokenType) {
+	update, current := p.Type, p.Type
 	if len(current.keyword) != 0 && prevType.identifier == TOKEN_DOT {
-		this.ExprAllowed = false
+		p.ExprAllowed = false
 	} else if current.updateContext != nil {
 		update.updateContext = current.updateContext
 		update.updateContext.updateContext(prevType)
 	} else {
-		this.ExprAllowed = current.beforeExpr
+		p.ExprAllowed = current.beforeExpr
 	}
 }
 
-func (this *Parser) overrideContext(tokenCtx *TokenContext) {
-	if this.currentContext().Identifier != tokenCtx.Identifier {
-		this.Context[len(this.Context)-1] = tokenCtx
+func (p *Parser) overrideContext(tokenCtx *TokenContext) {
+	if p.currentContext().Identifier != tokenCtx.Identifier {
+		p.Context[len(p.Context)-1] = tokenCtx
 	}
 }
 
-func (this *Parser) initAllUpdateContext() {
+func (p *Parser) initAllUpdateContext() {
 	tokenTypes[TOKEN_PARENR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if len(this.Context) == 1 {
-			this.ExprAllowed = true
+		if len(p.Context) == 1 {
+			p.ExprAllowed = true
 			return
 		}
 
-		out := this.Context[len(this.Context)-1]
-		this.Context = this.Context[:len(this.Context)-1]
-		if out.Identifier == BRACKET_STATEMENT && this.currentContext().Token == "function" {
-			out = this.Context[len(this.Context)-1]
-			this.Context = this.Context[:len(this.Context)-1]
+		out := p.Context[len(p.Context)-1]
+		p.Context = p.Context[:len(p.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && p.currentContext().Token == "function" {
+			out = p.Context[len(p.Context)-1]
+			p.Context = p.Context[:len(p.Context)-1]
 		}
-		this.ExprAllowed = !out.IsExpr
+		p.ExprAllowed = !out.IsExpr
 	}}
 
 	tokenTypes[TOKEN_BRACER].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if len(this.Context) == 1 {
-			this.ExprAllowed = true
+		if len(p.Context) == 1 {
+			p.ExprAllowed = true
 			return
 		}
 
-		out := this.Context[len(this.Context)-1]
-		this.Context = this.Context[:len(this.Context)-1]
-		if out.Identifier == BRACKET_STATEMENT && this.currentContext().Token == "function" {
-			out = this.Context[len(this.Context)-1]
-			this.Context = this.Context[:len(this.Context)-1]
+		out := p.Context[len(p.Context)-1]
+		p.Context = p.Context[:len(p.Context)-1]
+		if out.Identifier == BRACKET_STATEMENT && p.currentContext().Token == "function" {
+			out = p.Context[len(p.Context)-1]
+			p.Context = p.Context[:len(p.Context)-1]
 		}
-		this.ExprAllowed = !out.IsExpr
+		p.ExprAllowed = !out.IsExpr
 	}}
 
 	tokenTypes[TOKEN_BRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if this.braceIsBlock(token.identifier) {
-			this.Context = append(this.Context, TokenContexts[BRACKET_STATEMENT])
+		if p.braceIsBlock(token.identifier) {
+			p.Context = append(p.Context, TokenContexts[BRACKET_STATEMENT])
 		} else {
-			this.Context = append(this.Context, TokenContexts[BRACKET_EXPRESSION])
+			p.Context = append(p.Context, TokenContexts[BRACKET_EXPRESSION])
 		}
-		this.ExprAllowed = true
+		p.ExprAllowed = true
 
 	}}
 
 	tokenTypes[TOKEN_DOLLARBRACEL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		this.Context = append(this.Context, TokenContexts[BRACKET_TEMPLATE])
-		this.ExprAllowed = true
+		p.Context = append(p.Context, TokenContexts[BRACKET_TEMPLATE])
+		p.ExprAllowed = true
 	}}
 
 	tokenTypes[TOKEN_PARENL].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
@@ -440,11 +440,11 @@ func (this *Parser) initAllUpdateContext() {
 
 		if statementParens {
 
-			this.Context = append(this.Context, TokenContexts[PAREN_STATEMENT])
+			p.Context = append(p.Context, TokenContexts[PAREN_STATEMENT])
 		} else {
-			this.Context = append(this.Context, TokenContexts[PAREN_EXPRESSION])
+			p.Context = append(p.Context, TokenContexts[PAREN_EXPRESSION])
 		}
-		this.ExprAllowed = true
+		p.ExprAllowed = true
 	}}
 
 	tokenTypes[TOKEN_INCDEC].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
@@ -454,50 +454,50 @@ func (this *Parser) initAllUpdateContext() {
 	tokenTypes[TOKEN_FUNCTION].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
 		prevType := token.identifier
 
-		if token.beforeExpr && prevType == TOKEN_ELSE && !(prevType == TOKEN_SEMI && this.currentContext().Identifier == PAREN_STATEMENT) && !(prevType == TOKEN_RETURN /*&& lineBreak.test(this.input.slice(this.lastTokEnd, this.start)))*/) && !((prevType == TOKEN_COLON || prevType == TOKEN_BRACEL) && this.currentContext().Identifier == BRACKET_STATEMENT) {
-			this.Context = append(this.Context, TokenContexts[FUNCTION_EXPRESSION])
+		if token.beforeExpr && prevType == TOKEN_ELSE && !(prevType == TOKEN_SEMI && p.currentContext().Identifier == PAREN_STATEMENT) && !(prevType == TOKEN_RETURN /*&& lineBreak.test(p.input.slice(p.lastTokEnd, p.start)))*/) && !((prevType == TOKEN_COLON || prevType == TOKEN_BRACEL) && p.currentContext().Identifier == BRACKET_STATEMENT) {
+			p.Context = append(p.Context, TokenContexts[FUNCTION_EXPRESSION])
 		} else {
-			this.Context = append(this.Context, TokenContexts[FUNCTION_STATEMENT])
+			p.Context = append(p.Context, TokenContexts[FUNCTION_STATEMENT])
 		}
 	}}
 
 	tokenTypes[TOKEN_COLON].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if this.currentContext().Token == "function" {
-			this.Context = this.Context[:len(this.Context)-1]
+		if p.currentContext().Token == "function" {
+			p.Context = p.Context[:len(p.Context)-1]
 		}
-		this.ExprAllowed = true
+		p.ExprAllowed = true
 	}}
 
 	tokenTypes[TOKEN_BACKQUOTE].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
-		if this.currentContext().Identifier == QUOTE_TEMPLATE {
-			this.Context = this.Context[:len(this.Context)-1]
+		if p.currentContext().Identifier == QUOTE_TEMPLATE {
+			p.Context = p.Context[:len(p.Context)-1]
 		} else {
-			this.Context = append(this.Context, TokenContexts[QUOTE_TEMPLATE])
+			p.Context = append(p.Context, TokenContexts[QUOTE_TEMPLATE])
 		}
 	}}
 
 	tokenTypes[TOKEN_STAR].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
 		if token.identifier == TOKEN_FUNCTION {
-			idx := len(this.Context) - 1
+			idx := len(p.Context) - 1
 
-			if this.Context[idx].Identifier == FUNCTION_EXPRESSION {
-				this.Context[idx] = TokenContexts[FUNCTION_EXPRESSION_GENERATOR]
+			if p.Context[idx].Identifier == FUNCTION_EXPRESSION {
+				p.Context[idx] = TokenContexts[FUNCTION_EXPRESSION_GENERATOR]
 			} else {
-				this.Context[idx] = TokenContexts[FUNCTION_GENERATOR]
+				p.Context[idx] = TokenContexts[FUNCTION_GENERATOR]
 			}
-			this.ExprAllowed = true
+			p.ExprAllowed = true
 		}
 	}}
 
 	tokenTypes[TOKEN_NAME].updateContext = &UpdateContext{updateContext: func(token *TokenType) {
 		allowed := false
 
-		if this.getEcmaVersion() >= 6 && token.identifier != TOKEN_DOT {
-			if this.Value == "of" && !this.ExprAllowed || this.Value == "yield" || this.inGeneratorContext() {
+		if p.getEcmaVersion() >= 6 && token.identifier != TOKEN_DOT {
+			if p.Value == "of" && !p.ExprAllowed || p.Value == "yield" || p.inGeneratorContext() {
 				allowed = true
 			}
 		}
-		this.ExprAllowed = allowed
+		p.ExprAllowed = allowed
 	}}
 }
 

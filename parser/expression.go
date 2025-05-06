@@ -8,12 +8,12 @@ import (
 
 // EXPRESSION PARSING
 
-func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestructuringErrors *DestructuringErrors) error {
-	if this.getEcmaVersion() >= 9 && prop.Type == NODE_SPREAD_ELEMENT {
+func (p *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestructuringErrors *DestructuringErrors) error {
+	if p.getEcmaVersion() >= 9 && prop.Type == NODE_SPREAD_ELEMENT {
 		return nil
 	}
 
-	if this.getEcmaVersion() >= 6 && (prop.Computed || prop.IsMethod || prop.Shorthand) {
+	if p.getEcmaVersion() >= 6 && (prop.Computed || prop.IsMethod || prop.Shorthand) {
 		return nil
 	}
 
@@ -35,7 +35,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 
 	kind := prop.Kind
 
-	if this.getEcmaVersion() >= 6 {
+	if p.getEcmaVersion() >= 6 {
 		if name == "__proto__" && kind == KIND_PROPERTY_INIT {
 			if propHash.proto {
 				if refDestructuringErrors != nil {
@@ -43,7 +43,7 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 						refDestructuringErrors.doubleProto = key.Start
 					}
 				} else {
-					return this.raiseRecoverable(key.Start, "Redefinition of __proto__ property")
+					return p.raiseRecoverable(key.Start, "Redefinition of __proto__ property")
 				}
 			}
 			propHash.proto = true
@@ -55,12 +55,12 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 	if other, found := propHash.m[name]; found {
 		redefinition := false
 		if kind == KIND_PROPERTY_INIT {
-			redefinition = this.Strict && other[KIND_PROPERTY_INIT] || other[KIND_PROPERTY_GET] || other[KIND_PROPERTY_SET]
+			redefinition = p.Strict && other[KIND_PROPERTY_INIT] || other[KIND_PROPERTY_GET] || other[KIND_PROPERTY_SET]
 		} else {
 			redefinition = other[KIND_PROPERTY_INIT] || other[kind]
 		}
 		if redefinition {
-			this.raiseRecoverable(key.Start, "Redefinition of property")
+			p.raiseRecoverable(key.Start, "Redefinition of property")
 		}
 	} else {
 		newInfo := map[Kind]bool{
@@ -75,36 +75,36 @@ func (this *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestru
 	return nil
 }
 
-func (this *Parser) parseExpression(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	startPos, startLoc := this.start, this.startLoc
-	expr, err := this.parseMaybeAssign(forInit, refDestructuringErrors, nil)
+func (p *Parser) parseExpression(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := p.start, p.startLoc
+	expr, err := p.parseMaybeAssign(forInit, refDestructuringErrors, nil)
 
 	if err != nil {
 		return nil, err
 	}
-	if this.Type.identifier == TOKEN_COMMA {
-		node := this.startNodeAt(startPos, startLoc)
+	if p.Type.identifier == TOKEN_COMMA {
+		node := p.startNodeAt(startPos, startLoc)
 		node.Expressions = []*Node{expr}
 
-		for this.eat(TOKEN_COMMA) {
-			maybeAssign, err := this.parseMaybeAssign(forInit, refDestructuringErrors, nil)
+		for p.eat(TOKEN_COMMA) {
+			maybeAssign, err := p.parseMaybeAssign(forInit, refDestructuringErrors, nil)
 			if err != nil {
 				return nil, err
 			}
 			node.Expressions = append(node.Expressions, maybeAssign)
 		}
 
-		return this.finishNode(node, NODE_SEQUENCE_EXPRESSION), nil
+		return p.finishNode(node, NODE_SEQUENCE_EXPRESSION), nil
 	}
 	return expr, nil
 }
 
-func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *DestructuringErrors, afterLeftParse *struct {
+func (p *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *DestructuringErrors, afterLeftParse *struct {
 	call func(p *Parser, l *Node, s int, sl *Location) (*Node, error)
 }) (*Node, error) {
-	if this.isContextual("yield") {
-		if this.inGenerator() {
-			yield, err := this.parseYield(forInit)
+	if p.isContextual("yield") {
+		if p.inGenerator() {
+			yield, err := p.parseYield(forInit)
 			if err != nil {
 				return nil, err
 			}
@@ -112,7 +112,7 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 		} else {
 			// The tokenizer will assume an expression is allowed after
 			// `yield`, but this isn't that kind of yield
-			this.ExprAllowed = false
+			p.ExprAllowed = false
 		}
 	}
 
@@ -128,38 +128,38 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 		ownDestructuringErrors = true
 	}
 
-	startPos, startLoc := this.start, this.startLoc
+	startPos, startLoc := p.start, p.startLoc
 
-	if this.Type.identifier == TOKEN_PARENL || this.Type.identifier == TOKEN_NAME {
-		this.PotentialArrowAt = this.start
-		this.PotentialArrowInForAwait = forInit == "await"
+	if p.Type.identifier == TOKEN_PARENL || p.Type.identifier == TOKEN_NAME {
+		p.PotentialArrowAt = p.start
+		p.PotentialArrowInForAwait = forInit == "await"
 	}
-	left, err := this.parseMaybeConditional(forInit, refDestructuringErrors)
+	left, err := p.parseMaybeConditional(forInit, refDestructuringErrors)
 
 	if err != nil {
 		return nil, err
 	}
 
 	if afterLeftParse != nil {
-		newLeft, err := afterLeftParse.call(this, left, startPos, startLoc)
+		newLeft, err := afterLeftParse.call(p, left, startPos, startLoc)
 		if err != nil {
 			return nil, err
 		}
 		left = newLeft
 	}
 
-	if this.Type.isAssign {
-		node := this.startNodeAt(startPos, startLoc)
+	if p.Type.isAssign {
+		node := p.startNodeAt(startPos, startLoc)
 		var op AssignmentOperator
 
-		if byteSlice, ok := this.Value.([]byte); ok {
+		if byteSlice, ok := p.Value.([]byte); ok {
 			op = AssignmentOperator(byteSlice)
 		} else {
-			return nil, fmt.Errorf("invalid this.Value expected []byte, got: %q", this.Value)
+			return nil, fmt.Errorf("invalid p.Value expected []byte, got: %q", p.Value)
 		}
 		node.AssignmentOperator = op
-		if this.Type.identifier == TOKEN_EQ {
-			left, err = this.toAssignable(left, false, refDestructuringErrors)
+		if p.Type.identifier == TOKEN_EQ {
+			left, err = p.toAssignable(left, false, refDestructuringErrors)
 
 			if err != nil {
 				return nil, err
@@ -175,21 +175,21 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 			refDestructuringErrors.shorthandAssign = -1 // reset because shorthand default was used correctly
 		}
 
-		if this.Type.identifier == TOKEN_EQ {
-			this.checkLValPattern(left, 0, struct {
+		if p.Type.identifier == TOKEN_EQ {
+			p.checkLValPattern(left, 0, struct {
 				check bool
 				hash  map[string]bool
 			}{check: false, hash: map[string]bool{}})
 		} else {
-			this.checkLValSimple(left, 0, struct {
+			p.checkLValSimple(left, 0, struct {
 				check bool
 				hash  map[string]bool
 			}{check: false, hash: map[string]bool{}})
 		}
 
 		node.Left = left
-		this.next(false)
-		right, err := this.parseMaybeAssign(forInit, refDestructuringErrors, nil)
+		p.next(false)
+		right, err := p.parseMaybeAssign(forInit, refDestructuringErrors, nil)
 
 		if err != nil {
 			return nil, err
@@ -200,10 +200,10 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 			refDestructuringErrors.doubleProto = oldDoubleProto
 
 		}
-		return this.finishNode(node, NODE_ASSIGNMENT_EXPRESSION), nil
+		return p.finishNode(node, NODE_ASSIGNMENT_EXPRESSION), nil
 	} else {
 		if ownDestructuringErrors {
-			_, err := this.checkExpressionErrors(refDestructuringErrors, true)
+			_, err := p.checkExpressionErrors(refDestructuringErrors, true)
 			if err != nil {
 				return nil, err
 			}
@@ -218,43 +218,43 @@ func (this *Parser) parseMaybeAssign(forInit string, refDestructuringErrors *Des
 	return left, nil
 }
 
-func (this *Parser) parseMaybeConditional(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	startPos, startLoc := this.start, this.startLoc
-	expr, err := this.parseExprOps(forInit, refDestructuringErrors)
+func (p *Parser) parseMaybeConditional(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := p.start, p.startLoc
+	expr, err := p.parseExprOps(forInit, refDestructuringErrors)
 
 	if err != nil {
 		return nil, err
 	}
 
-	exprError, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+	exprError, _ := p.checkExpressionErrors(refDestructuringErrors, false)
 	if exprError {
 		return expr, nil
 	}
-	if this.eat(TOKEN_QUESTION) {
-		node := this.startNodeAt(startPos, startLoc)
+	if p.eat(TOKEN_QUESTION) {
+		node := p.startNodeAt(startPos, startLoc)
 		node.Test = expr
-		maybeAssign, err := this.parseMaybeAssign("", nil, nil)
+		maybeAssign, err := p.parseMaybeAssign("", nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		node.Consequent = maybeAssign
 
-		errExpect := this.expect(TOKEN_COLON)
+		errExpect := p.expect(TOKEN_COLON)
 		if errExpect != nil {
 			return nil, err
 		}
 
-		maybeAssignElse, errElse := this.parseMaybeAssign(forInit, nil, nil)
+		maybeAssignElse, errElse := p.parseMaybeAssign(forInit, nil, nil)
 		if errElse != nil {
 			return nil, errElse
 		}
 		node.Alternate = maybeAssignElse
-		return this.finishNode(node, NODE_CONDITIONAL_EXPRESSION), nil
+		return p.finishNode(node, NODE_CONDITIONAL_EXPRESSION), nil
 	}
 	return expr, nil
 }
 
-func (this *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringErrors, andThrow bool) (bool, error) {
+func (p *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringErrors, andThrow bool) (bool, error) {
 	if refDestructuringErrors == nil {
 		return false, nil
 	}
@@ -264,22 +264,22 @@ func (this *Parser) checkExpressionErrors(refDestructuringErrors *DestructuringE
 	}
 
 	if shorthandAssign >= 0 {
-		return true, this.raise(shorthandAssign, "Shorthand property assignments are valid only in destructuring patterns")
+		return true, p.raise(shorthandAssign, "Shorthand property assignments are valid only in destructuring patterns")
 	}
 
 	if doubleProto >= 0 {
-		return true, this.raiseRecoverable(doubleProto, "Redefinition of __proto__ property")
+		return true, p.raiseRecoverable(doubleProto, "Redefinition of __proto__ property")
 	}
 	return false, nil
 }
 
-func (this *Parser) parseSubscripts(base *Node, startPos int, startLoc *Location, noCalls bool, forInit string) (*Node, error) {
-	maybeAsyncArrow, optionalChained := this.getEcmaVersion() >= 8 && base.Type == NODE_IDENTIFIER && base.Name == "async" &&
-		this.LastTokEnd == base.End && !this.canInsertSemicolon() && base.End-base.Start == 5 &&
-		this.PotentialArrowAt == base.Start, false
+func (p *Parser) parseSubscripts(base *Node, startPos int, startLoc *Location, noCalls bool, forInit string) (*Node, error) {
+	maybeAsyncArrow, optionalChained := p.getEcmaVersion() >= 8 && base.Type == NODE_IDENTIFIER && base.Name == "async" &&
+		p.LastTokEnd == base.End && !p.canInsertSemicolon() && base.End-base.Start == 5 &&
+		p.PotentialArrowAt == base.Start, false
 
 	for {
-		element, err := this.parseSubscript(base, startPos, startLoc, noCalls, maybeAsyncArrow, optionalChained, forInit)
+		element, err := p.parseSubscript(base, startPos, startLoc, noCalls, maybeAsyncArrow, optionalChained, forInit)
 
 		if err != nil {
 			return nil, err
@@ -291,9 +291,9 @@ func (this *Parser) parseSubscripts(base *Node, startPos int, startLoc *Location
 
 		if element == base || element.Type == NODE_ARROW_FUNCTION_EXPRESSION {
 			if optionalChained {
-				chainNode := this.startNodeAt(startPos, startLoc)
+				chainNode := p.startNodeAt(startPos, startLoc)
 				chainNode.Expression = element
-				element = this.finishNode(chainNode, NODE_CHAIN_EXPRESSION)
+				element = p.finishNode(chainNode, NODE_CHAIN_EXPRESSION)
 			}
 			return element, nil
 		}
@@ -301,38 +301,38 @@ func (this *Parser) parseSubscripts(base *Node, startPos int, startLoc *Location
 	}
 }
 
-func (this *Parser) parseSubscript(base *Node, startPos int, startLoc *Location, noCalls bool, maybeAsyncArrow bool, optionalChained bool, forInit string) (*Node, error) {
-	optionalSupported := this.getEcmaVersion() >= 11
-	optional := optionalSupported && this.eat(TOKEN_QUESTIONDOT)
+func (p *Parser) parseSubscript(base *Node, startPos int, startLoc *Location, noCalls bool, maybeAsyncArrow bool, optionalChained bool, forInit string) (*Node, error) {
+	optionalSupported := p.getEcmaVersion() >= 11
+	optional := optionalSupported && p.eat(TOKEN_QUESTIONDOT)
 
 	if noCalls && optional {
-		return nil, this.raise(this.LastTokStart, "Optional chaining cannot appear in the callee of new expressions")
+		return nil, p.raise(p.LastTokStart, "Optional chaining cannot appear in the callee of new expressions")
 	}
 
-	computed := this.eat(TOKEN_BRACKETL)
+	computed := p.eat(TOKEN_BRACKETL)
 
-	if computed || optional && this.Type.identifier != TOKEN_PARENL && this.Type.identifier != TOKEN_BACKQUOTE || this.eat(TOKEN_DOT) {
-		node := this.startNodeAt(startPos, startLoc)
+	if computed || optional && p.Type.identifier != TOKEN_PARENL && p.Type.identifier != TOKEN_BACKQUOTE || p.eat(TOKEN_DOT) {
+		node := p.startNodeAt(startPos, startLoc)
 		node.Object = base
 		if computed {
-			prop, err := this.parseExpression("", nil)
+			prop, err := p.parseExpression("", nil)
 			if err != nil {
 				return nil, err
 			}
 			node.Property = prop
-			err = this.expect(TOKEN_BRACKETR)
+			err = p.expect(TOKEN_BRACKETR)
 
 			if err != nil {
 				return nil, err
 			}
-		} else if this.Type.identifier == TOKEN_PRIVATEID && base.Type != NODE_SUPER {
-			privIdent, err := this.parsePrivateIdent()
+		} else if p.Type.identifier == TOKEN_PRIVATEID && base.Type != NODE_SUPER {
+			privIdent, err := p.parsePrivateIdent()
 			if err != nil {
 				return nil, err
 			}
 			node.Property = privIdent
 		} else {
-			ident, err := this.parseIdent(this.options.AllowReserved != ALLOW_RESERVED_NEVER)
+			ident, err := p.parseIdent(p.options.AllowReserved != ALLOW_RESERVED_NEVER)
 			if err != nil {
 				return nil, err
 			}
@@ -342,68 +342,68 @@ func (this *Parser) parseSubscript(base *Node, startPos int, startLoc *Location,
 		if optionalSupported {
 			node.Optional = optional
 		}
-		base = this.finishNode(node, NODE_MEMBER_EXPRESSION)
-	} else if !noCalls && this.eat(TOKEN_PARENL) {
-		refDestructuringErrors, oldYieldPos, oldAwaitPos, oldAwaitIdentPos := NewDestructuringErrors(), this.YieldPos, this.AwaitPos, this.AwaitIdentPos
-		this.YieldPos = 0
-		this.AwaitPos = 0
-		this.AwaitIdentPos = 0
-		exprList, err := this.parseExprList(TOKEN_PARENR, this.getEcmaVersion() >= 8, false, refDestructuringErrors)
+		base = p.finishNode(node, NODE_MEMBER_EXPRESSION)
+	} else if !noCalls && p.eat(TOKEN_PARENL) {
+		refDestructuringErrors, oldYieldPos, oldAwaitPos, oldAwaitIdentPos := NewDestructuringErrors(), p.YieldPos, p.AwaitPos, p.AwaitIdentPos
+		p.YieldPos = 0
+		p.AwaitPos = 0
+		p.AwaitIdentPos = 0
+		exprList, err := p.parseExprList(TOKEN_PARENR, p.getEcmaVersion() >= 8, false, refDestructuringErrors)
 
 		if err != nil {
 			return nil, err
 		}
 
-		if maybeAsyncArrow && !optional && this.shouldParseAsyncArrow() {
-			this.checkPatternErrors(refDestructuringErrors, false)
-			this.checkYieldAwaitInDefaultParams()
-			if this.AwaitIdentPos > 0 {
-				return nil, this.raise(this.AwaitIdentPos, "Cannot use 'await' as identifier inside an async function")
+		if maybeAsyncArrow && !optional && p.shouldParseAsyncArrow() {
+			p.checkPatternErrors(refDestructuringErrors, false)
+			p.checkYieldAwaitInDefaultParams()
+			if p.AwaitIdentPos > 0 {
+				return nil, p.raise(p.AwaitIdentPos, "Cannot use 'await' as identifier inside an async function")
 			}
 
-			this.YieldPos = oldYieldPos
-			this.AwaitPos = oldAwaitPos
-			this.AwaitIdentPos = oldAwaitIdentPos
-			asyncArr, err := this.parseSubscriptAsyncArrow(startPos, startLoc, exprList, forInit)
+			p.YieldPos = oldYieldPos
+			p.AwaitPos = oldAwaitPos
+			p.AwaitIdentPos = oldAwaitIdentPos
+			asyncArr, err := p.parseSubscriptAsyncArrow(startPos, startLoc, exprList, forInit)
 			return asyncArr, err
 		}
 
-		_, err = this.checkExpressionErrors(refDestructuringErrors, true)
+		_, err = p.checkExpressionErrors(refDestructuringErrors, true)
 
 		if err != nil {
 			return nil, err
 		}
 
 		if oldYieldPos != 0 {
-			this.YieldPos = oldYieldPos
+			p.YieldPos = oldYieldPos
 		}
 
 		if oldAwaitPos != 0 {
-			this.AwaitPos = oldAwaitPos
+			p.AwaitPos = oldAwaitPos
 		}
 
 		if oldAwaitIdentPos != 0 {
-			this.AwaitIdentPos = oldAwaitIdentPos
+			p.AwaitIdentPos = oldAwaitIdentPos
 		}
-		node := this.startNodeAt(startPos, startLoc)
+		node := p.startNodeAt(startPos, startLoc)
 		node.Callee = base
 		node.Arguments = exprList
 		if optionalSupported {
 			node.Optional = optional
 		}
-		base = this.finishNode(node, NODE_CALL_EXPRESSION)
-	} else if this.Type.identifier == TOKEN_BACKQUOTE {
+		base = p.finishNode(node, NODE_CALL_EXPRESSION)
+	} else if p.Type.identifier == TOKEN_BACKQUOTE {
 		if optional || optionalChained {
-			return nil, this.raise(this.start, "Optional chaining cannot appear in the tag of tagged template expressions")
+			return nil, p.raise(p.start, "Optional chaining cannot appear in the tag of tagged template expressions")
 		}
-		node := this.startNodeAt(startPos, startLoc)
+		node := p.startNodeAt(startPos, startLoc)
 		node.Tag = base
-		tmpl, err := this.parseTemplate(struct{ isTagged bool }{isTagged: true})
+		tmpl, err := p.parseTemplate(struct{ isTagged bool }{isTagged: true})
 		if err != nil {
 			return nil, err
 		}
 		node.Quasi = tmpl
-		base = this.finishNode(node, NODE_TAGGED_TEMPLATE_EXPRESSION)
+		base = p.finishNode(node, NODE_TAGGED_TEMPLATE_EXPRESSION)
 	}
 	return base, nil
 }
@@ -413,33 +413,33 @@ func isLocalVariableAccess(node *Node) bool {
 		node.Type == NODE_PARENTHESIZED_EXPRESSION && isLocalVariableAccess(node.Expression)
 }
 
-func (this *Parser) parseAwait(forInit string) (*Node, error) {
-	if !(this.AwaitPos != 0) {
-		this.AwaitPos = this.start
+func (p *Parser) parseAwait(forInit string) (*Node, error) {
+	if !(p.AwaitPos != 0) {
+		p.AwaitPos = p.start
 	}
 
-	node := this.startNode()
-	this.next(false)
-	maybeUnary, err := this.parseMaybeUnary(nil, true, false, forInit)
+	node := p.startNode()
+	p.next(false)
+	maybeUnary, err := p.parseMaybeUnary(nil, true, false, forInit)
 	if err != nil {
 		return nil, err
 	}
 	node.Argument = maybeUnary
-	return this.finishNode(node, NODE_AWAIT_EXPRESSION), nil
+	return p.finishNode(node, NODE_AWAIT_EXPRESSION), nil
 }
 
-func (this *Parser) parseExprSubscripts(refDestructuringErrors *DestructuringErrors, forInit string) (*Node, error) {
-	startPos, startLoc := this.start, this.startLoc
-	expr, err := this.parseExprAtom(refDestructuringErrors, forInit, false)
+func (p *Parser) parseExprSubscripts(refDestructuringErrors *DestructuringErrors, forInit string) (*Node, error) {
+	startPos, startLoc := p.start, p.startLoc
+	expr, err := p.parseExprAtom(refDestructuringErrors, forInit, false)
 
 	if err != nil {
 		return nil, err
 	}
-	if expr.Type == NODE_ARROW_FUNCTION_EXPRESSION && string(this.input[this.LastTokStart:this.LastTokEnd]) != ")" {
+	if expr.Type == NODE_ARROW_FUNCTION_EXPRESSION && string(p.input[p.LastTokStart:p.LastTokEnd]) != ")" {
 		return expr, nil
 
 	}
-	result, err := this.parseSubscripts(expr, startPos, startLoc, false, forInit)
+	result, err := p.parseSubscripts(expr, startPos, startLoc, false, forInit)
 	if err != nil {
 		return nil, err
 	}
@@ -457,107 +457,107 @@ func (this *Parser) parseExprSubscripts(refDestructuringErrors *DestructuringErr
 	return result, nil
 }
 
-func (this *Parser) buildBinary(startPos int, startLoc *Location, left *Node, right *Node, op BinaryOperator, logical bool) (*Node, error) {
+func (p *Parser) buildBinary(startPos int, startLoc *Location, left *Node, right *Node, op BinaryOperator, logical bool) (*Node, error) {
 	if right.Type == NODE_PRIVATE_IDENTIFIER {
-		return nil, this.raise(right.Start, "Private identifier can only be left side of binary expression")
+		return nil, p.raise(right.Start, "Private identifier can only be left side of binary expression")
 	}
-	node := this.startNodeAt(startPos, startLoc)
+	node := p.startNodeAt(startPos, startLoc)
 	node.Left = left
 	node.BinaryOperator = op
 	node.Right = right
 	if logical {
-		return this.finishNode(node, NODE_LOGICAL_EXPRESSION), nil
+		return p.finishNode(node, NODE_LOGICAL_EXPRESSION), nil
 	}
-	return this.finishNode(node, NODE_BINARY_EXPRESSION), nil
+	return p.finishNode(node, NODE_BINARY_EXPRESSION), nil
 }
 
-func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors, sawUnary bool, incDec bool, forInit string) (*Node, error) {
-	startPos, startLoc := this.start, this.startLoc
+func (p *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors, sawUnary bool, incDec bool, forInit string) (*Node, error) {
+	startPos, startLoc := p.start, p.startLoc
 	var expr *Node
 	var err error
 
-	if this.isContextual("await") && this.canAwait() {
-		expr, err = this.parseAwait(forInit)
+	if p.isContextual("await") && p.canAwait() {
+		expr, err = p.parseAwait(forInit)
 		if err != nil {
 			return nil, err
 		}
 		sawUnary = true
-	} else if this.Type.prefix {
-		node, update := this.startNode(), this.Type.identifier == TOKEN_INCDEC
-		if uop, ok := this.Value.([]byte); ok {
+	} else if p.Type.prefix {
+		node, update := p.startNode(), p.Type.identifier == TOKEN_INCDEC
+		if uop, ok := p.Value.([]byte); ok {
 			node.UnaryOperator = UnaryOperator(uop)
 		} else {
-			panic("this.Value was not []byte as expected")
+			panic("p.Value was not []byte as expected")
 		}
 
 		node.Prefix = true
-		this.next(false)
-		maybeUnary, err := this.parseMaybeUnary(nil, true, update, forInit)
+		p.next(false)
+		maybeUnary, err := p.parseMaybeUnary(nil, true, update, forInit)
 		if err != nil {
 			return nil, err
 		}
 
 		node.Argument = maybeUnary
-		_, err = this.checkExpressionErrors(refDestructuringErrors, true)
+		_, err = p.checkExpressionErrors(refDestructuringErrors, true)
 
 		if err != nil {
 			return nil, err
 		}
 
 		if update {
-			err := this.checkLValSimple(node.Argument, 0, struct {
+			err := p.checkLValSimple(node.Argument, 0, struct {
 				check bool
 				hash  map[string]bool
 			}{check: false, hash: map[string]bool{}})
 			if err != nil {
 				return nil, err
 			}
-		} else if this.Strict && node.UnaryOperator == UNARY_DELETE && isLocalVariableAccess(node.Argument) {
-			return nil, this.raiseRecoverable(node.Start, "Deleting local variable in strict mode")
+		} else if p.Strict && node.UnaryOperator == UNARY_DELETE && isLocalVariableAccess(node.Argument) {
+			return nil, p.raiseRecoverable(node.Start, "Deleting local variable in strict mode")
 		} else if node.UnaryOperator == UNARY_DELETE && isPrivateFieldAccess(node.Argument) {
-			return nil, this.raiseRecoverable(node.Start, "Private fields can not be deleted")
+			return nil, p.raiseRecoverable(node.Start, "Private fields can not be deleted")
 		} else {
 			sawUnary = true
 		}
 
 		if update {
-			expr = this.finishNode(node, NODE_UPDATE_EXPRESSION)
+			expr = p.finishNode(node, NODE_UPDATE_EXPRESSION)
 		} else {
-			expr = this.finishNode(node, NODE_UNARY_EXPRESSION)
+			expr = p.finishNode(node, NODE_UNARY_EXPRESSION)
 		}
 
-	} else if !sawUnary && this.Type.identifier == TOKEN_PRIVATEID {
-		if len(forInit) != 0 || len(this.PrivateNameStack) == 0 && this.options.CheckPrivateFields {
-			return nil, this.unexpected(`len(forInit) != 0 || len(this.PrivateNameStack) == 0 && this.options.CheckPrivateFields`, &this.pos)
+	} else if !sawUnary && p.Type.identifier == TOKEN_PRIVATEID {
+		if len(forInit) != 0 || len(p.PrivateNameStack) == 0 && p.options.CheckPrivateFields {
+			return nil, p.unexpected(`len(forInit) != 0 || len(p.PrivateNameStack) == 0 && p.options.CheckPrivateFields`, &p.pos)
 		}
-		expr, err = this.parsePrivateIdent()
+		expr, err = p.parsePrivateIdent()
 		if err != nil {
 			return nil, err
 		}
 		// only could be private fields in 'in', such as #x in obj
-		if this.Type.identifier != TOKEN_IN {
-			return nil, this.unexpected("`only could be private fields in 'in', such as #x in obj` what?", &this.pos)
+		if p.Type.identifier != TOKEN_IN {
+			return nil, p.unexpected("`only could be private fields in 'in', such as #x in obj` what?", &p.pos)
 		}
 	} else {
-		expr, err = this.parseExprSubscripts(refDestructuringErrors, forInit)
+		expr, err = p.parseExprSubscripts(refDestructuringErrors, forInit)
 		if err != nil {
 			return nil, err
 		}
-		hasExprError, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+		hasExprError, _ := p.checkExpressionErrors(refDestructuringErrors, false)
 		if hasExprError {
 			return expr, nil
 		}
 
-		for this.Type.postfix && !this.canInsertSemicolon() {
-			node := this.startNodeAt(startPos, startLoc)
-			if val, ok := this.Value.([]byte); ok {
+		for p.Type.postfix && !p.canInsertSemicolon() {
+			node := p.startNodeAt(startPos, startLoc)
+			if val, ok := p.Value.([]byte); ok {
 				node.UpdateOperator = UpdateOperator(val)
 			} else {
 				panic("We expected []byte")
 			}
 			node.Prefix = false
 			node.Argument = expr
-			err := this.checkLValSimple(expr, 0, struct {
+			err := p.checkLValSimple(expr, 0, struct {
 				check bool
 				hash  map[string]bool
 			}{check: false, hash: map[string]bool{}})
@@ -565,22 +565,22 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 			if err != nil {
 				return nil, err
 			}
-			this.next(false)
-			expr = this.finishNode(node, NODE_UPDATE_EXPRESSION)
+			p.next(false)
+			expr = p.finishNode(node, NODE_UPDATE_EXPRESSION)
 		}
 	}
 
-	if !incDec && this.eat(TOKEN_STARSTAR) {
+	if !incDec && p.eat(TOKEN_STARSTAR) {
 		if sawUnary {
 
-			return nil, this.unexpected("we saw unary, which is wrong?", &this.LastTokStart)
+			return nil, p.unexpected("we saw unary, which is wrong?", &p.LastTokStart)
 		} else {
-			unary, err := this.parseMaybeUnary(nil, false, false, forInit)
+			unary, err := p.parseMaybeUnary(nil, false, false, forInit)
 			if err != nil {
 				return nil, err
 			}
 
-			binOp, errBinop := this.buildBinary(startPos, startLoc, expr, unary, EXPONENTIATION, false)
+			binOp, errBinop := p.buildBinary(startPos, startLoc, expr, unary, EXPONENTIATION, false)
 			if errBinop != nil {
 				return nil, errBinop
 			}
@@ -591,13 +591,13 @@ func (this *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors,
 	}
 }
 
-func (this *Parser) parseExprOps(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	startPos, startLoc := this.start, this.startLoc
-	expr, err := this.parseMaybeUnary(refDestructuringErrors, false, false, forInit)
+func (p *Parser) parseExprOps(forInit string, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	startPos, startLoc := p.start, p.startLoc
+	expr, err := p.parseMaybeUnary(refDestructuringErrors, false, false, forInit)
 	if err != nil {
 		return nil, err
 	}
-	exprErrors, _ := this.checkExpressionErrors(refDestructuringErrors, false)
+	exprErrors, _ := p.checkExpressionErrors(refDestructuringErrors, false)
 
 	if exprErrors {
 		return expr, nil
@@ -605,7 +605,7 @@ func (this *Parser) parseExprOps(forInit string, refDestructuringErrors *Destruc
 	if expr.Start == startPos && expr.Type == NODE_ARROW_FUNCTION_EXPRESSION {
 		return expr, nil
 	}
-	expr, err = this.parseExprOp(expr, startPos, startLoc, -1, forInit)
+	expr, err = p.parseExprOp(expr, startPos, startLoc, -1, forInit)
 	if err != nil {
 		return nil, err
 	}
@@ -613,37 +613,37 @@ func (this *Parser) parseExprOps(forInit string, refDestructuringErrors *Destruc
 
 }
 
-func (this *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Location, minPrec int, forInit string) (*Node, error) {
-	if this.Type.binop != nil && (len(forInit) == 0 || this.Type.identifier != TOKEN_IN) {
-		prec := this.Type.binop.prec
-		if this.Type.binop.prec > minPrec {
-			logical := this.Type.identifier == TOKEN_LOGICALOR || this.Type.identifier == TOKEN_LOGICALAND
-			coalesce := this.Type.identifier == TOKEN_COALESCE
+func (p *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Location, minPrec int, forInit string) (*Node, error) {
+	if p.Type.binop != nil && (len(forInit) == 0 || p.Type.identifier != TOKEN_IN) {
+		prec := p.Type.binop.prec
+		if p.Type.binop.prec > minPrec {
+			logical := p.Type.identifier == TOKEN_LOGICALOR || p.Type.identifier == TOKEN_LOGICALAND
+			coalesce := p.Type.identifier == TOKEN_COALESCE
 			if coalesce {
 				// Handle the precedence of `tt.coalesce` as equal to the range of logical expressions.
 				// In other words, `node.right` shouldn't contain logical expressions in order to check the mixed error.
 				prec = tokenTypes[TOKEN_LOGICALAND].binop.prec
 			}
-			if op, ok := this.Value.([]byte); ok {
-				this.next(false)
-				startPos, startLoc := this.start, this.startLoc
-				unary, err := this.parseMaybeUnary(nil, false, false, forInit)
+			if op, ok := p.Value.([]byte); ok {
+				p.next(false)
+				startPos, startLoc := p.start, p.startLoc
+				unary, err := p.parseMaybeUnary(nil, false, false, forInit)
 				if err != nil {
 					return nil, err
 				}
-				right, err := this.parseExprOp(unary, startPos, startLoc, prec, forInit)
+				right, err := p.parseExprOp(unary, startPos, startLoc, prec, forInit)
 
 				if err != nil {
 					return nil, err
 				}
-				node, err := this.buildBinary(leftStartPos, leftStartLoc, left, right, BinaryOperator(op), logical || coalesce)
+				node, err := p.buildBinary(leftStartPos, leftStartLoc, left, right, BinaryOperator(op), logical || coalesce)
 				if err != nil {
 					return nil, err
 				}
-				if (logical && this.Type.identifier == TOKEN_COALESCE) || (coalesce && (this.Type.identifier == TOKEN_LOGICALOR || this.Type.identifier == TOKEN_LOGICALAND)) {
-					return nil, this.raiseRecoverable(this.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+				if (logical && p.Type.identifier == TOKEN_COALESCE) || (coalesce && (p.Type.identifier == TOKEN_LOGICALOR || p.Type.identifier == TOKEN_LOGICALAND)) {
+					return nil, p.raiseRecoverable(p.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
 				}
-				expr, err := this.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
+				expr, err := p.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
 				if err != nil {
 					return nil, err
 				}
@@ -664,32 +664,32 @@ func isPrivateFieldAccess(node *Node) bool {
 
 }
 
-func (this *Parser) parseYield(forInit string) (*Node, error) {
-	if this.YieldPos == 0 {
-		this.YieldPos = this.start
+func (p *Parser) parseYield(forInit string) (*Node, error) {
+	if p.YieldPos == 0 {
+		p.YieldPos = p.start
 	}
 
-	node := this.startNode()
-	this.next(false)
-	if this.Type.identifier == TOKEN_SEMI || this.canInsertSemicolon() || (this.Type.identifier != TOKEN_STAR && !this.Type.startsExpr) {
+	node := p.startNode()
+	p.next(false)
+	if p.Type.identifier == TOKEN_SEMI || p.canInsertSemicolon() || (p.Type.identifier != TOKEN_STAR && !p.Type.startsExpr) {
 		node.Delegate = false
 		node.Argument = nil
 	} else {
-		node.Delegate = this.eat(TOKEN_STAR)
-		maybeAssign, err := this.parseMaybeAssign(forInit, nil, nil)
+		node.Delegate = p.eat(TOKEN_STAR)
+		maybeAssign, err := p.parseMaybeAssign(forInit, nil, nil)
 		if err != nil {
 			return nil, err
 		}
 		node.Argument = maybeAssign
 	}
-	return this.finishNode(node, NODE_YIELD_EXPRESSION), nil
+	return p.finishNode(node, NODE_YIELD_EXPRESSION), nil
 }
 
-func (this *Parser) parseTemplate(opts struct{ isTagged bool }) (*Node, error) {
-	node := this.startNode()
-	this.next(false)
+func (p *Parser) parseTemplate(opts struct{ isTagged bool }) (*Node, error) {
+	node := p.startNode()
+	p.next(false)
 	node.Expressions = []*Node{}
-	curElt, err := this.parseTemplateElement(opts)
+	curElt, err := p.parseTemplateElement(opts)
 
 	if err != nil {
 		return nil, err
@@ -697,45 +697,45 @@ func (this *Parser) parseTemplate(opts struct{ isTagged bool }) (*Node, error) {
 
 	node.Quasis = []*Node{curElt}
 	for !curElt.Tail {
-		if this.Type.identifier == TOKEN_EOF {
-			return nil, this.raise(this.pos, "Unterminated template literal")
+		if p.Type.identifier == TOKEN_EOF {
+			return nil, p.raise(p.pos, "Unterminated template literal")
 		}
-		err := this.expect(TOKEN_DOLLARBRACEL)
+		err := p.expect(TOKEN_DOLLARBRACEL)
 		if err != nil {
 			return nil, err
 		}
-		n, err := this.parseExpression("", nil)
+		n, err := p.parseExpression("", nil)
 
 		if err != nil {
 			return nil, err
 		}
 		node.Expressions = append(node.Expressions, n)
-		err = this.expect(TOKEN_BRACER)
+		err = p.expect(TOKEN_BRACER)
 		if err != nil {
 			return nil, err
 		}
-		curElt, err = this.parseTemplateElement(opts)
+		curElt, err = p.parseTemplateElement(opts)
 		if err != nil {
 			return nil, err
 		}
 		node.Quasis = append(node.Quasis, curElt)
 	}
-	this.next(false)
-	return this.finishNode(node, NODE_TEMPLATE_LITERAL), nil
+	p.next(false)
+	return p.finishNode(node, NODE_TEMPLATE_LITERAL), nil
 }
 
-func (this *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, error) {
-	elem := this.startNode()
-	if this.Type.identifier == TOKEN_INVALIDTEMPLATE {
+func (p *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, error) {
+	elem := p.startNode()
+	if p.Type.identifier == TOKEN_INVALIDTEMPLATE {
 		if !opts.isTagged {
-			return nil, this.raiseRecoverable(this.start, "Bad escape sequence in untagged template literal")
+			return nil, p.raiseRecoverable(p.start, "Bad escape sequence in untagged template literal")
 		}
 
 		elem.Value = struct {
 			raw    string
 			cooked string
 		}{
-			raw:    strings.ReplaceAll(string(this.Value.([]byte)), "\r\n", "\n"),
+			raw:    strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
 			cooked: "",
 		}
 	} else {
@@ -743,43 +743,43 @@ func (this *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, e
 			raw    string
 			cooked string
 		}{
-			raw:    strings.ReplaceAll(string(this.input[this.start:this.End]), "\r\n", "\n"),
-			cooked: string(this.Value.([]byte)),
+			raw:    strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
+			cooked: string(p.Value.([]byte)),
 		}
 	}
-	this.next(false)
-	elem.Tail = this.Type.identifier == TOKEN_BACKQUOTE
-	return this.finishNode(elem, NODE_TEMPLATE_ELEMENT), nil
+	p.next(false)
+	elem.Tail = p.Type.identifier == TOKEN_BACKQUOTE
+	return p.finishNode(elem, NODE_TEMPLATE_ELEMENT), nil
 }
 
-func (this *Parser) parseSubscriptAsyncArrow(startPos int, startLoc *Location, exprList []*Node, forInit string) (*Node, error) {
-	node := this.startNodeAt(startPos, startLoc)
-	arrowExpression, err := this.parseArrowExpression(node, exprList, true, forInit)
+func (p *Parser) parseSubscriptAsyncArrow(startPos int, startLoc *Location, exprList []*Node, forInit string) (*Node, error) {
+	node := p.startNodeAt(startPos, startLoc)
+	arrowExpression, err := p.parseArrowExpression(node, exprList, true, forInit)
 
 	return arrowExpression, err
 }
 
-func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, forInit string, forNew bool) (*Node, error) {
+func (p *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, forInit string, forNew bool) (*Node, error) {
 	// If a division operator appears in an expression position, the
 	// tokenizer got confused, and we force it to read a regexp instead.
-	if this.Type.identifier == TOKEN_SLASH {
-		err := this.readRegexp()
+	if p.Type.identifier == TOKEN_SLASH {
+		err := p.readRegexp()
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	_, canBeArrow := this.PotentialArrowAt == this.start, this.PotentialArrowAt == this.start
-	switch this.Type.identifier {
+	_, canBeArrow := p.PotentialArrowAt == p.start, p.PotentialArrowAt == p.start
+	switch p.Type.identifier {
 	case TOKEN_SUPER:
-		if !this.allowSuper() {
-			return nil, this.raise(this.start, "'super' keyword outside a method")
+		if !p.allowSuper() {
+			return nil, p.raise(p.start, "'super' keyword outside a method")
 		}
 
-		node := this.startNode()
-		this.next(false)
-		if this.Type.identifier == TOKEN_PARENL && !this.allowDirectSuper() {
-			return nil, this.raise(node.Start, "super() call outside constructor of a subclass")
+		node := p.startNode()
+		p.next(false)
+		if p.Type.identifier == TOKEN_PARENL && !p.allowDirectSuper() {
+			return nil, p.raise(node.Start, "super() call outside constructor of a subclass")
 		}
 
 		// The `super` keyword can appear at below:
@@ -789,47 +789,47 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 		// SuperCall:
 		//     super ( Arguments )
 
-		if this.Type.identifier != TOKEN_DOT && this.Type.identifier != TOKEN_BRACKETL && this.Type.identifier != TOKEN_PARENL {
-			return nil, this.unexpected(`this.Type.identifier != TOKEN_DOT && this.Type.identifier != TOKEN_BRACKETL && this.Type.identifier != TOKEN_PARENL`, nil)
+		if p.Type.identifier != TOKEN_DOT && p.Type.identifier != TOKEN_BRACKETL && p.Type.identifier != TOKEN_PARENL {
+			return nil, p.unexpected(`p.Type.identifier != TOKEN_DOT && p.Type.identifier != TOKEN_BRACKETL && p.Type.identifier != TOKEN_PARENL`, nil)
 		}
 
-		return this.finishNode(node, NODE_SUPER), nil
+		return p.finishNode(node, NODE_SUPER), nil
 
 	case TOKEN_THIS:
-		node := this.startNode()
-		this.next(false)
-		return this.finishNode(node, NODE_THIS_EXPRESSION), nil
+		node := p.startNode()
+		p.next(false)
+		return p.finishNode(node, NODE_THIS_EXPRESSION), nil
 
 	case TOKEN_NAME:
-		startPos, startLoc, containsEsc := this.start, this.startLoc, this.ContainsEsc
+		startPos, startLoc, containsEsc := p.start, p.startLoc, p.ContainsEsc
 
-		id, err := this.parseIdent(false)
+		id, err := p.parseIdent(false)
 		if err != nil {
 			return nil, err
 		}
-		if this.getEcmaVersion() >= 8 && !containsEsc && id.Name == "async" && !this.canInsertSemicolon() && this.eat(TOKEN_FUNCTION) {
-			this.overrideContext(TokenContexts[FUNCTION_EXPRESSION])
-			fun, err := this.parseFunction(this.startNodeAt(startPos, startLoc), 0, false, true, forInit)
+		if p.getEcmaVersion() >= 8 && !containsEsc && id.Name == "async" && !p.canInsertSemicolon() && p.eat(TOKEN_FUNCTION) {
+			p.overrideContext(TokenContexts[FUNCTION_EXPRESSION])
+			fun, err := p.parseFunction(p.startNodeAt(startPos, startLoc), 0, false, true, forInit)
 			return fun, err
 		}
 
-		if canBeArrow && !this.canInsertSemicolon() {
-			if this.eat(TOKEN_ARROW) {
-				arrowExpr, err := this.parseArrowExpression(this.startNodeAt(startPos, startLoc), []*Node{id}, false, forInit)
+		if canBeArrow && !p.canInsertSemicolon() {
+			if p.eat(TOKEN_ARROW) {
+				arrowExpr, err := p.parseArrowExpression(p.startNodeAt(startPos, startLoc), []*Node{id}, false, forInit)
 				return arrowExpr, err
 			}
 
-			if this.getEcmaVersion() >= 8 && id.Name == "async" && this.Type.identifier == TOKEN_NAME && !containsEsc &&
-				(!this.PotentialArrowInForAwait || this.Value != "of" || this.ContainsEsc) {
-				id, err = this.parseIdent(false)
+			if p.getEcmaVersion() >= 8 && id.Name == "async" && p.Type.identifier == TOKEN_NAME && !containsEsc &&
+				(!p.PotentialArrowInForAwait || p.Value != "of" || p.ContainsEsc) {
+				id, err = p.parseIdent(false)
 				if err != nil {
 					return nil, err
 				}
 
-				if this.canInsertSemicolon() || !this.eat(TOKEN_ARROW) {
-					return nil, this.unexpected(`if this.canInsertSemicolon() || !this.eat(TOKEN_ARROW)`, nil)
+				if p.canInsertSemicolon() || !p.eat(TOKEN_ARROW) {
+					return nil, p.unexpected(`if p.canInsertSemicolon() || !p.eat(TOKEN_ARROW)`, nil)
 				}
-				arrowExpr, err := this.parseArrowExpression(this.startNodeAt(startPos, startLoc), []*Node{id}, true, forInit)
+				arrowExpr, err := p.parseArrowExpression(p.startNodeAt(startPos, startLoc), []*Node{id}, true, forInit)
 				return arrowExpr, err
 			}
 		}
@@ -838,39 +838,39 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 	case TOKEN_REGEXP:
 		panic("TOKEN_REGEXP not implemented")
 		/*
-			value := this.Value
-			node = this.parseLiteral(value.value)
+			value := p.Value
+			node = p.parseLiteral(value.value)
 			node.regex = RegExpState{Pattern: value.pattern, flags: value.flags}
 			return node
 		*/
 
 	case TOKEN_NUM, TOKEN_STRING:
 		{
-			literal, err := this.parseLiteral(this.Value)
+			literal, err := p.parseLiteral(p.Value)
 			return literal, err
 		}
 
 	case TOKEN_NULL, TOKEN_TRUE, TOKEN_FALSE:
-		node := this.startNode()
-		if this.Type.identifier == TOKEN_NULL {
+		node := p.startNode()
+		if p.Type.identifier == TOKEN_NULL {
 			node.Value = nil
 		} else {
-			node.Value = this.Type.identifier == TOKEN_TRUE
+			node.Value = p.Type.identifier == TOKEN_TRUE
 		}
 
-		node.Raw = this.Type.keyword
-		this.next(false)
-		return this.finishNode(node, NODE_LITERAL), nil
+		node.Raw = p.Type.keyword
+		p.next(false)
+		return p.finishNode(node, NODE_LITERAL), nil
 
 	case TOKEN_PARENL:
-		expr, err := this.parseParenAndDistinguishExpression(canBeArrow, forInit)
+		expr, err := p.parseParenAndDistinguishExpression(canBeArrow, forInit)
 		if err != nil {
 			return nil, err
 		}
 
-		start := this.start
+		start := p.start
 		if refDestructuringErrors != nil {
-			if refDestructuringErrors.parenthesizedAssign < 0 && !this.isSimpleAssignTarget(expr) {
+			if refDestructuringErrors.parenthesizedAssign < 0 && !p.isSimpleAssignTarget(expr) {
 				refDestructuringErrors.parenthesizedAssign = start
 			}
 
@@ -882,52 +882,52 @@ func (this *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, f
 		return expr, nil
 
 	case TOKEN_BRACKETL:
-		node := this.startNode()
-		this.next(false)
+		node := p.startNode()
+		p.next(false)
 
-		exprList, err := this.parseExprList(TOKEN_BRACKETR, true, true, refDestructuringErrors)
+		exprList, err := p.parseExprList(TOKEN_BRACKETR, true, true, refDestructuringErrors)
 
 		if err != nil {
 			return nil, err
 		}
 
 		node.Elements = exprList
-		return this.finishNode(node, NODE_ARRAY_EXPRESSION), nil
+		return p.finishNode(node, NODE_ARRAY_EXPRESSION), nil
 
 	case TOKEN_BRACEL:
-		this.overrideContext(TokenContexts[BRACKET_EXPRESSION])
-		obj, err := this.parseObj(false, refDestructuringErrors)
+		p.overrideContext(TokenContexts[BRACKET_EXPRESSION])
+		obj, err := p.parseObj(false, refDestructuringErrors)
 		return obj, err
 
 	case TOKEN_FUNCTION:
-		node := this.startNode()
-		this.next(false)
-		fun, err := this.parseFunction(node, 0, false, false, "")
+		node := p.startNode()
+		p.next(false)
+		fun, err := p.parseFunction(node, 0, false, false, "")
 		return fun, err
 
 	case TOKEN_CLASS:
-		node := this.startNode()
-		class, err := this.parseClass(node, false)
+		node := p.startNode()
+		class, err := p.parseClass(node, false)
 		return class, err
 
 	case TOKEN_NEW:
-		new, err := this.parseNew()
+		new, err := p.parseNew()
 		return new, err
 
 	case TOKEN_BACKQUOTE:
-		tmpl, err := this.parseTemplate(struct{ isTagged bool }{isTagged: false})
+		tmpl, err := p.parseTemplate(struct{ isTagged bool }{isTagged: false})
 		return tmpl, err
 
 	case TOKEN_IMPORT:
-		if this.getEcmaVersion() >= 11 {
-			exprImport, err := this.parseExprImport(forNew)
+		if p.getEcmaVersion() >= 11 {
+			exprImport, err := p.parseExprImport(forNew)
 			return exprImport, err
 		} else {
-			return nil, this.unexpected("Ecma version is too old", nil)
+			return nil, p.unexpected("Ecma version is too old", nil)
 		}
 
 	default:
-		return nil, this.parseExprAtomDefault()
+		return nil, p.parseExprAtomDefault()
 
 	}
 }
@@ -936,20 +936,20 @@ func (p *Parser) parseExprAtomDefault() error {
 	return p.unexpected("parseExprAtomDefault()", nil)
 }
 
-func (this *Parser) shouldParseAsyncArrow() bool {
-	return !this.canInsertSemicolon() && this.eat(TOKEN_ARROW)
+func (p *Parser) shouldParseAsyncArrow() bool {
+	return !p.canInsertSemicolon() && p.eat(TOKEN_ARROW)
 }
 
-func (this *Parser) parseExprList(close Token, allowTrailingComma bool, allowEmpty bool, refDestructuringErrors *DestructuringErrors) ([]*Node, error) {
+func (p *Parser) parseExprList(close Token, allowTrailingComma bool, allowEmpty bool, refDestructuringErrors *DestructuringErrors) ([]*Node, error) {
 	elts, first := []*Node{}, true
 
-	for !this.eat(close) {
+	for !p.eat(close) {
 		if !first {
-			if err := this.expect(TOKEN_COMMA); err != nil {
+			if err := p.expect(TOKEN_COMMA); err != nil {
 				return nil, err
 			}
 
-			if allowTrailingComma && this.afterTrailingComma(close, false) {
+			if allowTrailingComma && p.afterTrailingComma(close, false) {
 				break
 			}
 		} else {
@@ -957,22 +957,22 @@ func (this *Parser) parseExprList(close Token, allowTrailingComma bool, allowEmp
 		}
 
 		var elt *Node
-		if allowEmpty && this.Type.identifier == TOKEN_COMMA {
+		if allowEmpty && p.Type.identifier == TOKEN_COMMA {
 			elt = nil
-		} else if this.Type.identifier == TOKEN_ELLIPSIS {
-			spreadElement, err := this.parseSpread(refDestructuringErrors)
+		} else if p.Type.identifier == TOKEN_ELLIPSIS {
+			spreadElement, err := p.parseSpread(refDestructuringErrors)
 
 			if err != nil {
 				return nil, err
 			}
 
-			if refDestructuringErrors != nil && this.Type.identifier == TOKEN_COMMA && refDestructuringErrors.trailingComma < 0 {
-				refDestructuringErrors.trailingComma = this.start
+			if refDestructuringErrors != nil && p.Type.identifier == TOKEN_COMMA && refDestructuringErrors.trailingComma < 0 {
+				refDestructuringErrors.trailingComma = p.start
 			}
 			elt = spreadElement
 
 		} else {
-			maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
+			maybeAssign, err := p.parseMaybeAssign("", refDestructuringErrors, nil)
 			if err != nil {
 				return nil, err
 			}
@@ -983,15 +983,15 @@ func (this *Parser) parseExprList(close Token, allowTrailingComma bool, allowEmp
 	return elts, nil
 }
 
-func (this *Parser) parseIdent(liberal bool) (*Node, error) {
-	node, err := this.parseIdentNode()
+func (p *Parser) parseIdent(liberal bool) (*Node, error) {
+	node, err := p.parseIdentNode()
 	if err != nil {
 		return nil, err
 	}
-	this.next(liberal)
-	this.finishNode(node, NODE_IDENTIFIER)
+	p.next(liberal)
+	p.finishNode(node, NODE_IDENTIFIER)
 	if !liberal {
-		err := this.checkUnreserved(struct {
+		err := p.checkUnreserved(struct {
 			start int
 			end   int
 			name  string
@@ -1001,114 +1001,114 @@ func (this *Parser) parseIdent(liberal bool) (*Node, error) {
 			return nil, err
 		}
 
-		if node.Name == "await" && !(this.AwaitIdentPos != 0) {
-			this.AwaitIdentPos = node.Start
+		if node.Name == "await" && !(p.AwaitIdentPos != 0) {
+			p.AwaitIdentPos = node.Start
 		}
 
 	}
 	return node, nil
 }
 
-func (this *Parser) parseIdentNode() (*Node, error) {
-	node := this.startNode()
-	if this.Type.identifier == TOKEN_NAME {
-		if val, ok := this.Value.(string); ok {
+func (p *Parser) parseIdentNode() (*Node, error) {
+	node := p.startNode()
+	if p.Type.identifier == TOKEN_NAME {
+		if val, ok := p.Value.(string); ok {
 			node.Name = val
 		} else {
 			panic("Theres a situation with node having a wrong type of .Value")
 		}
 
-	} else if len(this.Type.keyword) != 0 {
-		node.Name = this.Type.keyword
+	} else if len(p.Type.keyword) != 0 {
+		node.Name = p.Type.keyword
 
 		if (node.Name == "class" || node.Name == "function") &&
-			(this.LastTokEnd != this.LastTokStart+1 || this.input[this.LastTokStart] != 46) {
-			this.Context = this.Context[:len(this.Context)-1]
+			(p.LastTokEnd != p.LastTokStart+1 || p.input[p.LastTokStart] != 46) {
+			p.Context = p.Context[:len(p.Context)-1]
 		}
-		this.Type = tokenTypes[TOKEN_NAME]
+		p.Type = tokenTypes[TOKEN_NAME]
 	} else {
-		return nil, this.unexpected("Keyword was not present, we want it", nil)
+		return nil, p.unexpected("Keyword was not present, we want it", nil)
 	}
 	return node, nil
 }
 
-func (this *Parser) checkUnreserved(opts struct {
+func (p *Parser) checkUnreserved(opts struct {
 	start int
 	end   int
 	name  string
 }) error {
-	if this.inGenerator() && opts.name == "yield" {
-		return this.raiseRecoverable(opts.start, "Cannot use 'yield' as identifier inside a generator")
+	if p.inGenerator() && opts.name == "yield" {
+		return p.raiseRecoverable(opts.start, "Cannot use 'yield' as identifier inside a generator")
 	}
 
-	if this.inAsync() && opts.name == "await" {
-		return this.raiseRecoverable(opts.start, "Cannot use 'await' as identifier inside an async function")
+	if p.inAsync() && opts.name == "await" {
+		return p.raiseRecoverable(opts.start, "Cannot use 'await' as identifier inside an async function")
 	}
-	curScope := this.currentThisScope()
+	curScope := p.currentThisScope()
 	if !(curScope != nil && curScope.Flags&SCOPE_VAR == SCOPE_VAR) && opts.name == "arguments" {
-		return this.raiseRecoverable(opts.start, "Cannot use 'arguments' in class field initializer")
+		return p.raiseRecoverable(opts.start, "Cannot use 'arguments' in class field initializer")
 	}
 
-	if this.InClassStaticBlock && (opts.name == "arguments" || opts.name == "await") {
-		return this.raise(opts.start, `Cannot use ${name} in class static initialization block`)
+	if p.InClassStaticBlock && (opts.name == "arguments" || opts.name == "await") {
+		return p.raise(opts.start, `Cannot use ${name} in class static initialization block`)
 	}
-	if this.Keywords.Match([]byte(opts.name)) {
-		return this.raise(opts.start, "Unexpected keyword "+opts.name)
+	if p.Keywords.Match([]byte(opts.name)) {
+		return p.raise(opts.start, "Unexpected keyword "+opts.name)
 	}
 
-	if this.getEcmaVersion() < 6 && strings.Index(string(this.input[opts.start:opts.end]), "\\") != -1 {
+	if p.getEcmaVersion() < 6 && strings.Index(string(p.input[opts.start:opts.end]), "\\") != -1 {
 		return nil
 	}
 	var re *regexp.Regexp
-	if this.Strict {
-		re = this.ReservedWordsStrict
+	if p.Strict {
+		re = p.ReservedWordsStrict
 	} else {
-		re = this.ReservedWords
+		re = p.ReservedWords
 	}
 
 	if re.Match([]byte(opts.name)) {
-		if !this.inAsync() && opts.name == "await" {
-			return this.raiseRecoverable(opts.start, "Cannot use keyword 'await' outside an async function")
+		if !p.inAsync() && opts.name == "await" {
+			return p.raiseRecoverable(opts.start, "Cannot use keyword 'await' outside an async function")
 		}
-		return this.raiseRecoverable(opts.start, "The keyword "+opts.name+" is reserved")
+		return p.raiseRecoverable(opts.start, "The keyword "+opts.name+" is reserved")
 	}
 	return nil
 }
 
-func (this *Parser) parseExprImport(forNew bool) (*Node, error) {
-	node := this.startNode()
+func (p *Parser) parseExprImport(forNew bool) (*Node, error) {
+	node := p.startNode()
 
 	// Consume `import` as an identifier for `import.meta`.
-	// Because `this.parseIdent(true)` doesn't check escape sequences, it needs the check of `this.containsEsc`.
-	if this.ContainsEsc {
-		return nil, this.raiseRecoverable(this.start, "Escape sequence in keyword import")
+	// Because `p.parseIdent(true)` doesn't check escape sequences, it needs the check of `p.containsEsc`.
+	if p.ContainsEsc {
+		return nil, p.raiseRecoverable(p.start, "Escape sequence in keyword import")
 	}
-	this.next(false)
+	p.next(false)
 
-	if this.Type.identifier == TOKEN_PARENL && !forNew {
-		dynImport, err := this.parseDynamicImport(node)
+	if p.Type.identifier == TOKEN_PARENL && !forNew {
+		dynImport, err := p.parseDynamicImport(node)
 		return dynImport, err
-	} else if this.Type.identifier == TOKEN_DOT {
+	} else if p.Type.identifier == TOKEN_DOT {
 		var loc *Location
 
 		if node.Location != nil && node.Location.Start != nil {
 			loc = node.Location.Start
 		}
-		meta := this.startNodeAt(node.Start, loc)
+		meta := p.startNodeAt(node.Start, loc)
 		meta.Name = "import"
-		node.Meta = this.finishNode(meta, NODE_IDENTIFIER)
-		importMeta, err := this.parseImportMeta(node)
+		node.Meta = p.finishNode(meta, NODE_IDENTIFIER)
+		importMeta, err := p.parseImportMeta(node)
 		return importMeta, err
 	} else {
-		return nil, this.unexpected("", nil)
+		return nil, p.unexpected("", nil)
 	}
 }
 
-func (this *Parser) parseImportMeta(node *Node) (*Node, error) {
-	this.next(false) // skip `.`
+func (p *Parser) parseImportMeta(node *Node) (*Node, error) {
+	p.next(false) // skip `.`
 
-	containsEsc := this.ContainsEsc
-	ident, err := this.parseIdent(true)
+	containsEsc := p.ContainsEsc
+	ident, err := p.parseIdent(true)
 
 	if err != nil {
 		return nil, err
@@ -1116,49 +1116,49 @@ func (this *Parser) parseImportMeta(node *Node) (*Node, error) {
 	node.Property = ident
 
 	if node.Property.Name != "meta" {
-		return nil, this.raiseRecoverable(node.Property.Start, "The only valid meta property for import is 'import.meta'")
+		return nil, p.raiseRecoverable(node.Property.Start, "The only valid meta property for import is 'import.meta'")
 	}
 
 	if containsEsc {
-		return nil, this.raiseRecoverable(node.Start, "'import.meta' must not contain escaped characters")
+		return nil, p.raiseRecoverable(node.Start, "'import.meta' must not contain escaped characters")
 	}
 
-	if this.options.SourceType != "module" && !this.options.AllowImportExportEverywhere {
-		return nil, this.raiseRecoverable(node.Start, "Cannot use 'import.meta' outside a module")
+	if p.options.SourceType != "module" && !p.options.AllowImportExportEverywhere {
+		return nil, p.raiseRecoverable(node.Start, "Cannot use 'import.meta' outside a module")
 	}
 
-	return this.finishNode(node, NODE_META_PROPERTY), nil
+	return p.finishNode(node, NODE_META_PROPERTY), nil
 }
 
-func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
-	this.next(false)
+func (p *Parser) parseDynamicImport(node *Node) (*Node, error) {
+	p.next(false)
 
-	source, err := this.parseMaybeAssign("", nil, nil)
+	source, err := p.parseMaybeAssign("", nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	node.Source = source
 
-	if this.getEcmaVersion() >= 16 {
-		if !this.eat(TOKEN_PARENR) {
-			err := this.expect(TOKEN_COMMA)
+	if p.getEcmaVersion() >= 16 {
+		if !p.eat(TOKEN_PARENR) {
+			err := p.expect(TOKEN_COMMA)
 			if err != nil {
 				return nil, err
 			}
 
-			if !this.afterTrailingComma(TOKEN_PARENR, false) {
-				opts, err := this.parseMaybeAssign("", nil, nil)
+			if !p.afterTrailingComma(TOKEN_PARENR, false) {
+				opts, err := p.parseMaybeAssign("", nil, nil)
 				if err != nil {
 					return nil, err
 				}
 				node.Options = opts
-				if !this.eat(TOKEN_PARENR) {
-					err := this.expect(TOKEN_COMMA)
+				if !p.eat(TOKEN_PARENR) {
+					err := p.expect(TOKEN_COMMA)
 					if err != nil {
 						return nil, err
 					}
-					if !this.afterTrailingComma(TOKEN_PARENR, false) {
-						this.unexpected("trailing commas", nil)
+					if !p.afterTrailingComma(TOKEN_PARENR, false) {
+						p.unexpected("trailing commas", nil)
 					}
 				}
 			} else {
@@ -1169,90 +1169,90 @@ func (this *Parser) parseDynamicImport(node *Node) (*Node, error) {
 		}
 	} else {
 		// Verify ending.
-		if !this.eat(TOKEN_PARENR) {
-			errorPos := this.start
-			if this.eat(TOKEN_COMMA) && this.eat(TOKEN_PARENR) {
-				return nil, this.raiseRecoverable(errorPos, "Trailing comma is not allowed in import()")
+		if !p.eat(TOKEN_PARENR) {
+			errorPos := p.start
+			if p.eat(TOKEN_COMMA) && p.eat(TOKEN_PARENR) {
+				return nil, p.raiseRecoverable(errorPos, "Trailing comma is not allowed in import()")
 			} else {
-				return nil, this.unexpected("", &errorPos)
+				return nil, p.unexpected("", &errorPos)
 			}
 		}
 	}
 
-	return this.finishNode(node, NODE_IMPORT_EXPRESSION), nil
+	return p.finishNode(node, NODE_IMPORT_EXPRESSION), nil
 }
 
-func (this *Parser) parseLiteral(value any) (*Node, error) {
-	node := this.startNode()
+func (p *Parser) parseLiteral(value any) (*Node, error) {
+	node := p.startNode()
 	node.Value = value
 
-	node.Raw = string(this.input[this.start:this.End])
+	node.Raw = string(p.input[p.start:p.End])
 	if node.Raw[len(node.Raw)-1] == 110 { // big int stuff, maybe some day....
 		node.Bigint = strings.ReplaceAll(node.Raw[:len(node.Raw)-1], "_", "")
 		// node.bigint = node.raw.slice(0, -1).replace(/_/g, "")
 	}
-	this.next(false)
-	return this.finishNode(node, NODE_LITERAL), nil
+	p.next(false)
+	return p.finishNode(node, NODE_LITERAL), nil
 }
 
-func (this *Parser) parsePrivateIdent() (*Node, error) {
-	node := this.startNode()
-	if this.Type.identifier == TOKEN_PRIVATEID {
-		if val, ok := this.Value.(string); ok {
+func (p *Parser) parsePrivateIdent() (*Node, error) {
+	node := p.startNode()
+	if p.Type.identifier == TOKEN_PRIVATEID {
+		if val, ok := p.Value.(string); ok {
 			node.Name = val
 		} else {
-			panic("In parsePrivateIdent() this.Value was not string as expected")
+			panic("In parsePrivateIdent() p.Value was not string as expected")
 		}
 	} else {
-		return nil, this.unexpected("", &this.pos)
+		return nil, p.unexpected("", &p.pos)
 	}
-	this.next(false)
-	this.finishNode(node, NODE_PRIVATE_IDENTIFIER)
+	p.next(false)
+	p.finishNode(node, NODE_PRIVATE_IDENTIFIER)
 
-	if this.options.CheckPrivateFields {
-		if len(this.PrivateNameStack) == 0 {
-			this.raise(node.Start, "Private field #"+node.Name+" must be declared in an enclosing class")
+	if p.options.CheckPrivateFields {
+		if len(p.PrivateNameStack) == 0 {
+			p.raise(node.Start, "Private field #"+node.Name+" must be declared in an enclosing class")
 		} else {
-			this.PrivateNameStack[len(this.PrivateNameStack)-1].Used = append(this.PrivateNameStack[len(this.PrivateNameStack)-1].Used, node)
+			p.PrivateNameStack[len(p.PrivateNameStack)-1].Used = append(p.PrivateNameStack[len(p.PrivateNameStack)-1].Used, node)
 		}
 	}
 
 	return node, nil
 }
 
-func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit string) (*Node, error) {
-	startPos, startLoc, allowTrailingComma := this.start, this.startLoc, this.getEcmaVersion() >= 8
+func (p *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit string) (*Node, error) {
+	startPos, startLoc, allowTrailingComma := p.start, p.startLoc, p.getEcmaVersion() >= 8
 	var val *Node
-	if this.getEcmaVersion() >= 6 {
-		this.next(false)
+	if p.getEcmaVersion() >= 6 {
+		p.next(false)
 
-		innerStartPos, innerStartLoc := this.start, this.startLoc
+		innerStartPos, innerStartLoc := p.start, p.startLoc
 		exprList, first, lastIsComma := []*Node{}, true, false
-		refDestructuringErrors, oldYieldPos, oldAwaitPos, spreadStart := NewDestructuringErrors(), this.YieldPos, this.AwaitPos, 0
-		this.YieldPos = 0
-		this.AwaitPos = 0
+		refDestructuringErrors, oldYieldPos, oldAwaitPos, spreadStart := NewDestructuringErrors(), p.YieldPos, p.AwaitPos, 0
+		p.YieldPos = 0
+		p.AwaitPos = 0
 		// Do not save awaitIdentPos to allow checking awaits nested in parameters
-		for this.Type.identifier != TOKEN_PARENR {
+		for p.Type.identifier != TOKEN_PARENR {
 			if first {
 				first = false
 			} else {
-				err := this.expect(TOKEN_COMMA)
+				err := p.expect(TOKEN_COMMA)
 				if err != nil {
 					return nil, err
 				}
 			}
 
-			if allowTrailingComma && this.afterTrailingComma(TOKEN_PARENR, true) {
+			if allowTrailingComma && p.afterTrailingComma(TOKEN_PARENR, true) {
 				lastIsComma = true
 				break
-			} else if this.Type.identifier == TOKEN_ELLIPSIS {
-				spreadStart = this.start
-				restBinding, err := this.parseRestBinding()
+			} else if p.Type.identifier == TOKEN_ELLIPSIS {
+				spreadStart = p.start
+				restBinding, err := p.parseRestBinding()
 				if err != nil {
 					return nil, err
 				}
 
-				parenItem, err := this.parseParenItem(restBinding)
+				parenItem, err := p.parseParenItem(restBinding)
 
 				if err != nil {
 					return nil, err
@@ -1260,15 +1260,15 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 
 				exprList = append(exprList, parenItem)
 
-				if this.Type.identifier == TOKEN_COMMA {
-					return nil, this.raiseRecoverable(
-						this.start,
+				if p.Type.identifier == TOKEN_COMMA {
+					return nil, p.raiseRecoverable(
+						p.start,
 						"Comma is not permitted after the rest element",
 					)
 				}
 				break
 			} else {
-				maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors, &struct {
+				maybeAssign, err := p.parseMaybeAssign("", refDestructuringErrors, &struct {
 					call func(p *Parser, l *Node, s int, sl *Location) (*Node, error)
 				}{call: func(p *Parser, l *Node, s int, sl *Location) (*Node, error) {
 					res, err := p.parseParenItem(l)
@@ -1281,60 +1281,60 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 				exprList = append(exprList, maybeAssign)
 			}
 		}
-		innerEndPos, innerEndLoc := this.LastTokEnd, this.LastTokEndLoc
-		err := this.expect(TOKEN_PARENR)
+		innerEndPos, innerEndLoc := p.LastTokEnd, p.LastTokEndLoc
+		err := p.expect(TOKEN_PARENR)
 
 		if err != nil {
 			return nil, err
 		}
 
-		if canBeArrow && this.shouldParseArrow(exprList) && this.eat(TOKEN_ARROW) {
-			err := this.checkPatternErrors(refDestructuringErrors, false)
+		if canBeArrow && p.shouldParseArrow(exprList) && p.eat(TOKEN_ARROW) {
+			err := p.checkPatternErrors(refDestructuringErrors, false)
 			if err != nil {
 				return nil, err
 			}
 
-			err = this.checkYieldAwaitInDefaultParams()
+			err = p.checkYieldAwaitInDefaultParams()
 			if err != nil {
 				return nil, err
 			}
 
-			this.YieldPos = oldYieldPos
-			this.AwaitPos = oldAwaitPos
-			parenArrowList, err := this.parseParenArrowList(startPos, startLoc, exprList, forInit)
+			p.YieldPos = oldYieldPos
+			p.AwaitPos = oldAwaitPos
+			parenArrowList, err := p.parseParenArrowList(startPos, startLoc, exprList, forInit)
 			return parenArrowList, err
 		}
 
 		if len(exprList) == 0 || lastIsComma {
-			return nil, this.unexpected("hanging comma", &this.LastTokStart)
+			return nil, p.unexpected("hanging comma", &p.LastTokStart)
 		}
 
 		if spreadStart != 0 {
-			return nil, this.unexpected("", &spreadStart)
+			return nil, p.unexpected("", &spreadStart)
 		}
-		_, err = this.checkExpressionErrors(refDestructuringErrors, true)
+		_, err = p.checkExpressionErrors(refDestructuringErrors, true)
 
 		if err != nil {
 			return nil, err
 		}
 
 		if oldYieldPos != 0 {
-			this.YieldPos = oldYieldPos
+			p.YieldPos = oldYieldPos
 		}
 
 		if oldAwaitPos != 0 {
-			this.AwaitPos = oldAwaitPos
+			p.AwaitPos = oldAwaitPos
 		}
 
 		if len(exprList) > 1 {
-			val = this.startNodeAt(innerStartPos, innerStartLoc)
+			val = p.startNodeAt(innerStartPos, innerStartLoc)
 			val.Expressions = exprList
-			this.finishNodeAt(val, NODE_SEQUENCE_EXPRESSION, innerEndPos, innerEndLoc)
+			p.finishNodeAt(val, NODE_SEQUENCE_EXPRESSION, innerEndPos, innerEndLoc)
 		} else {
 			val = exprList[0]
 		}
 	} else {
-		parenExpr, err := this.parseParenExpression()
+		parenExpr, err := p.parseParenExpression()
 
 		if err != nil {
 			return nil, err
@@ -1342,38 +1342,38 @@ func (this *Parser) parseParenAndDistinguishExpression(canBeArrow bool, forInit 
 		val = parenExpr
 	}
 
-	if this.options.PreserveParens {
-		par := this.startNodeAt(startPos, startLoc)
+	if p.options.PreserveParens {
+		par := p.startNodeAt(startPos, startLoc)
 		par.Expression = val
-		return this.finishNode(par, NODE_PARENTHESIZED_EXPRESSION), nil
+		return p.finishNode(par, NODE_PARENTHESIZED_EXPRESSION), nil
 	} else {
 		return val, nil
 	}
 }
 
-func (this *Parser) parseParenArrowList(startPos int, startLoc *Location, exprList []*Node, forInit string) (*Node, error) {
-	arrExpr, err := this.parseArrowExpression(this.startNodeAt(startPos, startLoc), exprList, false, forInit)
+func (p *Parser) parseParenArrowList(startPos int, startLoc *Location, exprList []*Node, forInit string) (*Node, error) {
+	arrExpr, err := p.parseArrowExpression(p.startNodeAt(startPos, startLoc), exprList, false, forInit)
 	return arrExpr, err
 }
 
-func (this *Parser) shouldParseArrow(_ []*Node) bool {
-	return !this.canInsertSemicolon()
+func (p *Parser) shouldParseArrow(_ []*Node) bool {
+	return !p.canInsertSemicolon()
 }
 
-func (this *Parser) parseParenItem(item *Node) (*Node, error) {
+func (p *Parser) parseParenItem(item *Node) (*Node, error) {
 	return item, nil
 }
 
-func (this *Parser) parseParenExpression() (*Node, error) {
-	err := this.expect(TOKEN_PARENL)
+func (p *Parser) parseParenExpression() (*Node, error) {
+	err := p.expect(TOKEN_PARENL)
 	if err != nil {
 		return nil, err
 	}
-	val, errParse := this.parseExpression("", nil)
+	val, errParse := p.parseExpression("", nil)
 	if errParse != nil {
 		return nil, err
 	}
-	err = this.expect(TOKEN_PARENR)
+	err = p.expect(TOKEN_PARENR)
 
 	if err != nil {
 		return nil, err
@@ -1381,57 +1381,57 @@ func (this *Parser) parseParenExpression() (*Node, error) {
 	return val, nil
 }
 
-func (this *Parser) parseNew() (*Node, error) {
-	if this.ContainsEsc {
-		return nil, this.raiseRecoverable(this.start, "Escape sequence in keyword new")
+func (p *Parser) parseNew() (*Node, error) {
+	if p.ContainsEsc {
+		return nil, p.raiseRecoverable(p.start, "Escape sequence in keyword new")
 	}
-	node := this.startNode()
-	this.next(false)
-	if this.getEcmaVersion() >= 6 && this.Type.identifier == TOKEN_DOT {
+	node := p.startNode()
+	p.next(false)
+	if p.getEcmaVersion() >= 6 && p.Type.identifier == TOKEN_DOT {
 
 		var startLoc *Location
 
 		if node.Location != nil {
 			startLoc = node.Location.Start
 		}
-		meta := this.startNodeAt(node.Start, startLoc)
+		meta := p.startNodeAt(node.Start, startLoc)
 		meta.Name = "new"
-		node.Meta = this.finishNode(meta, NODE_IDENTIFIER)
-		this.next(false)
-		containsEsc := this.ContainsEsc
-		id, err := this.parseIdent(true)
+		node.Meta = p.finishNode(meta, NODE_IDENTIFIER)
+		p.next(false)
+		containsEsc := p.ContainsEsc
+		id, err := p.parseIdent(true)
 		if err != nil {
 			return nil, err
 		}
 		node.Property = id
 		if node.Property.Name != "target" {
-			return nil, this.raiseRecoverable(node.Property.Start, "The only valid meta property for new is 'new.target'")
+			return nil, p.raiseRecoverable(node.Property.Start, "The only valid meta property for new is 'new.target'")
 		}
 
 		if containsEsc {
-			return nil, this.raiseRecoverable(node.Start, "'new.target' must not contain escaped characters")
+			return nil, p.raiseRecoverable(node.Start, "'new.target' must not contain escaped characters")
 		}
 
-		if !this.allowNewDotTarget() {
-			return nil, this.raiseRecoverable(node.Start, "'new.target' can only be used in functions and class static block")
+		if !p.allowNewDotTarget() {
+			return nil, p.raiseRecoverable(node.Start, "'new.target' can only be used in functions and class static block")
 		}
 
-		return this.finishNode(node, NODE_META_PROPERTY), nil
+		return p.finishNode(node, NODE_META_PROPERTY), nil
 	}
-	startPos, startLoc := this.start, this.startLoc
-	exprAtom, err := this.parseExprAtom(nil, "", true)
+	startPos, startLoc := p.start, p.startLoc
+	exprAtom, err := p.parseExprAtom(nil, "", true)
 	if err != nil {
 		return nil, err
 	}
 
-	subscript, errSubcript := this.parseSubscript(exprAtom, startPos, startLoc, true, false, false, "")
+	subscript, errSubcript := p.parseSubscript(exprAtom, startPos, startLoc, true, false, false, "")
 
 	if errSubcript != nil {
 		return nil, errSubcript
 	}
 	node.Callee = subscript
-	if this.eat(TOKEN_PARENL) {
-		exprList, err := this.parseExprList(TOKEN_PARENR, this.getEcmaVersion() >= 8, false, nil)
+	if p.eat(TOKEN_PARENL) {
+		exprList, err := p.parseExprList(TOKEN_PARENR, p.getEcmaVersion() >= 8, false, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -1440,83 +1440,83 @@ func (this *Parser) parseNew() (*Node, error) {
 	} else {
 		node.Arguments = []*Node{}
 	}
-	return this.finishNode(node, NODE_NEW_EXPRESSION), nil
+	return p.finishNode(node, NODE_NEW_EXPRESSION), nil
 }
 
-func (this *Parser) parseArrowExpression(node *Node, params []*Node, isAsync bool, forInit string) (*Node, error) {
-	oldYieldPos, oldAwaitPos, oldAwaitIdentPos := this.YieldPos, this.AwaitPos, this.AwaitIdentPos
+func (p *Parser) parseArrowExpression(node *Node, params []*Node, isAsync bool, forInit string) (*Node, error) {
+	oldYieldPos, oldAwaitPos, oldAwaitIdentPos := p.YieldPos, p.AwaitPos, p.AwaitIdentPos
 
-	this.enterScope(functionFlags(isAsync, false) | SCOPE_ARROW)
-	this.initFunction(node)
+	p.enterScope(functionFlags(isAsync, false) | SCOPE_ARROW)
+	p.initFunction(node)
 
 	node.IsAsync = isAsync
 
-	this.YieldPos = 0
-	this.AwaitPos = 0
-	this.AwaitIdentPos = 0
+	p.YieldPos = 0
+	p.AwaitPos = 0
+	p.AwaitIdentPos = 0
 
-	listParams, err := this.toAssignableList(params, true)
+	listParams, err := p.toAssignableList(params, true)
 
 	if err != nil {
 		return nil, err
 	}
 	node.Params = listParams
-	err = this.parseFunctionBody(node, true, false, forInit)
+	err = p.parseFunctionBody(node, true, false, forInit)
 	if err != nil {
 		return nil, err
 	}
 
-	this.YieldPos = oldYieldPos
-	this.AwaitPos = oldAwaitPos
-	this.AwaitIdentPos = oldAwaitIdentPos
+	p.YieldPos = oldYieldPos
+	p.AwaitPos = oldAwaitPos
+	p.AwaitIdentPos = oldAwaitIdentPos
 
-	return this.finishNode(node, NODE_ARROW_FUNCTION_EXPRESSION), nil
+	return p.finishNode(node, NODE_ARROW_FUNCTION_EXPRESSION), nil
 }
 
-func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod bool, forInit string) error {
-	isExpression := isArrowFunction && this.Type.identifier != TOKEN_BRACEL
-	oldStrict, useStrict := this.Strict, false
+func (p *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod bool, forInit string) error {
+	isExpression := isArrowFunction && p.Type.identifier != TOKEN_BRACEL
+	oldStrict, useStrict := p.Strict, false
 	if isExpression {
-		maybeAssign, err := this.parseMaybeAssign(forInit, nil, nil)
+		maybeAssign, err := p.parseMaybeAssign(forInit, nil, nil)
 		if err != nil {
 			return err
 		}
 		node.BodyNode = maybeAssign
 		node.IsExpression = true
-		err = this.checkParams(node, false)
+		err = p.checkParams(node, false)
 		if err != nil {
 			return err
 		}
 	} else {
-		nonSimple := this.getEcmaVersion() >= 7 && !this.isSimpleParamList(node.Params)
+		nonSimple := p.getEcmaVersion() >= 7 && !p.isSimpleParamList(node.Params)
 		if !oldStrict || nonSimple {
-			useStrict = this.strictDirective(this.End)
+			useStrict = p.strictDirective(p.End)
 			// If this is a strict mode function, verify that argument names
 			// are not repeated, and it does not try to bind the words `eval`
 			// or `arguments`.
 			if useStrict && nonSimple {
-				return this.raiseRecoverable(node.Start, "Illegal 'use strict' directive in function with non-simple parameter list")
+				return p.raiseRecoverable(node.Start, "Illegal 'use strict' directive in function with non-simple parameter list")
 			}
 
 		}
 		// Start a new scope with regard to labels and the `inFunction`
 		// flag (restore them to their old value afterwards).
-		oldLabels := this.Labels
-		this.Labels = []Label{}
+		oldLabels := p.Labels
+		p.Labels = []Label{}
 		if useStrict {
-			this.Strict = true
+			p.Strict = true
 		}
 
 		// Add the params to varDeclaredNames to ensure that an error is thrown
 		// if a let/const declaration in the function clashes with one of the params.
-		err := this.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && this.isSimpleParamList(node.Params))
+		err := p.checkParams(node, !oldStrict && !useStrict && !isArrowFunction && !isMethod && p.isSimpleParamList(node.Params))
 
 		if err != nil {
 			return err
 		}
 		// Ensure the function name isn't a forbidden identifier in strict mode, e.g. 'eval'
-		if this.Strict && node.Identifier != nil {
-			err := this.checkLValSimple(node.Identifier, BIND_OUTSIDE, struct {
+		if p.Strict && node.Identifier != nil {
+			err := p.checkLValSimple(node.Identifier, BIND_OUTSIDE, struct {
 				check bool
 				hash  map[string]bool
 			}{})
@@ -1525,20 +1525,20 @@ func (this *Parser) parseFunctionBody(node *Node, isArrowFunction bool, isMethod
 				return err
 			}
 		}
-		block, err := this.parseBlock(false, nil, useStrict && !oldStrict)
+		block, err := p.parseBlock(false, nil, useStrict && !oldStrict)
 		if err != nil {
 			return err
 		}
 		node.BodyNode = block
 		node.IsExpression = false
-		this.adaptDirectivePrologue(node.BodyNode.Body)
-		this.Labels = oldLabels
+		p.adaptDirectivePrologue(node.BodyNode.Body)
+		p.Labels = oldLabels
 	}
-	this.exitScope()
+	p.exitScope()
 	return nil
 }
 
-func (this *Parser) isSimpleParamList(params []*Node) bool {
+func (p *Parser) isSimpleParamList(params []*Node) bool {
 	for _, param := range params {
 		if param.Type != NODE_IDENTIFIER {
 			return false
@@ -1547,11 +1547,11 @@ func (this *Parser) isSimpleParamList(params []*Node) bool {
 	return true
 }
 
-func (this *Parser) checkParams(node *Node, allowDuplicates bool) error {
+func (p *Parser) checkParams(node *Node, allowDuplicates bool) error {
 	// nameHash = Object.create(null), let's see if I got this right....
 	for _, param := range node.Params {
 		if allowDuplicates {
-			err := this.checkLValInnerPattern(param, BIND_VAR, struct {
+			err := p.checkLValInnerPattern(param, BIND_VAR, struct {
 				check bool
 				hash  map[string]bool
 			}{})
@@ -1559,7 +1559,7 @@ func (this *Parser) checkParams(node *Node, allowDuplicates bool) error {
 				return err
 			}
 		} else {
-			err := this.checkLValInnerPattern(param, BIND_VAR, struct {
+			err := p.checkLValInnerPattern(param, BIND_VAR, struct {
 				check bool
 				hash  map[string]bool
 			}{check: true, hash: map[string]bool{}})
@@ -1572,87 +1572,87 @@ func (this *Parser) checkParams(node *Node, allowDuplicates bool) error {
 	return nil
 }
 
-func (this *Parser) initFunction(node *Node) {
+func (p *Parser) initFunction(node *Node) {
 	node.Identifier = nil
-	if this.getEcmaVersion() >= 6 {
+	if p.getEcmaVersion() >= 6 {
 		node.IsGenerator = false
 		node.IsExpression = false
 	}
 
-	if this.getEcmaVersion() >= 8 {
+	if p.getEcmaVersion() >= 8 {
 		node.IsAsync = false
 	}
 }
 
-func (this *Parser) parseMethod(isGenerator bool, isAsync bool, allowDirectSuper bool) (*Node, error) {
-	node, oldYieldPos, oldAwaitPos, oldAwaitIdentPos := this.startNode(), this.YieldPos, this.AwaitPos, this.AwaitIdentPos
+func (p *Parser) parseMethod(isGenerator bool, isAsync bool, allowDirectSuper bool) (*Node, error) {
+	node, oldYieldPos, oldAwaitPos, oldAwaitIdentPos := p.startNode(), p.YieldPos, p.AwaitPos, p.AwaitIdentPos
 
-	this.initFunction(node)
+	p.initFunction(node)
 	node.IsGenerator = isGenerator
 
 	node.IsAsync = isAsync
 
-	this.YieldPos = 0
-	this.AwaitPos = 0
-	this.AwaitIdentPos = 0
+	p.YieldPos = 0
+	p.AwaitPos = 0
+	p.AwaitIdentPos = 0
 
 	flags := functionFlags(isAsync, node.IsGenerator) | SCOPE_SUPER
 
 	if allowDirectSuper {
-		this.enterScope(flags | SCOPE_DIRECT_SUPER)
+		p.enterScope(flags | SCOPE_DIRECT_SUPER)
 	} else {
-		this.enterScope(flags)
+		p.enterScope(flags)
 	}
 
-	err := this.expect(TOKEN_PARENL)
+	err := p.expect(TOKEN_PARENL)
 	if err != nil {
 		return nil, err
 	}
 
-	bindingList, errBindingList := this.parseBindingList(TOKEN_PARENR, false, this.getEcmaVersion() >= 8, false)
+	bindingList, errBindingList := p.parseBindingList(TOKEN_PARENR, false, p.getEcmaVersion() >= 8, false)
 	if errBindingList != nil {
 		return nil, errBindingList
 	}
 	node.Params = bindingList
-	err = this.checkYieldAwaitInDefaultParams()
+	err = p.checkYieldAwaitInDefaultParams()
 	if err != nil {
 		return nil, err
 	}
 
-	err = this.parseFunctionBody(node, false, true, "")
+	err = p.parseFunctionBody(node, false, true, "")
 
 	if err != nil {
 		return nil, err
 	}
 
-	this.YieldPos = oldYieldPos
-	this.AwaitPos = oldAwaitPos
-	this.AwaitIdentPos = oldAwaitIdentPos
-	return this.finishNode(node, NODE_FUNCTION_EXPRESSION), nil
+	p.YieldPos = oldYieldPos
+	p.AwaitPos = oldAwaitPos
+	p.AwaitIdentPos = oldAwaitIdentPos
+	return p.finishNode(node, NODE_FUNCTION_EXPRESSION), nil
 }
 
-func (this *Parser) parseObj(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	node, first, propHash := this.startNode(), true, &PropertyHash{proto: false, m: map[string]map[Kind]bool{}}
+func (p *Parser) parseObj(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	node, first, propHash := p.startNode(), true, &PropertyHash{proto: false, m: map[string]map[Kind]bool{}}
 	node.Properties = []*Node{}
-	this.next(false)
-	for !this.eat(TOKEN_BRACER) {
+	p.next(false)
+	for !p.eat(TOKEN_BRACER) {
 		if !first {
-			err := this.expect(TOKEN_COMMA)
+			err := p.expect(TOKEN_COMMA)
 			if err != nil {
 				return nil, err
 			}
-			if this.getEcmaVersion() >= 5 && this.afterTrailingComma(TOKEN_BRACER, false) {
+			if p.getEcmaVersion() >= 5 && p.afterTrailingComma(TOKEN_BRACER, false) {
 				break
 			}
 		} else {
 			first = false
 		}
-		prop, err := this.parseProperty(isPattern, refDestructuringErrors)
+		prop, err := p.parseProperty(isPattern, refDestructuringErrors)
 		if err != nil {
 			return nil, err
 		}
 		if !isPattern {
-			err := this.checkPropClash(prop, propHash, refDestructuringErrors)
+			err := p.checkPropClash(prop, propHash, refDestructuringErrors)
 			if err != nil {
 				return nil, err
 			}
@@ -1661,65 +1661,65 @@ func (this *Parser) parseObj(isPattern bool, refDestructuringErrors *Destructuri
 	}
 
 	if isPattern {
-		return this.finishNode(node, NODE_OBJECT_PATTERN), nil
+		return p.finishNode(node, NODE_OBJECT_PATTERN), nil
 	}
-	return this.finishNode(node, NODE_OBJECT_EXPRESSION), nil
+	return p.finishNode(node, NODE_OBJECT_EXPRESSION), nil
 }
 
-func (this *Parser) parseProperty(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
-	prop := this.startNode()
+func (p *Parser) parseProperty(isPattern bool, refDestructuringErrors *DestructuringErrors) (*Node, error) {
+	prop := p.startNode()
 	isGenerator, isAsync, startPos := false, false, 0
 	var startLoc *Location
 
-	if this.getEcmaVersion() >= 9 && this.eat(TOKEN_ELLIPSIS) {
+	if p.getEcmaVersion() >= 9 && p.eat(TOKEN_ELLIPSIS) {
 		if isPattern {
-			ident, err := this.parseIdent(false)
+			ident, err := p.parseIdent(false)
 			if err != nil {
 				return nil, err
 			}
 
 			prop.Argument = ident
-			if this.Type.identifier == TOKEN_COMMA {
-				return nil, this.raiseRecoverable(this.start, "Comma is not permitted after the rest element")
+			if p.Type.identifier == TOKEN_COMMA {
+				return nil, p.raiseRecoverable(p.start, "Comma is not permitted after the rest element")
 			}
-			return this.finishNode(prop, NODE_REST_ELEMENT), nil
+			return p.finishNode(prop, NODE_REST_ELEMENT), nil
 		}
 		// Parse argument.
-		maybeAssign, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
+		maybeAssign, err := p.parseMaybeAssign("", refDestructuringErrors, nil)
 		if err != nil {
 			return nil, err
 		}
 		prop.Argument = maybeAssign
-		// To disallow trailing comma via `this.toAssignable()`.
-		if this.Type.identifier == TOKEN_COMMA && refDestructuringErrors != nil && refDestructuringErrors.trailingComma < 0 {
-			refDestructuringErrors.trailingComma = this.start
+		// To disallow trailing comma via `p.toAssignable()`.
+		if p.Type.identifier == TOKEN_COMMA && refDestructuringErrors != nil && refDestructuringErrors.trailingComma < 0 {
+			refDestructuringErrors.trailingComma = p.start
 		}
 		// Finish
-		return this.finishNode(prop, NODE_SPREAD_ELEMENT), nil
+		return p.finishNode(prop, NODE_SPREAD_ELEMENT), nil
 	}
-	if this.getEcmaVersion() >= 6 {
+	if p.getEcmaVersion() >= 6 {
 		prop.IsMethod = false
 		prop.Shorthand = false
 		if isPattern || refDestructuringErrors != nil {
-			startPos = this.start
-			startLoc = this.startLoc
+			startPos = p.start
+			startLoc = p.startLoc
 		}
 		if !isPattern {
-			isGenerator = this.eat(TOKEN_STAR)
+			isGenerator = p.eat(TOKEN_STAR)
 		}
 
 	}
-	containsEsc := this.ContainsEsc
-	_, err := this.parsePropertyName(prop)
+	containsEsc := p.ContainsEsc
+	_, err := p.parsePropertyName(prop)
 
 	if err != nil {
 		return nil, err
 	}
 
-	if !isPattern && !containsEsc && this.getEcmaVersion() >= 8 && !isGenerator && this.isAsyncProp(prop) {
+	if !isPattern && !containsEsc && p.getEcmaVersion() >= 8 && !isGenerator && p.isAsyncProp(prop) {
 		isAsync = true
-		isGenerator = this.getEcmaVersion() >= 9 && this.eat(TOKEN_STAR)
-		_, err := this.parsePropertyName(prop)
+		isGenerator = p.getEcmaVersion() >= 9 && p.eat(TOKEN_STAR)
+		_, err := p.parsePropertyName(prop)
 
 		if err != nil {
 			return nil, err
@@ -1727,38 +1727,38 @@ func (this *Parser) parseProperty(isPattern bool, refDestructuringErrors *Destru
 	} else {
 		isAsync = false
 	}
-	err = this.parsePropertyValue(prop, isPattern, isGenerator, isAsync, startPos, startLoc, refDestructuringErrors, containsEsc)
+	err = p.parsePropertyValue(prop, isPattern, isGenerator, isAsync, startPos, startLoc, refDestructuringErrors, containsEsc)
 	if err != nil {
 		return nil, err
 	}
-	return this.finishNode(prop, NODE_PROPERTY), nil
+	return p.finishNode(prop, NODE_PROPERTY), nil
 }
 
-func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator bool, isAsync bool, startPos int, startLoc *Location, refDestructuringErrors *DestructuringErrors, containsEsc bool) error {
-	if (isGenerator || isAsync) && this.Type.identifier == TOKEN_COLON {
-		return this.unexpected("", nil)
+func (p *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator bool, isAsync bool, startPos int, startLoc *Location, refDestructuringErrors *DestructuringErrors, containsEsc bool) error {
+	if (isGenerator || isAsync) && p.Type.identifier == TOKEN_COLON {
+		return p.unexpected("", nil)
 	}
 
-	if this.eat(TOKEN_COLON) {
+	if p.eat(TOKEN_COLON) {
 		prop.Kind = KIND_PROPERTY_INIT
 		if isPattern {
-			val, err := this.parseMaybeDefault(this.start, this.startLoc, nil)
+			val, err := p.parseMaybeDefault(p.start, p.startLoc, nil)
 			if err != nil {
 				return err
 			}
 			prop.Value = val
 		} else {
-			val, err := this.parseMaybeAssign("", refDestructuringErrors, nil)
+			val, err := p.parseMaybeAssign("", refDestructuringErrors, nil)
 			if err != nil {
 				return err
 			}
 			prop.Value = val
 		}
-	} else if this.getEcmaVersion() >= 6 && this.Type.identifier == TOKEN_PARENL {
+	} else if p.getEcmaVersion() >= 6 && p.Type.identifier == TOKEN_PARENL {
 		if isPattern {
-			return this.unexpected("", nil)
+			return p.unexpected("", nil)
 		}
-		method, err := this.parseMethod(isGenerator, isAsync, false)
+		method, err := p.parseMethod(isGenerator, isAsync, false)
 		if err != nil {
 			return err
 		}
@@ -1766,21 +1766,21 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		prop.Kind = KIND_PROPERTY_INIT
 		prop.Value = method
 	} else if !isPattern && !containsEsc &&
-		this.getEcmaVersion() >= 5 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER &&
+		p.getEcmaVersion() >= 5 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER &&
 		(prop.Key.Name == "get" || prop.Key.Name == "set") &&
-		(this.Type.identifier != TOKEN_COMMA && this.Type.identifier != TOKEN_BRACER && this.Type.identifier != TOKEN_EQ) {
+		(p.Type.identifier != TOKEN_COMMA && p.Type.identifier != TOKEN_BRACER && p.Type.identifier != TOKEN_EQ) {
 		if isGenerator || isAsync {
-			return this.unexpected("", nil)
+			return p.unexpected("", nil)
 		}
-		err := this.parseGetterSetter(prop)
+		err := p.parseGetterSetter(prop)
 		if err != nil {
 			return err
 		}
-	} else if this.getEcmaVersion() >= 6 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER {
+	} else if p.getEcmaVersion() >= 6 && !prop.Computed && prop.Key.Type == NODE_IDENTIFIER {
 		if isGenerator || isAsync {
-			return this.unexpected("", nil)
+			return p.unexpected("", nil)
 		}
-		err := this.checkUnreserved(struct {
+		err := p.checkUnreserved(struct {
 			start int
 			end   int
 			name  string
@@ -1788,35 +1788,35 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		if err != nil {
 			return err
 		}
-		if prop.Key.Name == "await" && !(this.AwaitIdentPos != 0) {
-			this.AwaitIdentPos = startPos
+		if prop.Key.Name == "await" && !(p.AwaitIdentPos != 0) {
+			p.AwaitIdentPos = startPos
 		}
 
 		if isPattern {
-			c, err := this.copyNode(prop.Key)
+			c, err := p.copyNode(prop.Key)
 			if err != nil {
 				return err
 			}
-			val, err := this.parseMaybeDefault(startPos, startLoc, c)
+			val, err := p.parseMaybeDefault(startPos, startLoc, c)
 			if err != nil {
 				return err
 			}
 			prop.Value = val
-		} else if this.Type.identifier == TOKEN_EQ && refDestructuringErrors != nil {
+		} else if p.Type.identifier == TOKEN_EQ && refDestructuringErrors != nil {
 			if refDestructuringErrors.shorthandAssign < 0 {
-				refDestructuringErrors.shorthandAssign = this.start
+				refDestructuringErrors.shorthandAssign = p.start
 			}
-			c, err := this.copyNode(prop.Key)
+			c, err := p.copyNode(prop.Key)
 			if err != nil {
 				return err
 			}
-			val, err := this.parseMaybeDefault(startPos, startLoc, c)
+			val, err := p.parseMaybeDefault(startPos, startLoc, c)
 			if err != nil {
 				return err
 			}
 			prop.Value = val
 		} else {
-			c, err := this.copyNode(prop.Key)
+			c, err := p.copyNode(prop.Key)
 			if err != nil {
 				return err
 			}
@@ -1825,12 +1825,12 @@ func (this *Parser) parsePropertyValue(prop *Node, isPattern bool, isGenerator b
 		prop.Kind = KIND_PROPERTY_INIT
 		prop.Shorthand = true
 	} else {
-		return this.unexpected("", nil)
+		return p.unexpected("", nil)
 	}
 	return nil
 }
 
-func (this *Parser) parseGetterSetter(prop *Node) error {
+func (p *Parser) parseGetterSetter(prop *Node) error {
 	kind := KIND_NOT_INITIALIZED
 
 	switch prop.Key.Name {
@@ -1840,8 +1840,8 @@ func (this *Parser) parseGetterSetter(prop *Node) error {
 		kind = KIND_PROPERTY_GET
 	}
 
-	this.parsePropertyName(prop)
-	method, err := this.parseMethod(false, false, false)
+	p.parsePropertyName(prop)
+	method, err := p.parseMethod(false, false, false)
 	if err != nil {
 		return err
 	}
@@ -1857,13 +1857,13 @@ func (this *Parser) parseGetterSetter(prop *Node) error {
 		if len(val.Params) != paramCount {
 			start := val.Start
 			if prop.Kind == KIND_PROPERTY_GET {
-				return this.raiseRecoverable(start, "getter should have no params")
+				return p.raiseRecoverable(start, "getter should have no params")
 			} else {
-				return this.raiseRecoverable(start, "setter should have exactly one param")
+				return p.raiseRecoverable(start, "setter should have exactly one param")
 			}
 		} else {
 			if prop.Kind == KIND_PROPERTY_SET && val.Params[0].Type == NODE_REST_ELEMENT {
-				return this.raiseRecoverable(val.Params[0].Start, "Setter cannot use rest params")
+				return p.raiseRecoverable(val.Params[0].Start, "Setter cannot use rest params")
 			}
 		}
 	} else {
@@ -1872,22 +1872,22 @@ func (this *Parser) parseGetterSetter(prop *Node) error {
 	return nil
 }
 
-func (this *Parser) isAsyncProp(prop *Node) bool {
+func (p *Parser) isAsyncProp(prop *Node) bool {
 	return !prop.Computed && prop.Key.Type == NODE_IDENTIFIER && prop.Key.Name == "async" &&
-		(this.Type.identifier == TOKEN_NAME || this.Type.identifier == TOKEN_NUM || this.Type.identifier == TOKEN_STRING || this.Type.identifier == TOKEN_BRACKETL || len(this.Type.keyword) != 0 || (this.getEcmaVersion() >= 9 && this.Type.identifier == TOKEN_STAR)) &&
-		!lineBreak.Match(this.input[this.LastTokEnd:this.start])
+		(p.Type.identifier == TOKEN_NAME || p.Type.identifier == TOKEN_NUM || p.Type.identifier == TOKEN_STRING || p.Type.identifier == TOKEN_BRACKETL || len(p.Type.keyword) != 0 || (p.getEcmaVersion() >= 9 && p.Type.identifier == TOKEN_STAR)) &&
+		!lineBreak.Match(p.input[p.LastTokEnd:p.start])
 }
 
-func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
-	if this.getEcmaVersion() >= 6 {
-		if this.eat(TOKEN_BRACKETL) {
+func (p *Parser) parsePropertyName(prop *Node) (*Node, error) {
+	if p.getEcmaVersion() >= 6 {
+		if p.eat(TOKEN_BRACKETL) {
 			prop.Computed = true
-			maybeAssign, err := this.parseMaybeAssign("", nil, nil)
+			maybeAssign, err := p.parseMaybeAssign("", nil, nil)
 			if err != nil {
 				return nil, err
 			}
 			prop.Key = maybeAssign
-			err = this.expect(TOKEN_BRACKETR)
+			err = p.expect(TOKEN_BRACKETR)
 
 			if err != nil {
 				return nil, err
@@ -1897,15 +1897,15 @@ func (this *Parser) parsePropertyName(prop *Node) (*Node, error) {
 			prop.Computed = false
 		}
 	}
-	if this.Type.identifier == TOKEN_NUM || this.Type.identifier == TOKEN_STRING {
-		exprAtom, err := this.parseExprAtom(nil, "", false)
+	if p.Type.identifier == TOKEN_NUM || p.Type.identifier == TOKEN_STRING {
+		exprAtom, err := p.parseExprAtom(nil, "", false)
 		if err != nil {
 			return nil, err
 		}
 		prop.Key = exprAtom
 		return prop.Key, nil
 	} else {
-		ident, err := this.parseIdent(this.options.AllowReserved != ALLOW_RESERVED_NEVER)
+		ident, err := p.parseIdent(p.options.AllowReserved != ALLOW_RESERVED_NEVER)
 		if err != nil {
 			return nil, err
 		}
