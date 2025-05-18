@@ -2,7 +2,7 @@
 
 Make a JS runtime (not that the world needs another js runtime, I just want to make one)
 
-- Port acorn to go
-- transpile AST -> bytecode
+- Port acorn to go - Done, bugs may appear later, let's fix them as they appear
+- transpile AST -> bytecode 
 - build a VM to run this bytecode
 - try not to quit... hello

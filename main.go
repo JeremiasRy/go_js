@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"go_js/compiler"
 	"go_js/parser"
+	"go_js/vm"
 	"log"
 	"os"
 )
@@ -27,4 +29,8 @@ func main() {
 
 	bJson, _ := json.MarshalIndent(node, "", "  ")
 	println(string(bJson))
+
+	fn := compiler.Compile(node)
+	vm := vm.NewVM(fn)
+	vm.Run()
 }
