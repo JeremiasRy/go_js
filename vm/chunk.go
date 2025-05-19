@@ -5,30 +5,32 @@ import (
 	"strconv"
 )
 
-const QNAN uint64 = 0x7ffc000000000000
-const SIGN uint64 = 0x8000000000000000
+type Value uint64
+
+const QNAN Value = 0x7ffc000000000000
+const SIGN Value = 0x8000000000000000
 
 const (
-	TAG_UNDEFINED uint64 = QNAN | 1
-	TAG_NILL      uint64 = QNAN | 2
-	TAG_TRUE      uint64 = QNAN | 3
-	TAG_FALSE     uint64 = QNAN | 4
-	TAG_OBJ       uint64 = QNAN | SIGN
+	TAG_UNDEFINED Value = Value(QNAN | 1)
+	TAG_NILL      Value = Value(QNAN | 2)
+	TAG_TRUE      Value = Value(QNAN | 3)
+	TAG_FALSE     Value = Value(QNAN | 4)
+	TAG_OBJ       Value = Value(QNAN | SIGN)
 )
 
-func isNumber(value uint64) bool {
+func isNumber(value Value) bool {
 	return value&QNAN != QNAN
 }
 
-func isUndefined(value uint64) bool {
+func isUndefined(value Value) bool {
 	return value == TAG_UNDEFINED
 }
 
-func isNill(value uint64) bool {
+func isNill(value Value) bool {
 	return value == TAG_NILL
 }
 
-func isBool(value uint64) bool {
+func isBool(value Value) bool {
 	return value|3 == TAG_TRUE
 }
 
@@ -53,13 +55,13 @@ const (
 
 type Chunk struct {
 	code      []uint8
-	constants []uint64
+	constants []Value
 }
 
 func NewChunk() *Chunk {
 	return &Chunk{
 		code:      []uint8{},
-		constants: []uint64{},
+		constants: []Value{},
 	}
 }
 
@@ -67,7 +69,7 @@ func (c *Chunk) EmitByte(b uint8) {
 	c.code = append(c.code, b)
 }
 
-func (c *Chunk) AddConstant(v uint64) uint8 {
+func (c *Chunk) AddConstant(v Value) uint8 {
 	c.constants = append(c.constants, v)
 	return uint8(len(c.constants) - 1)
 }

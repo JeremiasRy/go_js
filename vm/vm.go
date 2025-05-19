@@ -13,33 +13,33 @@ type CallFrame struct {
 type VM struct {
 	frames       []*CallFrame
 	currentFrame *CallFrame
-	stack        []uint64
+	stack        []Value
 }
 
 func NewVM(fn *ObjFunction) *VM {
 	return &VM{
 		frames:       []*CallFrame{},
 		currentFrame: &CallFrame{fn: fn, ip: 0},
-		stack:        []uint64{},
+		stack:        []Value{},
 	}
 }
 
-func (vm *VM) peek(distance int) uint64 {
+func (vm *VM) peek(distance int) Value {
 	return vm.stack[len(vm.stack)-1-distance]
 }
 
-func (vm *VM) pop() uint64 {
+func (vm *VM) pop() Value {
 	v := vm.stack[len(vm.stack)-1]
 	vm.stack = vm.stack[:len(vm.stack)-1]
 	return v
 }
 
-func (vm *VM) push(value uint64) {
+func (vm *VM) push(value Value) {
 	vm.stack = append(vm.stack, value)
 }
 
 func (vm *VM) readByte() uint8 {
-	code := uint8(vm.currentFrame.fn.chunk.code[vm.currentFrame.ip])
+	code := vm.currentFrame.fn.chunk.code[vm.currentFrame.ip]
 	vm.currentFrame.ip++
 	return code
 }
@@ -60,39 +60,43 @@ func (vm *VM) Run() {
 			}
 		case OP_ADD:
 			{
-				b := math.Float64frombits(vm.pop())
-				a := math.Float64frombits(vm.pop())
+				b := math.Float64frombits(uint64(vm.pop()))
+				a := math.Float64frombits(uint64(vm.pop()))
 
 				fmt.Printf("%f + %f\n", a, b)
 
-				vm.push(math.Float64bits(a + b))
+				vm.push(Value(math.Float64bits(a + b)))
 			}
 		case OP_SUBTRACT:
 			{
-				b := math.Float64frombits(vm.pop())
-				a := math.Float64frombits(vm.pop())
+				b := math.Float64frombits(uint64(vm.pop()))
+				a := math.Float64frombits(uint64(vm.pop()))
 
 				fmt.Printf("%f - %f\n", a, b)
 
-				vm.push(math.Float64bits(a - b))
+				vm.push(Value(math.Float64bits(a - b)))
 			}
 		case OP_MULTIPLY:
 			{
-				b := math.Float64frombits(vm.pop())
-				a := math.Float64frombits(vm.pop())
+				b := math.Float64frombits(uint64(vm.pop()))
+				a := math.Float64frombits(uint64(vm.pop()))
 
-				vm.push(math.Float64bits(a * b))
+				fmt.Printf("%f * %f\n", a, b)
+
+				vm.push(Value(math.Float64bits(a * b)))
 			}
 		case OP_DIVIDE:
 			{
-				b := math.Float64frombits(vm.pop())
-				a := math.Float64frombits(vm.pop())
+				b := math.Float64frombits(uint64(vm.pop()))
+				a := math.Float64frombits(uint64(vm.pop()))
 
-				vm.push(math.Float64bits(a / b))
+				fmt.Printf("%f / %f\n", a, b)
+
+				vm.push(Value(math.Float64bits(a / b)))
 			}
 		case OP_EOF:
 			{
-				fmt.Printf("%f\n", math.Float64frombits(vm.stack[len(vm.stack)-1]))
+				fmt.Printf("%f\n", math.Float64frombits(uint64(vm.stack[len(vm.stack)-1])))
 				return
 			}
 		}

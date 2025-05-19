@@ -44,7 +44,7 @@ func traverse(current *parser.Node, chunk *vm.Chunk) {
 			switch current.Value.(type) {
 			case float64:
 				{
-					address := chunk.AddConstant(uint64(math.Float64bits(current.Value.(float64))))
+					address := chunk.AddConstant(vm.Value(math.Float64bits(current.Value.(float64))))
 					chunk.EmitByte(vm.OP_CONSTANT)
 					chunk.EmitByte(address)
 				}
