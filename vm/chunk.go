@@ -45,7 +45,7 @@ func getObjType(value Value) ObjType {
 		payload := uint64(value & ENCODE_MASK)
 		return (*Obj)(unsafe.Pointer(uintptr(payload)))._type
 	}
-	return OBJ_NOT_A_OBJ
+	return OBJ_NUMBER
 }
 
 func asObj[ReturnType ObjLike](value Value) *ReturnType {

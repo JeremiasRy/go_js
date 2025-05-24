@@ -910,7 +910,11 @@ func (p *Parser) readNumber(startsWithDot bool) error {
 	if next == 46 && !octal { // '.'
 		p.pos = p.pos + 1
 		p.readInt(10, nil, false)
-		next = int(p.input[p.pos])
+
+		if p.pos < len(p.input)-1 {
+			next = int(p.input[p.pos])
+		}
+
 	}
 	if (next == 69 || next == 101) && !octal { // 'eE'
 		p.pos = p.pos + 1
@@ -1364,7 +1368,6 @@ func (p *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiteral 
 		if p.pos < len(p.input) {
 			p.pos = p.pos + 1
 		}
-
 	}
 
 	if allowSeparators && lastCode == 95 {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go_js/parser"
 	"math"
+	"strconv"
+	"strings"
 )
 
 type CallFrame struct {
@@ -47,6 +49,10 @@ func NewVM() *VM {
 	}
 }
 
+func numValueToString(v Value) string {
+	return strconv.FormatFloat(math.Float64frombits(uint64(v)), 'f', -1, 64)
+}
+
 func (vm *VM) call(fn *ObjFunction) bool {
 	if vm.frameCount == FRAMES_MAX {
 		// runtime error
@@ -71,7 +77,7 @@ func (vm *VM) peek(distance uint8) Value {
 }
 
 func (vm *VM) pop() Value {
-	v := vm.stack[vm.stackTop]
+	v := vm.stack[vm.stackTop-1]
 	vm.stackTop--
 	return v
 }
@@ -88,12 +94,83 @@ func (vm *VM) readByte() uint8 {
 	return code
 }
 
+func (vm *VM) concatenate(a Value, b Value) (Value, error) {
+	aType := getObjType(a)
+	bType := getObjType(b)
+
+	if aType == OBJ_NUMBER && bType == OBJ_NUMBER {
+		a := math.Float64frombits(uint64(a))
+		b := math.Float64frombits(uint64(b))
+
+		return Value(math.Float64bits(a + b)), nil
+	}
+
+	if aType == OBJ_STRING && bType == OBJ_STRING {
+		a := asObj[ObjString](a)
+		b := asObj[ObjString](b)
+
+		res := a.s + b.s
+
+		encoded, err := vm.intern(res).Encode()
+		if err != nil {
+			return 0, fmt.Errorf("failed to encode string -%e-", err)
+		}
+		return encoded, nil
+	}
+
+	if aType == OBJ_STRING && bType == OBJ_NUMBER {
+		a := asObj[ObjString](a).s
+		b := numValueToString(b)
+
+		res := a + b
+
+		encoded, err := vm.intern(res).Encode()
+		if err != nil {
+			return 0, fmt.Errorf("failed to encode string -%e-", err)
+		}
+		return encoded, nil
+	}
+
+	if aType == OBJ_NUMBER && bType == OBJ_STRING {
+		a := numValueToString(a)
+		b := asObj[ObjString](b).s
+
+		res := a + b
+
+		encoded, err := vm.intern(res).Encode()
+		if err != nil {
+			return 0, fmt.Errorf("failed to encode string -%e-", err)
+		}
+		return encoded, nil
+	}
+
+	return 0, fmt.Errorf("no suitable operation found")
+}
+
+func (vm *VM) DebugStack() {
+	debugStack := []string{}
+
+	for _, v := range vm.stack[0:vm.stackTop] {
+		switch getObjType(v) {
+		case OBJ_STRING:
+			{
+				debugStack = append(debugStack, "\""+asObj[ObjString](v).s+"\"")
+			}
+		case OBJ_NUMBER:
+			{
+				debugStack = append(debugStack, numValueToString(v))
+			}
+		}
+	}
+	fmt.Printf("[%v]\n", strings.Join(debugStack, " | "))
+}
+
 func (vm *VM) Run() {
 	vm.currentFrame().fn.Debug()
 
 	for {
 		code := vm.readByte()
-		fmt.Printf("%v\n", vm.stack)
+		vm.DebugStack()
 		PrintCode(code)
 
 		switch code {
@@ -108,27 +185,12 @@ func (vm *VM) Run() {
 				b := vm.pop()
 				a := vm.pop()
 
-				fmt.Printf("a: %v \nb: %v\n", a, b)
+				c, err := vm.concatenate(a, b)
 
-				switch getObjType(b) {
-				case OBJ_STRING:
-					{
-						bStr := asObj[ObjString](b)
-						fmt.Printf("%v\n", bStr)
-					}
+				if err != nil {
+					// runtime error
 				}
-
-				switch getObjType(a) {
-				case OBJ_STRING:
-					{
-						aStr := asObj[ObjString](a)
-						fmt.Printf("%v\n", aStr)
-					}
-				}
-
-				//fmt.Printf("%f + %f\n", a, b)
-
-				//vm.push(Value(math.Float64bits(a + b)))
+				vm.push(c)
 			}
 		case OP_SUBTRACT:
 			{
@@ -159,6 +221,7 @@ func (vm *VM) Run() {
 			}
 		case OP_EOF:
 			{
+				println("Done :)")
 				return
 			}
 		}

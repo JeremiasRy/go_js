@@ -16,7 +16,7 @@ type Obj struct {
 const (
 	OBJ_FUNCTION ObjType = iota
 	OBJ_STRING
-	OBJ_NOT_A_OBJ
+	OBJ_NUMBER
 )
 
 type ObjFunction struct {
