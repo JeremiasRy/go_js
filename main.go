@@ -1,9 +1,6 @@
 package main
 
 import (
-	"encoding/json"
-	"go_js/compiler"
-	"go_js/parser"
 	"go_js/vm"
 	"log"
 	"os"
@@ -21,16 +18,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	node, err := parser.GetAst(b, &parser.Options{SourceType: "module"}, 0)
+	err = vm.Interpret(b)
+
 	if err != nil {
-		println("Error while parsing file")
-		log.Fatal(err)
+		log.Fatalf("Runtime error -%e-", err)
 	}
-
-	bJson, _ := json.MarshalIndent(node, "", "  ")
-	println(string(bJson))
-
-	fn := compiler.Compile(node)
-	vm := vm.NewVM(fn)
-	vm.Run()
 }

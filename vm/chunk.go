@@ -2,15 +2,17 @@ package vm
 
 import (
 	"fmt"
+	"math"
 	"strconv"
+	"unsafe"
 )
 
 type Value uint64
 
-const QNAN Value = 0x7ffc000000000000
-const SIGN Value = 0x8000000000000000
-
 const (
+	QNAN          Value = 0x7ffc000000000000
+	SIGN          Value = 0x8000000000000000
+	ENCODE_MASK   Value = math.MaxUint64 ^ (QNAN | SIGN)
 	TAG_UNDEFINED Value = Value(QNAN | 1)
 	TAG_NILL      Value = Value(QNAN | 2)
 	TAG_TRUE      Value = Value(QNAN | 3)
@@ -32,6 +34,27 @@ func isNill(value Value) bool {
 
 func isBool(value Value) bool {
 	return value|3 == TAG_TRUE
+}
+
+func isObj(value Value) bool {
+	return value&(SIGN|QNAN) == (SIGN | QNAN)
+}
+
+func getObjType(value Value) ObjType {
+	if isObj(value) {
+		payload := uint64(value & ENCODE_MASK)
+		return (*Obj)(unsafe.Pointer(uintptr(payload)))._type
+	}
+	return OBJ_NOT_A_OBJ
+}
+
+func asObj[ReturnType ObjLike](value Value) *ReturnType {
+	payload := uint64(value & ENCODE_MASK)
+	return (*ReturnType)(unsafe.Pointer(uintptr(payload)))
+}
+
+func getNanPayload(value Value) uint64 {
+	return uint64(value & ENCODE_MASK)
 }
 
 func DebugValue(v uint64) {
