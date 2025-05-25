@@ -124,6 +124,11 @@ const (
 	NODE_UNTYPED
 )
 
+type TemplateNodeValue struct {
+	Raw    string
+	Cooked string
+}
+
 func (nt *NodeType) MarshalJSON() ([]byte, error) {
 	name, ok := nodeTypeToString[*nt]
 
@@ -270,10 +275,10 @@ const (
 
 type Node struct {
 	// Base values
-	Start              int                `json:"start"`
-	End                int                `json:"end"`
-	Type               NodeType           `json:"type"`
-	Range              [2]int             `json:"range"`
+	Start              int      `json:"start"`
+	End                int      `json:"end"`
+	Type               NodeType `json:"type"`
+	_range             [2]int
 	Location           *SourceLocation    `json:"location,omitempty"`
 	SourceFile         *string            `json:"sourceFile,omitempty"`
 	Name               string             `json:"name,omitempty"`
@@ -334,7 +339,6 @@ type Node struct {
 	Quasi              *Node              `json:"quasi,omitempty"`
 	Tag                *Node              `json:"tag,omitempty"`
 	Tail               bool               `json:"tail,omitempty"`
-	TmplValue          *TemplateValue     `json:"tmplValue,omitempty"`
 	SuperClass         *Node              `json:"superClass,omitempty"`
 	IsStatic           bool               `json:"isStatic,omitempty"`
 	Meta               *Node              `json:"meta,omitempty"`
@@ -369,11 +373,6 @@ func (n Node) MarshalJSON() ([]byte, error) {
 	})
 }
 
-type TemplateValue struct {
-	Cooked *string
-	Raw    string
-}
-
 func NewNode(parser *Parser, pos int, loc *Location) *Node {
 	node := &Node{
 		Type:  NODE_UNTYPED,
@@ -390,7 +389,7 @@ func NewNode(parser *Parser, pos int, loc *Location) *Node {
 	}
 
 	if parser.options.Ranges {
-		node.Range = [2]int{pos, 0}
+		node._range = [2]int{pos, 0}
 	}
 	return node
 }
@@ -411,7 +410,7 @@ func (p *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Loc
 	}
 
 	if p.options.Ranges {
-		node.Range[1] = pos
+		node._range[1] = pos
 	}
 }
 

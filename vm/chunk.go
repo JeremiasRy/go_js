@@ -3,7 +3,6 @@ package vm
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"unsafe"
 )
 
@@ -57,6 +56,27 @@ func getNanPayload(value Value) uint64 {
 	return uint64(value & ENCODE_MASK)
 }
 
+func (v Value) String() string {
+	t := getObjType(v)
+
+	switch t {
+	case OBJ_STRING:
+		{
+			return "\"" + asObj[ObjString](v).s + "\""
+		}
+	case OBJ_NUMBER:
+		{
+			return numValueToString(v)
+		}
+	case OBJ_FUNCTION:
+		{
+			return "<fn " + asObj[ObjFunction](v).name + ">"
+		}
+	}
+
+	return "<unknown value>"
+}
+
 func DebugValue(v uint64) {
 	fmt.Printf("%v\n", v)
 }
@@ -73,6 +93,8 @@ const (
 	OP_FALSE
 	OP_EQUALS
 	OP_EQUALS_STRICT
+	OP_TEMPLATE_LITERAL
+	OP_TEMPLATE_LITARAL_END
 	OP_EOF
 )
 
@@ -104,7 +126,7 @@ func (c *Chunk) PrintCode() {
 		switch code {
 		case OP_CONSTANT:
 			{
-				fmt.Printf("%-14s | %s\n", "OP_CONSTANT", strconv.Itoa(int(c.code[i+1])))
+				fmt.Printf("%-14s | %s\n", "OP_CONSTANT", c.constants[int(c.code[i+1])].String())
 				i++
 			}
 		case OP_ADD:
@@ -127,7 +149,6 @@ func (c *Chunk) PrintCode() {
 		i++
 	}
 	println()
-	println()
 }
 
 func PrintCode(c uint8) {
@@ -135,7 +156,6 @@ func PrintCode(c uint8) {
 	case OP_CONSTANT:
 		{
 			fmt.Printf("%-14s \n", "OP_CONSTANT")
-
 		}
 	case OP_ADD:
 		{

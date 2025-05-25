@@ -26,7 +26,6 @@ func traverse(current *parser.Node, chunk *Chunk, vm *VM) {
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
-
 			traverse(current.Left, chunk, vm)
 			traverse(current.Right, chunk, vm)
 			switch current.BinaryOperator {
@@ -53,6 +52,7 @@ func traverse(current *parser.Node, chunk *Chunk, vm *VM) {
 				{
 					/*
 						We might need to keep a ref pool, let's see if random segfaults start to appear later
+
 						obj := vm.intern(string(current.Value.([]byte)))
 						vm.refs = append(vm.refs, obj) Lets see if this becomes an issue
 					*/
@@ -63,9 +63,79 @@ func traverse(current *parser.Node, chunk *Chunk, vm *VM) {
 					where := chunk.AddConstant(encoded)
 					chunk.EmitByte(OP_CONSTANT)
 					chunk.EmitByte(where)
-					runtime.GC()
+					runtime.GC() // just to see if segfaults start
 				}
 			}
 		}
+	case parser.NODE_TEMPLATE_LITERAL:
+		{
+			max := int(math.Max(float64(len(current.Quasis)), float64(len(current.Expressions))))
+			templateArr := []*parser.Node{}
+
+			for i := range max {
+				if i < len(current.Quasis) {
+					if !(current.Quasis[i].Start == current.Quasis[i].End && !current.Quasis[i].Tail) {
+						templateArr = append(templateArr, current.Quasis[i])
+					}
+				}
+
+				if i < len(current.Expressions) {
+					templateArr = append(templateArr, current.Expressions[i])
+				}
+			}
+
+			current, next, iterations := 0, 1, -1
+
+			for current < len(templateArr) {
+				c := templateArr[current]
+				var n *parser.Node
+
+				if next < len(templateArr) {
+					n = templateArr[next]
+				}
+
+				if n != nil {
+					iterations = iterations + 1
+				}
+
+				if c.Type != parser.NODE_TEMPLATE_ELEMENT {
+					traverse(c, chunk, vm)
+					if n != nil && !n.Tail {
+						str := n.Value.(parser.TemplateNodeValue).Raw
+						encoded, err := vm.intern(str).Encode()
+
+						if err != nil {
+							log.Fatalf("failed to read template string %e", err)
+						}
+						where := chunk.AddConstant(encoded)
+						chunk.EmitByte(OP_CONSTANT)
+						chunk.EmitByte(where)
+
+						chunk.EmitByte(OP_ADD)
+					}
+				} else {
+					str := c.Value.(parser.TemplateNodeValue).Raw
+					encoded, err := vm.intern(str).Encode()
+
+					if err != nil {
+						log.Fatalf("failed to read template string %e", err)
+					}
+					where := chunk.AddConstant(encoded)
+					chunk.EmitByte(OP_CONSTANT)
+					chunk.EmitByte(where)
+
+					if n != nil {
+						traverse(n, chunk, vm)
+					}
+					chunk.EmitByte(OP_ADD)
+				}
+				current, next = next+1, next+2
+			}
+
+			for range iterations {
+				chunk.EmitByte(OP_ADD)
+			}
+		}
 	}
+
 }

@@ -731,20 +731,14 @@ func (p *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, erro
 			return nil, p.raiseRecoverable(p.start, "Bad escape sequence in untagged template literal")
 		}
 
-		elem.Value = struct {
-			raw    string
-			cooked string
-		}{
-			raw:    strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
-			cooked: "",
+		elem.Value = TemplateNodeValue{
+			Raw:    strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
+			Cooked: "",
 		}
 	} else {
-		elem.Value = struct {
-			raw    string
-			cooked string
-		}{
-			raw:    strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
-			cooked: string(p.Value.([]byte)),
+		elem.Value = TemplateNodeValue{
+			Raw:    strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
+			Cooked: string(p.Value.([]byte)),
 		}
 	}
 	p.next(false)

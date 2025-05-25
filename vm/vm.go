@@ -154,11 +154,11 @@ func (vm *VM) DebugStack() {
 		switch getObjType(v) {
 		case OBJ_STRING:
 			{
-				debugStack = append(debugStack, "\""+asObj[ObjString](v).s+"\"")
+				debugStack = append(debugStack, v.String())
 			}
 		case OBJ_NUMBER:
 			{
-				debugStack = append(debugStack, numValueToString(v))
+				debugStack = append(debugStack, v.String())
 			}
 		}
 	}
@@ -166,8 +166,7 @@ func (vm *VM) DebugStack() {
 }
 
 func (vm *VM) Run() {
-	vm.currentFrame().fn.Debug()
-
+	vm.currentFrame().fn.chunk.PrintCode()
 	for {
 		code := vm.readByte()
 		vm.DebugStack()

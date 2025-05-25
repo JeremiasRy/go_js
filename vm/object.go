@@ -47,12 +47,3 @@ func (objStr *ObjString) Encode() (Value, error) {
 
 	return TAG_OBJ | (address & ENCODE_MASK), nil
 }
-
-func (objStr *ObjString) Debug() {
-	fmt.Printf("%s\n", objStr.s)
-}
-
-func (fn *ObjFunction) Debug() {
-	fmt.Printf("<fn %s>\n", fn.name)
-	fn.chunk.PrintCode()
-}
