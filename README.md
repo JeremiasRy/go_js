@@ -5,4 +5,4 @@ Make a JS runtime (not that the world needs another js runtime, I just want to m
 - Port acorn to go - Done, bugs may appear later, let's fix them as they appear
 - transpile AST -> bytecode 
 - build a VM to run this bytecode
-- try not to quit... hello
+- try not to quit... seems that nan boxing in GO is not so straightforward GC cleans up things pretty radicly, might be a case of re-write in rust?
