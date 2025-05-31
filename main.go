@@ -2,7 +2,6 @@ package main
 
 import (
 	"go_js/vm"
-	"log"
 	"os"
 )
 
@@ -17,10 +16,5 @@ func main() {
 		println("Can't read file: ", os.Args[1])
 		os.Exit(1)
 	}
-
-	err = vm.Interpret(b)
-
-	if err != nil {
-		log.Fatalf("Runtime error -%e-", err)
-	}
+	vm.Interpret(b)
 }
