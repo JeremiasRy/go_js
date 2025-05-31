@@ -4,7 +4,7 @@ import (
 	"go_js/parser"
 )
 
-func Compile(ast *parser.Node, heap *Heap, chunk *Chunk, strings map[string]*ObjString) error {
+func Compile(ast *parser.Node, heap *Heap, chunk *Chunk, strings map[string]ObjString) error {
 	err := traverse(ast, heap, chunk, strings)
 
 	if err != nil {
@@ -15,7 +15,7 @@ func Compile(ast *parser.Node, heap *Heap, chunk *Chunk, strings map[string]*Obj
 	return nil
 }
 
-func traverse(current *parser.Node, heap *Heap, chunk *Chunk, strings map[string]*ObjString) error {
+func traverse(current *parser.Node, heap *Heap, chunk *Chunk, strings map[string]ObjString) error {
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
@@ -48,6 +48,19 @@ func traverse(current *parser.Node, heap *Heap, chunk *Chunk, strings map[string
 			case float64:
 				{
 					chunk.WriteConstant(ValueFromFloat64(current.Value.(float64)))
+				}
+			case []byte:
+				{
+					raw := string(current.Value.([]byte))
+
+					if str, found := strings[raw]; found {
+						register := heap.Allocate(str)
+						chunk.WriteConstant(EncodeObject(register))
+					} else {
+						strings[raw] = ObjString(raw)
+						register := heap.Allocate(strings[raw])
+						chunk.WriteConstant(EncodeObject(register))
+					}
 				}
 			}
 		}

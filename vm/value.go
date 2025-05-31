@@ -8,14 +8,22 @@ import (
 type Value uint64
 
 const (
-	QNAN        Value = 0x7ffc000000000000
-	SIGN        Value = 0x8000000000000000
-	ENCODE_MASK Value = math.MaxUint64 ^ (QNAN | SIGN)
-	TAG_OBJ     Value = QNAN | SIGN
+	STANDARD_NAN  Value = 0x7ff8000000000000
+	QNAN          Value = 0x7ffc000000000000
+	SIGN          Value = 0x8000000000000000
+	ENCODE_MASK   Value = math.MaxUint64 ^ (QNAN | SIGN)
+	TAG_OBJ       Value = QNAN | SIGN
+	TAG_NIL       Value = QNAN | 0x0001000000000000
+	TAG_UNDEFINED Value = QNAN | 0x0002000000000000
 )
 
 func (v *Value) isObject() bool {
 	return *v&TAG_OBJ == TAG_OBJ
+}
+
+func (v *Value) isNaN() bool {
+	return (*v&STANDARD_NAN == STANDARD_NAN) &&
+		(*v != TAG_OBJ) && (*v != TAG_NIL) && (*v != TAG_UNDEFINED)
 }
 
 func (v *Value) asNumber() float64 {
@@ -30,6 +38,18 @@ func EncodeObject(register uint32) Value {
 	return TAG_OBJ | Value(register)
 }
 
+func EncodeNil() Value {
+	return TAG_NIL
+}
+
+func EncodedUndefined() Value {
+	return TAG_UNDEFINED
+}
+
+func EncodeNaN() Value {
+	return Value(math.Float64bits(math.NaN()))
+}
+
 func ValueFromFloat64(number float64) Value {
 	return Value(math.Float64bits(number))
 }
@@ -40,7 +60,7 @@ func (v *Value) String() string {
 	if !v.isObject() {
 		strValue = strconv.FormatFloat(v.asNumber(), 'g', -1, 64)
 	} else {
-		//
+		strValue = "<heap object> -> r" + strconv.Itoa(int(v.getRegister()))
 	}
 	return strValue
 }

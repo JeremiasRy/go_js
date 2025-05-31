@@ -17,6 +17,10 @@ func (heap *Heap) Allocate(object Object) uint32 {
 	return uint32(len(heap.objects) - 1)
 }
 
+func (heap *Heap) GetObject(register uint32) Object {
+	return heap.objects[register]
+}
+
 func NewHeap() *Heap {
 	return &Heap{objects: []Object{}, freeList: []uint32{}}
 }

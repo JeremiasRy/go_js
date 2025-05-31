@@ -18,10 +18,10 @@ type ObjFunction struct {
 
 type ObjString string
 
-func (*ObjFunction) Type() ObjType {
+func (ObjFunction) Type() ObjType {
 	return OBJ_FUNCTION
 }
 
-func (*ObjString) Type() ObjType {
+func (ObjString) Type() ObjType {
 	return OBJ_STRING
 }
