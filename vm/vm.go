@@ -4,23 +4,12 @@ import (
 	"fmt"
 	"go_js/parser"
 	"log"
+	"math"
 )
 
 type CallFrame struct {
 	fn *ObjFunction
 	ip int
-}
-
-func (cf *CallFrame) readByte() uint8 {
-	code := cf.fn.chunk.code[cf.ip]
-	cf.ip++
-	return code
-}
-
-func (cf *CallFrame) readConstant() Value {
-	code := cf.fn.chunk.code[cf.ip]
-	cf.ip++
-	return cf.fn.chunk.constants[code]
 }
 
 func NewCallFrame(fn *ObjFunction) *CallFrame {
@@ -37,8 +26,7 @@ type VM struct {
 	stack      [255]Value
 	stackTop   uint8
 
-	strings map[string]ObjString
-	heap    *Heap
+	heap *Heap
 }
 
 func (vm *VM) call(fn *ObjFunction) error {
@@ -51,11 +39,17 @@ func (vm *VM) call(fn *ObjFunction) error {
 }
 
 func (vm *VM) readByte() uint8 {
-	return vm.frames[vm.frameCount-1].readByte()
+	cf := vm.currentFrame()
+	code := cf.fn.chunk.code[cf.ip]
+	cf.ip++
+	return code
 }
 
 func (vm *VM) readConstant() Value {
-	return vm.frames[vm.frameCount-1].readConstant()
+	cf := vm.currentFrame()
+	code := cf.fn.chunk.code[cf.ip]
+	cf.ip++
+	return cf.fn.chunk.constants[code]
 }
 
 func (vm *VM) push(v Value) {
@@ -66,6 +60,18 @@ func (vm *VM) push(v Value) {
 func (vm *VM) pop() Value {
 	vm.stackTop--
 	return vm.stack[vm.stackTop]
+}
+
+func (vm *VM) addLocal(v Value) {
+	vm.currentFrame().fn.AddLocal(v)
+}
+
+func (vm *VM) getLocal(slot int) Value {
+	return vm.currentFrame().fn.GetLocal(slot)
+}
+
+func (vm *VM) currentFrame() *CallFrame {
+	return vm.frames[vm.frameCount-1]
 }
 
 func (vm *VM) getHeapObject(v Value) Object {
@@ -79,13 +85,7 @@ func (vm *VM) concatenate(a, b Value) Value {
 
 		if aObj.Type() == OBJ_STRING && bObj.Type() == OBJ_STRING {
 			res := aObj.(ObjString) + bObj.(ObjString)
-			if str, found := vm.strings[string(res)]; found {
-				register := vm.heap.Allocate(str)
-				return EncodeObject(register)
-			} else {
-				register := vm.heap.Allocate(res)
-				return EncodeObject(register)
-			}
+			return vm.heap.AllocateString(string(res))
 		}
 	}
 	if a.isObject() && !b.isObject() {
@@ -94,13 +94,7 @@ func (vm *VM) concatenate(a, b Value) Value {
 		if aObj.Type() == OBJ_STRING {
 			res := aObj.(ObjString) + ObjString(b.String())
 
-			if str, found := vm.strings[string(res)]; found {
-				register := vm.heap.Allocate(str)
-				return EncodeObject(register)
-			} else {
-				register := vm.heap.Allocate(res)
-				return EncodeObject(register)
-			}
+			return vm.heap.AllocateString(string(res))
 		}
 	}
 
@@ -110,16 +104,10 @@ func (vm *VM) concatenate(a, b Value) Value {
 		if bObj.Type() == OBJ_STRING {
 			res := ObjString(a.String()) + bObj.(ObjString)
 
-			if str, found := vm.strings[string(res)]; found {
-				register := vm.heap.Allocate(str)
-				return EncodeObject(register)
-			} else {
-				register := vm.heap.Allocate(res)
-				return EncodeObject(register)
-			}
+			return vm.heap.AllocateString(string(res))
 		}
 	}
-	return Value(a.asNumber() + b.asNumber())
+	return Value(math.Float64bits(a.asNumber() + b.asNumber()))
 }
 
 func (vm *VM) subtract(a, b Value) Value {
@@ -148,7 +136,7 @@ func (vm *VM) subtract(a, b Value) Value {
 
 func (vm *VM) run() {
 	if DEBUG {
-		printFrame(vm.frames[vm.frameCount-1])
+		printFrame(vm.currentFrame())
 	}
 
 	for {
@@ -201,6 +189,13 @@ func (vm *VM) run() {
 				a := vm.pop()
 				vm.push(ValueFromFloat64(a.asNumber() * b.asNumber()))
 			}
+		case OP_DEFINE_VARIABLE:
+			vm.addLocal(vm.pop())
+		case OP_GET_VARIABLE:
+			{
+				slot := vm.readByte()
+				vm.push(vm.getLocal(int(slot)))
+			}
 		case OP_EOF:
 			{
 				println("Done :)")
@@ -211,8 +206,8 @@ func (vm *VM) run() {
 
 }
 
-func NewVM(heap *Heap, strings map[string]ObjString) *VM {
-	return &VM{frames: [FRAMES_MAX]*CallFrame{}, frameCount: 0, stack: [STACK_MAX]Value{}, stackTop: 0, strings: strings, heap: heap}
+func NewVM(heap *Heap) *VM {
+	return &VM{frames: [FRAMES_MAX]*CallFrame{}, frameCount: 0, stack: [STACK_MAX]Value{}, stackTop: 0, heap: heap}
 }
 
 func Interpret(source []byte) {
@@ -221,21 +216,19 @@ func Interpret(source []byte) {
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
-
+	println("### Abtract Syntax Tree ###")
 	parser.PrintNode(ast)
-	chunk := NewChunk()
+	println()
 	heap := NewHeap()
-	strings := map[string]ObjString{}
+	main := NewFunction("PROGRAM_MAIN")
 
-	err = Compile(ast, heap, chunk, strings)
+	err = Compile(ast, heap, main)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
 
-	vm := NewVM(heap, strings)
-	main := &ObjFunction{name: "main", chunk: chunk}
-
+	vm := NewVM(heap)
 	vm.call(main)
 	vm.run()
 }

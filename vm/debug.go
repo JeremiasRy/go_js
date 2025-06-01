@@ -15,6 +15,11 @@ func printConstant(chunk *Chunk, i int) int {
 	return 1
 }
 
+func printGetVariable(chunk *Chunk, i int) int {
+	fmt.Printf("%-23s | slot %d\n", "OP_GET_VARIABLE", chunk.code[i+1])
+	return 1
+}
+
 func printChunk(chunk *Chunk) {
 	i := 0
 	for i < len(chunk.code) {
@@ -24,6 +29,11 @@ func printChunk(chunk *Chunk) {
 			printCode(OpcodeNames[code])
 		case OP_CONSTANT:
 			offset := printConstant(chunk, i)
+			i += offset
+		case OP_DEFINE_VARIABLE:
+			printCode(OpcodeNames[OP_DEFINE_VARIABLE])
+		case OP_GET_VARIABLE:
+			offset := printGetVariable(chunk, i)
 			i += offset
 		}
 		i++
