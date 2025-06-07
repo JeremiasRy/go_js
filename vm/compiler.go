@@ -15,8 +15,8 @@ func NewScope(parent *Scope) *Scope {
 }
 
 func Compile(ast *parser.Node, heap *Heap, main *ObjFunction) error {
-	scopeChain := NewScope(nil)
-	err := traverse(ast, heap, main, scopeChain)
+	scope := NewScope(nil)
+	err := traverse(ast, heap, main, scope)
 
 	if err != nil {
 		return err
@@ -26,22 +26,23 @@ func Compile(ast *parser.Node, heap *Heap, main *ObjFunction) error {
 	return nil
 }
 
-func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scopeChain *Scope) error {
+func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope) error {
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
 			for _, statement := range current.Body {
-				traverse(statement, heap, fn, scopeChain)
+				traverse(statement, heap, fn, scope)
 			}
 		}
 	case parser.NODE_EXPRESSION_STATEMENT:
-
-		traverse(current.Expression, heap, fn, scopeChain)
+		{
+			traverse(current.Expression, heap, fn, scope)
+		}
 
 	case parser.NODE_BINARY_EXPRESSION:
 		{
-			traverse(current.Left, heap, fn, scopeChain)
-			traverse(current.Right, heap, fn, scopeChain)
+			traverse(current.Left, heap, fn, scope)
+			traverse(current.Right, heap, fn, scope)
 			switch current.BinaryOperator {
 			case parser.PLUS:
 				fn.chunk.EmitByte(OP_ADD)
@@ -71,20 +72,53 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scopeChain *Sco
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
 			for _, declaration := range current.Declarations {
-				traverse(declaration, heap, fn, scopeChain)
+				traverse(declaration, heap, fn, scope)
 			}
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
-			traverse(current.Initializer, heap, fn, scopeChain)
+			traverse(current.Initializer, heap, fn, scope)
 			fn.chunk.EmitByte(OP_DEFINE_VARIABLE)
-			scopeChain.resolver[current.Identifier.Name] = scopeChain.locals
-			scopeChain.locals++
+			scope.resolver[current.Identifier.Name] = scope.locals
+			scope.locals++
 		}
 	case parser.NODE_IDENTIFIER:
 		{
 			fn.chunk.EmitByte(OP_GET_VARIABLE)
-			fn.chunk.EmitByte(uint8(scopeChain.resolver[current.Name]))
+			fn.chunk.EmitByte(uint8(scope.resolver[current.Name]))
+		}
+	case parser.NODE_FUNCTION_DECLARATION:
+		{
+			function := NewFunction(current.Identifier.Name, len(current.Params))
+			register := heap.Allocate(function)
+			scope.resolver[function.name] = int(register)
+
+			scope := NewScope(scope)
+
+			fn.chunk.WriteConstant(EncodeObject(register))
+			fn.chunk.EmitByte(OP_DEFINE_VARIABLE)
+			for _, param := range current.Params {
+				scope.resolver[param.Name] = scope.locals
+				scope.locals++
+			}
+
+			for _, statement := range current.BodyNode.Body {
+				traverse(statement, heap, function, scope)
+			}
+		}
+	case parser.NODE_CALL_EXPRESSION:
+		{
+			for _, arg := range current.Arguments {
+				traverse(arg, heap, fn, scope)
+			}
+			fn.chunk.EmitByte(OP_GET_VARIABLE)
+			fn.chunk.EmitByte(uint8(scope.resolver[current.Callee.Name]))
+			fn.chunk.EmitByte(OP_CALL)
+		}
+	case parser.NODE_RETURN_STATEMENT:
+		{
+			traverse(current.Argument, heap, fn, scope)
+			fn.chunk.EmitByte(OP_RETURN)
 		}
 	}
 	return nil

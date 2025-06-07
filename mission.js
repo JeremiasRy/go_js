@@ -1,9 +1,7 @@
-let a = 23
-let b = 23
-let c = a + b
 
-const test = "test"
-const testa = a + test
+function myFunc(first, second) {
+    const innerVariable = 2
+    return (first + second) * innerVariable
+}
 
-
-testa
+myFunc(100, 200) + myFunc(10, 20)

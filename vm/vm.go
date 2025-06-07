@@ -8,12 +8,22 @@ import (
 )
 
 type CallFrame struct {
-	fn *ObjFunction
-	ip int
+	fn     *ObjFunction
+	locals []Value
+	ip     int
 }
 
 func NewCallFrame(fn *ObjFunction) *CallFrame {
 	return &CallFrame{fn: fn, ip: 0}
+}
+
+func (cf *CallFrame) AddLocal(v Value) int {
+	cf.locals = append(cf.locals, v)
+	return len(cf.locals)
+}
+
+func (cf *CallFrame) GetLocal(index int) Value {
+	return cf.locals[index]
 }
 
 const STACK_MAX = 255
@@ -36,6 +46,10 @@ func (vm *VM) call(fn *ObjFunction) error {
 	vm.frames[vm.frameCount] = NewCallFrame(fn)
 	vm.frameCount++
 	return nil
+}
+
+func (vm *VM) returnFromCallFrame() {
+
 }
 
 func (vm *VM) readByte() uint8 {
@@ -63,11 +77,11 @@ func (vm *VM) pop() Value {
 }
 
 func (vm *VM) addLocal(v Value) {
-	vm.currentFrame().fn.AddLocal(v)
+	vm.currentFrame().AddLocal(v)
 }
 
 func (vm *VM) getLocal(slot int) Value {
-	return vm.currentFrame().fn.GetLocal(slot)
+	return vm.currentFrame().GetLocal(slot)
 }
 
 func (vm *VM) currentFrame() *CallFrame {
@@ -137,26 +151,30 @@ func (vm *VM) subtract(a, b Value) Value {
 func (vm *VM) run() {
 	if DEBUG {
 		printFrame(vm.currentFrame())
+		for _, object := range heap.objects {
+			if object.Type() == OBJ_FUNCTION {
+				println(object.String())
+				printChunk(object.(*ObjFunction).chunk)
+				println()
+			}
+		}
 	}
 
 	for {
 		code := vm.readByte()
 
 		if DEBUG {
-			print("[")
+			print("[ ")
 			for _, v := range vm.stack[:vm.stackTop] {
 				if v.isObject() {
 					obj := vm.getHeapObject(v)
-					switch obj := obj.(type) {
-					case ObjString:
-						print("\"" + obj + "\" | ")
-					}
+					print(obj.String() + " | ")
 				} else {
 					print(v.String() + " | ")
 				}
 
 			}
-			println("]")
+			println("<stack top> ]")
 			println(OpcodeNames[code])
 		}
 
@@ -196,6 +214,35 @@ func (vm *VM) run() {
 				slot := vm.readByte()
 				vm.push(vm.getLocal(int(slot)))
 			}
+		case OP_CALL:
+			{
+				callee := vm.pop()
+				if callee.isObject() {
+					obj := heap.GetObject(callee.getRegister())
+					switch obj.Type() {
+					case OBJ_FUNCTION:
+						{
+							fn := obj.(*ObjFunction)
+							vm.call(fn)
+
+							for _, v := range vm.stack[vm.stackTop-uint8(fn.arity) : vm.stackTop] {
+								vm.addLocal(v)
+							}
+
+							for range fn.arity {
+								vm.pop()
+							}
+						}
+					}
+				} else {
+					// .toString, __proto__, ...etc
+				}
+
+			}
+		case OP_RETURN:
+			{
+				vm.frameCount--
+			}
 		case OP_EOF:
 			{
 				println("Done :)")
@@ -220,7 +267,8 @@ func Interpret(source []byte) {
 	parser.PrintNode(ast)
 	println()
 	heap := NewHeap()
-	main := NewFunction("PROGRAM_MAIN")
+	initDebugger(heap)
+	main := NewFunction("PROGRAM_MAIN", 0)
 
 	err = Compile(ast, heap, main)
 
