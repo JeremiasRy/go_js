@@ -1,7 +1,7 @@
 
 function myFunc(first, second) {
     const innerVariable = 2
-    return (first + second) * innerVariable
+    return (first() + second()) * innerVariable
 }
 
-myFunc(1 + 1, 3 - 1) + myFunc(1, 1)
+myFunc(function () { return 1 + 1 }, () => "2") + myFunc(() => 1 + 1, function () { const first = 1; const second = 1; return first + second })

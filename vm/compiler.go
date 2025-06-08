@@ -2,6 +2,7 @@ package vm
 
 import (
 	"go_js/parser"
+	"strconv"
 )
 
 type Scope struct {
@@ -92,7 +93,6 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope) e
 			function := NewFunction(current.Identifier.Name, len(current.Params))
 			register := heap.Allocate(function)
 
-			println(function.name, " ", register)
 			scope.resolver[function.name] = int(register)
 			scope.locals++
 
@@ -107,6 +107,33 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope) e
 			for _, statement := range current.BodyNode.Body {
 				traverse(statement, heap, function, scope)
 			}
+		}
+		// For now just gonna treat them as the same, once we start binding 'this', etc... need to separate the implementations
+	case parser.NODE_FUNCTION_EXPRESSION, parser.NODE_ARROW_FUNCTION_EXPRESSION:
+		{
+			name := "ANONYMOUS_FN_" + strconv.Itoa(scope.locals)
+			function := NewFunction(name, len(current.Params))
+			register := heap.Allocate(function)
+			scope.resolver[name] = int(register)
+			scope.locals++
+
+			scope := NewScope(scope)
+			fn.chunk.WriteConstant(EncodeObject(register))
+			// fn.chunk.EmitByte(OP_DEFINE_VARIABLE)
+			for _, param := range current.Params {
+				scope.resolver[param.Name] = scope.locals
+				scope.locals++
+			}
+
+			if current.IsExpression {
+				traverse(current.BodyNode, heap, function, scope)
+				function.chunk.EmitByte(OP_RETURN)
+			} else {
+				for _, statement := range current.BodyNode.Body {
+					traverse(statement, heap, function, scope)
+				}
+			}
+
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
