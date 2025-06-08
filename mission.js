@@ -4,4 +4,4 @@ function myFunc(first, second) {
     return (first + second) * innerVariable
 }
 
-myFunc(100, 200) + myFunc(10, 20)
+myFunc(1 + 1, 3 - 1) + myFunc(1, 1)

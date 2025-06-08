@@ -91,10 +91,12 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope) e
 		{
 			function := NewFunction(current.Identifier.Name, len(current.Params))
 			register := heap.Allocate(function)
+
+			println(function.name, " ", register)
 			scope.resolver[function.name] = int(register)
+			scope.locals++
 
 			scope := NewScope(scope)
-
 			fn.chunk.WriteConstant(EncodeObject(register))
 			fn.chunk.EmitByte(OP_DEFINE_VARIABLE)
 			for _, param := range current.Params {

@@ -13,13 +13,13 @@ type CallFrame struct {
 	ip     int
 }
 
-func NewCallFrame(fn *ObjFunction) *CallFrame {
-	return &CallFrame{fn: fn, ip: 0}
+func NewCallFrame(fn *ObjFunction, locals []Value) *CallFrame {
+	return &CallFrame{fn: fn, locals: locals, ip: 0}
 }
 
 func (cf *CallFrame) AddLocal(v Value) int {
 	cf.locals = append(cf.locals, v)
-	return len(cf.locals)
+	return len(cf.locals) - 1
 }
 
 func (cf *CallFrame) GetLocal(index int) Value {
@@ -43,13 +43,15 @@ func (vm *VM) call(fn *ObjFunction) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
-	vm.frames[vm.frameCount] = NewCallFrame(fn)
+
+	locals := make([]Value, fn.arity)
+	copy(locals, vm.stack[vm.stackTop-uint8(fn.arity):vm.stackTop])
+
+	vm.frames[vm.frameCount] = NewCallFrame(fn, locals)
 	vm.frameCount++
+
+	vm.stackTop -= uint8(fn.arity)
 	return nil
-}
-
-func (vm *VM) returnFromCallFrame() {
-
 }
 
 func (vm *VM) readByte() uint8 {
@@ -77,7 +79,7 @@ func (vm *VM) pop() Value {
 }
 
 func (vm *VM) addLocal(v Value) {
-	vm.currentFrame().AddLocal(v)
+	vm.frames[vm.frameCount-1].AddLocal(v)
 }
 
 func (vm *VM) getLocal(slot int) Value {
@@ -162,7 +164,6 @@ func (vm *VM) run() {
 
 	for {
 		code := vm.readByte()
-
 		if DEBUG {
 			print("[ ")
 			for _, v := range vm.stack[:vm.stackTop] {
@@ -174,13 +175,16 @@ func (vm *VM) run() {
 				}
 
 			}
-			println("<stack top> ]")
+			println("-stack top- ]")
 			println(OpcodeNames[code])
+			println("---")
 		}
 
 		switch code {
 		case OP_CONSTANT:
-			vm.push(vm.readConstant())
+			{
+				vm.push(vm.readConstant())
+			}
 		case OP_ADD:
 			{
 				b := vm.pop()
@@ -208,7 +212,10 @@ func (vm *VM) run() {
 				vm.push(ValueFromFloat64(a.asNumber() * b.asNumber()))
 			}
 		case OP_DEFINE_VARIABLE:
-			vm.addLocal(vm.pop())
+			{
+				variable := vm.pop()
+				vm.addLocal(variable)
+			}
 		case OP_GET_VARIABLE:
 			{
 				slot := vm.readByte()
@@ -217,6 +224,7 @@ func (vm *VM) run() {
 		case OP_CALL:
 			{
 				callee := vm.pop()
+
 				if callee.isObject() {
 					obj := heap.GetObject(callee.getRegister())
 					switch obj.Type() {
@@ -224,14 +232,6 @@ func (vm *VM) run() {
 						{
 							fn := obj.(*ObjFunction)
 							vm.call(fn)
-
-							for _, v := range vm.stack[vm.stackTop-uint8(fn.arity) : vm.stackTop] {
-								vm.addLocal(v)
-							}
-
-							for range fn.arity {
-								vm.pop()
-							}
 						}
 					}
 				} else {

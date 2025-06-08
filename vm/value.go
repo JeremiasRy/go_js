@@ -17,21 +17,21 @@ const (
 	TAG_UNDEFINED Value = QNAN | 0x0002000000000000
 )
 
-func (v *Value) isObject() bool {
-	return *v&TAG_OBJ == TAG_OBJ
+func (v Value) isObject() bool {
+	return v&TAG_OBJ == TAG_OBJ
 }
 
-func (v *Value) isNaN() bool {
-	return (*v&STANDARD_NAN == STANDARD_NAN) &&
-		(*v != TAG_OBJ) && (*v != TAG_NIL) && (*v != TAG_UNDEFINED)
+func (v Value) isNaN() bool {
+	return (v&STANDARD_NAN == STANDARD_NAN) &&
+		(v != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED)
 }
 
-func (v *Value) asNumber() float64 {
-	return math.Float64frombits(uint64(*v))
+func (v Value) asNumber() float64 {
+	return math.Float64frombits(uint64(v))
 }
 
-func (v *Value) getRegister() uint32 {
-	return uint32(*v & ENCODE_MASK)
+func (v Value) getRegister() uint32 {
+	return uint32(v & ENCODE_MASK)
 }
 
 func EncodeObject(register uint32) Value {
