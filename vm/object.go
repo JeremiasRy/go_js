@@ -7,6 +7,8 @@ const (
 	OBJ_STRING
 )
 
+const MAIN_FN_NAME = "PROGRAM_MAIN"
+
 type Object interface {
 	Type() ObjType
 	String() string

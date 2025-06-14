@@ -1,7 +1,9 @@
 
-function myFunc(first, second) {
-    const innerVariable = 2
-    return (first() + second()) * innerVariable
+function fibo(n) {
+    if (n <= 1) {
+        return n
+    }
+    return fibo(n - 1) + fibo(n - 2)
 }
 
-myFunc(function () { return 1 + 1 }, () => "2") + myFunc(() => 1 + 1, function () { const first = 1; const second = 1; return first + second })
+fibo(35)

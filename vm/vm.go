@@ -5,6 +5,7 @@ import (
 	"go_js/parser"
 	"log"
 	"math"
+	"time"
 )
 
 type CallFrame struct {
@@ -28,22 +29,26 @@ func (cf *CallFrame) GetLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 type VM struct {
 	frames     [64]*CallFrame
 	frameCount uint8
 	stack      [255]Value
 	stackTop   uint8
+	globals    []Value
 
 	heap *Heap
+}
+
+func NewVM(heap *Heap) *VM {
+	return &VM{frames: [FRAMES_MAX]*CallFrame{}, frameCount: 0, stack: [STACK_MAX]Value{}, stackTop: 0, heap: heap, globals: []Value{}}
 }
 
 func (vm *VM) call(fn *ObjFunction) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
-
 	locals := make([]Value, fn.arity)
 	copy(locals, vm.stack[vm.stackTop-uint8(fn.arity):vm.stackTop])
 
@@ -59,6 +64,13 @@ func (vm *VM) readByte() uint8 {
 	code := cf.fn.chunk.code[cf.ip]
 	cf.ip++
 	return code
+}
+
+func (vm *VM) readInt32() int {
+	cf := vm.currentFrame()
+	i := int(cf.fn.chunk.code[cf.ip+3]) | int(cf.fn.chunk.code[cf.ip+2])<<8 | int(cf.fn.chunk.code[cf.ip+1])<<16 | int(cf.fn.chunk.code[cf.ip])<<24
+	cf.ip += 4
+	return i
 }
 
 func (vm *VM) readConstant() Value {
@@ -77,7 +89,12 @@ func (vm *VM) pop() Value {
 	vm.stackTop--
 	return vm.stack[vm.stackTop]
 }
-
+func (vm *VM) addGlobal(v Value) {
+	vm.globals = append(vm.globals, v)
+}
+func (vm *VM) getGlobal(global int) Value {
+	return vm.globals[global]
+}
 func (vm *VM) addLocal(v Value) {
 	vm.frames[vm.frameCount-1].AddLocal(v)
 }
@@ -95,6 +112,7 @@ func (vm *VM) getHeapObject(v Value) Object {
 }
 
 func (vm *VM) concatenate(a, b Value) Value {
+
 	if a.isObject() && b.isObject() {
 		aObj := vm.getHeapObject(a)
 		bObj := vm.getHeapObject(b)
@@ -123,10 +141,12 @@ func (vm *VM) concatenate(a, b Value) Value {
 			return vm.heap.AllocateString(string(res))
 		}
 	}
+
 	return Value(math.Float64bits(a.asNumber() + b.asNumber()))
 }
 
 func (vm *VM) subtract(a, b Value) Value {
+
 	if a.isObject() || b.isObject() {
 		if a.isObject() && b.isObject() {
 			// todo
@@ -147,13 +167,14 @@ func (vm *VM) subtract(a, b Value) Value {
 		}
 
 	}
+
 	return ValueFromFloat64(a.asNumber() - b.asNumber())
 }
 
 func (vm *VM) run() {
 	if DEBUG {
 		printFrame(vm.currentFrame())
-		for _, object := range heap.objects {
+		for _, object := range h.objects {
 			if object.Type() == OBJ_FUNCTION {
 				println(object.String())
 				printChunk(object.(*ObjFunction).chunk)
@@ -161,11 +182,12 @@ func (vm *VM) run() {
 			}
 		}
 	}
-
+	start := time.Now()
 	for {
 		code := vm.readByte()
 		if DEBUG {
-			print("[ ")
+			println("Current context: ", vm.currentFrame().fn.name)
+			print("Stack: [ ")
 			for _, v := range vm.stack[:vm.stackTop] {
 				if v.isObject() {
 					obj := vm.getHeapObject(v)
@@ -175,8 +197,8 @@ func (vm *VM) run() {
 				}
 
 			}
-			println("-stack top- ]")
-			println(OpcodeNames[code])
+			println("-top- ]")
+			println("Instsruction: ", OpcodeNames[code])
 			println("---")
 		}
 
@@ -211,12 +233,42 @@ func (vm *VM) run() {
 				a := vm.pop()
 				vm.push(ValueFromFloat64(a.asNumber() * b.asNumber()))
 			}
-		case OP_DEFINE_VARIABLE:
+		case OP_LESS_THAN_EQUAL:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				if a.asNumber() <= b.asNumber() {
+					vm.push(EncodeTrue())
+				} else {
+					vm.push(EncodeFalse())
+				}
+			}
+		case OP_JUMP_IF_FALSE:
+			{
+				value := vm.pop()
+				jump := vm.readInt32()
+				if !AsBoolean(value) {
+					vm.currentFrame().ip += jump
+				}
+			}
+		case OP_DEFINE_GLOBAL:
+			{
+				variable := vm.pop()
+				vm.addGlobal(variable)
+
+			}
+		case OP_GET_GLOBAL:
+			{
+				global := vm.readByte()
+				vm.push(vm.getGlobal(int(global)))
+			}
+		case OP_DEFINE_LOCAL:
 			{
 				variable := vm.pop()
 				vm.addLocal(variable)
 			}
-		case OP_GET_VARIABLE:
+		case OP_GET_LOCAL:
 			{
 				slot := vm.readByte()
 				vm.push(vm.getLocal(int(slot)))
@@ -226,7 +278,7 @@ func (vm *VM) run() {
 				callee := vm.pop()
 
 				if callee.isObject() {
-					obj := heap.GetObject(callee.getRegister())
+					obj := vm.heap.GetObject(callee.getRegister())
 					switch obj.Type() {
 					case OBJ_FUNCTION:
 						{
@@ -245,16 +297,12 @@ func (vm *VM) run() {
 			}
 		case OP_EOF:
 			{
-				println("Done :)")
+				fmt.Printf("Done :) stack top: %f time: %s\n", vm.stack[vm.stackTop-1].asNumber(), time.Since(start))
 				return
 			}
 		}
 	}
 
-}
-
-func NewVM(heap *Heap) *VM {
-	return &VM{frames: [FRAMES_MAX]*CallFrame{}, frameCount: 0, stack: [STACK_MAX]Value{}, stackTop: 0, heap: heap}
 }
 
 func Interpret(source []byte) {
@@ -263,12 +311,20 @@ func Interpret(source []byte) {
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
-	println("### Abtract Syntax Tree ###")
-	parser.PrintNode(ast)
-	println()
+
+	if DEBUG {
+		println("### Abtract Syntax Tree ###")
+		parser.PrintNode(ast)
+		println()
+	}
+
 	heap := NewHeap()
-	initDebugger(heap)
-	main := NewFunction("PROGRAM_MAIN", 0)
+
+	if DEBUG {
+		initDebugger(heap)
+	}
+
+	main := NewFunction(MAIN_FN_NAME, 0)
 
 	err = Compile(ast, heap, main)
 
