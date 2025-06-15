@@ -1,9 +1,6 @@
-
-function fibo(n) {
-    if (n <= 1) {
-        return n
-    }
-    return fibo(n - 1) + fibo(n - 2)
+const randomValue = 12;
+function add(a, b) {
+    return a + b
 }
 
-fibo(35)
+add(33, 22) + add(12, 23) * randomValue

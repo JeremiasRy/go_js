@@ -29,7 +29,7 @@ func (cf *CallFrame) GetLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 type VM struct {
 	frames     [64]*CallFrame
