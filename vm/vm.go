@@ -9,13 +9,19 @@ import (
 )
 
 type CallFrame struct {
-	fn     *ObjFunction
-	locals []Value
-	ip     int
+	fn       *ObjFunction
+	locals   []Value
+	returnIp int
 }
 
 func NewCallFrame(fn *ObjFunction, locals []Value) *CallFrame {
-	return &CallFrame{fn: fn, locals: locals, ip: 0}
+	return &CallFrame{fn: fn, locals: locals, returnIp: 0}
+}
+
+func (cf *CallFrame) initCallFrame(fn *ObjFunction, locals []Value, returnIp int) {
+	cf.fn = fn
+	cf.locals = locals
+	cf.returnIp = returnIp
 }
 
 func (cf *CallFrame) AddLocal(v Value) int {
@@ -29,55 +35,32 @@ func (cf *CallFrame) GetLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 type VM struct {
-	frames     [64]*CallFrame
-	frameCount uint8
-	stack      [255]Value
-	stackTop   uint8
+	frames     []CallFrame
+	frameCount int
+	stack      []Value
+	stackTop   int
 	globals    []Value
 
 	heap *Heap
 }
 
 func NewVM(heap *Heap) *VM {
-	return &VM{frames: [FRAMES_MAX]*CallFrame{}, frameCount: 0, stack: [STACK_MAX]Value{}, stackTop: 0, heap: heap, globals: []Value{}}
+	frames := make([]CallFrame, FRAMES_MAX)
+	stack := make([]Value, STACK_MAX)
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, heap: heap, globals: []Value{}}
 }
 
-func (vm *VM) call(fn *ObjFunction) error {
+func (vm *VM) call(fn *ObjFunction, returnIp int) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
-	locals := make([]Value, fn.arity)
-	copy(locals, vm.stack[vm.stackTop-uint8(fn.arity):vm.stackTop])
 
-	vm.frames[vm.frameCount] = NewCallFrame(fn, locals)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.arity:vm.stackTop], returnIp)
 	vm.frameCount++
-
-	vm.stackTop -= uint8(fn.arity)
 	return nil
-}
-
-func (vm *VM) readByte() uint8 {
-	cf := vm.currentFrame()
-	code := cf.fn.chunk.code[cf.ip]
-	cf.ip++
-	return code
-}
-
-func (vm *VM) readInt32() int {
-	cf := vm.currentFrame()
-	i := int(cf.fn.chunk.code[cf.ip+3]) | int(cf.fn.chunk.code[cf.ip+2])<<8 | int(cf.fn.chunk.code[cf.ip+1])<<16 | int(cf.fn.chunk.code[cf.ip])<<24
-	cf.ip += 4
-	return i
-}
-
-func (vm *VM) readConstant() Value {
-	cf := vm.currentFrame()
-	code := cf.fn.chunk.code[cf.ip]
-	cf.ip++
-	return cf.fn.chunk.constants[code]
 }
 
 func (vm *VM) push(v Value) {
@@ -95,16 +78,9 @@ func (vm *VM) addGlobal(v Value) {
 func (vm *VM) getGlobal(global int) Value {
 	return vm.globals[global]
 }
-func (vm *VM) addLocal(v Value) {
-	vm.frames[vm.frameCount-1].AddLocal(v)
-}
 
-func (vm *VM) getLocal(slot int) Value {
-	return vm.currentFrame().GetLocal(slot)
-}
-
-func (vm *VM) currentFrame() *CallFrame {
-	return vm.frames[vm.frameCount-1]
+func (vm *VM) currentFramePointer() *CallFrame {
+	return &vm.frames[vm.frameCount-1]
 }
 
 func (vm *VM) getHeapObject(v Value) Object {
@@ -173,7 +149,7 @@ func (vm *VM) subtract(a, b Value) Value {
 
 func (vm *VM) run() {
 	if DEBUG {
-		printFrame(vm.currentFrame())
+		printFrame(vm.currentFramePointer())
 		for _, object := range h.objects {
 			if object.Type() == OBJ_FUNCTION {
 				println(object.String())
@@ -182,11 +158,19 @@ func (vm *VM) run() {
 			}
 		}
 	}
+	ipStack := make([]int, FRAMES_MAX)
+	frame := vm.frames[vm.frameCount-1]
+	chunk := *frame.fn.chunk
+	ip := 0
 	start := time.Now()
+
 	for {
-		code := vm.readByte()
+		//time.Sleep(time.Millisecond * 100)
+		code := chunk.code[ip]
+		ip++
+
 		if DEBUG {
-			println("Current context: ", vm.currentFrame().fn.name)
+			println("Current context: ", vm.currentFramePointer().fn.name)
 			print("Stack: [ ")
 			for _, v := range vm.stack[:vm.stackTop] {
 				if v.isObject() {
@@ -205,7 +189,8 @@ func (vm *VM) run() {
 		switch code {
 		case OP_CONSTANT:
 			{
-				vm.push(vm.readConstant())
+				vm.push(chunk.constants[chunk.code[ip]])
+				ip++
 			}
 		case OP_ADD:
 			{
@@ -247,9 +232,10 @@ func (vm *VM) run() {
 		case OP_JUMP_IF_FALSE:
 			{
 				value := vm.pop()
-				jump := vm.readInt32()
+				jump := int(chunk.code[ip+3]) | int(chunk.code[ip+2])<<8 | int(chunk.code[ip])<<16 | int(chunk.code[ip])<<24
+				ip += 4
 				if !AsBoolean(value) {
-					vm.currentFrame().ip += jump
+					ip += jump
 				}
 			}
 		case OP_DEFINE_GLOBAL:
@@ -260,18 +246,21 @@ func (vm *VM) run() {
 			}
 		case OP_GET_GLOBAL:
 			{
-				global := vm.readByte()
+				global := chunk.code[ip]
 				vm.push(vm.getGlobal(int(global)))
+				ip++
+
 			}
 		case OP_DEFINE_LOCAL:
 			{
 				variable := vm.pop()
-				vm.addLocal(variable)
+				frame.AddLocal(variable)
 			}
 		case OP_GET_LOCAL:
 			{
-				slot := vm.readByte()
-				vm.push(vm.getLocal(int(slot)))
+				slot := chunk.code[ip]
+				vm.push(frame.GetLocal(int(slot)))
+				ip++
 			}
 		case OP_CALL:
 			{
@@ -283,7 +272,12 @@ func (vm *VM) run() {
 					case OBJ_FUNCTION:
 						{
 							fn := obj.(*ObjFunction)
-							vm.call(fn)
+							vm.call(fn, ip)
+
+							frame = vm.frames[vm.frameCount-1]
+							chunk = *frame.fn.chunk
+							ipStack[vm.frameCount-2] = ip
+							ip = 0
 						}
 					}
 				} else {
@@ -293,7 +287,14 @@ func (vm *VM) run() {
 			}
 		case OP_RETURN:
 			{
+				value := vm.pop()
+				ip = vm.frames[vm.frameCount-1].returnIp
+				vm.stackTop -= vm.frames[vm.frameCount-1].fn.arity
+				vm.push(value)
+
 				vm.frameCount--
+				frame = vm.frames[vm.frameCount-1]
+				chunk = *frame.fn.chunk
 			}
 		case OP_EOF:
 			{
@@ -333,6 +334,6 @@ func Interpret(source []byte) {
 	}
 
 	vm := NewVM(heap)
-	vm.call(main)
+	vm.call(main, 0)
 	vm.run()
 }
