@@ -65,9 +65,14 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 				fn.chunk.EmitByte(OP_DIVIDE)
 			case parser.MULTIPLY:
 				fn.chunk.EmitByte(OP_MULTIPLY)
+			case parser.LESS_THAN:
+				fn.chunk.EmitByte(OP_LESS_THAN)
 			case parser.LESS_THAN_EQUAL:
 				fn.chunk.EmitByte(OP_LESS_THAN_EQUAL)
-
+			case parser.GREATER_THAN:
+				fn.chunk.EmitByte(OP_GREATER_THAN)
+			case parser.GREATER_THAN_EQUAL:
+				fn.chunk.EmitByte(OP_GREATER_THAN_EQUAL)
 			}
 		}
 	case parser.NODE_IF_STATEMENT:

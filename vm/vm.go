@@ -35,7 +35,7 @@ func (cf *CallFrame) GetLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 type VM struct {
 	frames     []CallFrame
@@ -158,7 +158,6 @@ func (vm *VM) run() {
 			}
 		}
 	}
-	ipStack := make([]int, FRAMES_MAX)
 	frame := vm.frames[vm.frameCount-1]
 	chunk := *frame.fn.chunk
 	ip := 0
@@ -218,12 +217,45 @@ func (vm *VM) run() {
 				a := vm.pop()
 				vm.push(ValueFromFloat64(a.asNumber() * b.asNumber()))
 			}
+		case OP_LESS_THAN:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				if a.asNumber() < b.asNumber() {
+					vm.push(EncodeTrue())
+				} else {
+					vm.push(EncodeFalse())
+				}
+			}
 		case OP_LESS_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
 				if a.asNumber() <= b.asNumber() {
+					vm.push(EncodeTrue())
+				} else {
+					vm.push(EncodeFalse())
+				}
+			}
+		case OP_GREATER_THAN:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				if a.asNumber() > b.asNumber() {
+					vm.push(EncodeTrue())
+				} else {
+					vm.push(EncodeFalse())
+				}
+			}
+		case OP_GREATER_THAN_EQUAL:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				if a.asNumber() >= b.asNumber() {
 					vm.push(EncodeTrue())
 				} else {
 					vm.push(EncodeFalse())
@@ -272,11 +304,11 @@ func (vm *VM) run() {
 					case OBJ_FUNCTION:
 						{
 							fn := obj.(*ObjFunction)
-							vm.call(fn, ip)
+							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.arity:vm.stackTop], ip)
+							vm.frameCount++
 
 							frame = vm.frames[vm.frameCount-1]
 							chunk = *frame.fn.chunk
-							ipStack[vm.frameCount-2] = ip
 							ip = 0
 						}
 					}
@@ -287,10 +319,10 @@ func (vm *VM) run() {
 			}
 		case OP_RETURN:
 			{
-				value := vm.pop()
 				ip = vm.frames[vm.frameCount-1].returnIp
-				vm.stackTop -= vm.frames[vm.frameCount-1].fn.arity
-				vm.push(value)
+				vm.stack[vm.stackTop-2] = vm.stack[vm.stackTop-1]
+				vm.stackTop -= vm.frames[vm.frameCount-1].fn.arity - 1
+				vm.stackTop--
 
 				vm.frameCount--
 				frame = vm.frames[vm.frameCount-1]
