@@ -261,6 +261,25 @@ func (vm *VM) run() {
 					vm.push(EncodeFalse())
 				}
 			}
+		case OP_STRICT_EQUALS:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				if b.isObject() && a.isObject() {
+					if vm.heap.GetObject(b.getRegister()).Type() == vm.heap.GetObject(a.getRegister()).Type() {
+
+					} else {
+						vm.push(EncodeFalse())
+					}
+				}
+
+				if a == b {
+					vm.push(EncodeTrue())
+				} else {
+					vm.push(EncodeFalse())
+				}
+			}
 		case OP_JUMP_IF_FALSE:
 			{
 				value := vm.pop()
@@ -269,6 +288,11 @@ func (vm *VM) run() {
 				if !AsBoolean(value) {
 					ip += jump
 				}
+			}
+		case OP_JUMP:
+			{
+				jump := int(chunk.code[ip+3]) | int(chunk.code[ip+2])<<8 | int(chunk.code[ip])<<16 | int(chunk.code[ip])<<24
+				ip += jump + 4
 			}
 		case OP_DEFINE_GLOBAL:
 			{
@@ -330,7 +354,8 @@ func (vm *VM) run() {
 			}
 		case OP_EOF:
 			{
-				fmt.Printf("Done :) stack top: %f time: %s\n", vm.stack[vm.stackTop-1].asNumber(), time.Since(start))
+
+				fmt.Printf("Done :) %s\n", time.Since(start))
 				return
 			}
 		}

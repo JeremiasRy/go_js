@@ -23,7 +23,7 @@ func printConstant(chunk *Chunk, i int) int {
 		output = constant.String()
 	}
 
-	fmt.Printf("%-23s | %d -> %s\n", "OP_CONSTANT", chunk.code[i+1], output)
+	fmt.Printf("%-23s | %s\n", "OP_CONSTANT", output)
 	return 1
 }
 
@@ -32,8 +32,8 @@ func printGetVariable(chunk *Chunk, i int, code uint8) int {
 	return 1
 }
 
-func printJumpIfFalse(chunk *Chunk, i int) int {
-	fmt.Printf("%-23s | %d\n", "OP_JUMP_IF_FALSE", uint32(chunk.code[i+4])|(uint32(chunk.code[i+3])<<8)|(uint32(chunk.code[i+2])<<16)|(uint32(chunk.code[i+1])<<24))
+func printJump(chunk *Chunk, i int, name string) int {
+	fmt.Printf("%-23s | %d\n", name, uint32(chunk.code[i+4])|(uint32(chunk.code[i+3])<<8)|(uint32(chunk.code[i+2])<<16)|(uint32(chunk.code[i+1])<<24))
 	return 4
 }
 
@@ -53,8 +53,8 @@ func printChunk(chunk *Chunk) {
 		case OP_GET_LOCAL, OP_GET_GLOBAL:
 			offset := printGetVariable(chunk, i, code)
 			i += offset
-		case OP_JUMP_IF_FALSE:
-			offset := printJumpIfFalse(chunk, i)
+		case OP_JUMP_IF_FALSE, OP_JUMP:
+			offset := printJump(chunk, i, OpcodeNames[code])
 			i += offset
 		}
 

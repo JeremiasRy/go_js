@@ -73,6 +73,8 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 				fn.chunk.EmitByte(OP_GREATER_THAN)
 			case parser.GREATER_THAN_EQUAL:
 				fn.chunk.EmitByte(OP_GREATER_THAN_EQUAL)
+			case parser.STRICT_EQUALS:
+				fn.chunk.EmitByte(OP_STRICT_EQUALS)
 			}
 		}
 	case parser.NODE_IF_STATEMENT:
@@ -83,14 +85,34 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 			fn.chunk.EmitByte(0)
 			fn.chunk.EmitByte(0)
 			fn.chunk.EmitByte(0)
+
 			start := len(fn.chunk.code)
 			traverse(current.Consequent, heap, fn, scope, globals)
+			fn.chunk.EmitByte(OP_JUMP)
+			fn.chunk.EmitByte(0)
+			fn.chunk.EmitByte(0)
+			fn.chunk.EmitByte(0)
+			fn.chunk.EmitByte(0)
+
+			trueJumpStart := len(fn.chunk.code)
+
 			jump := uint32(len(fn.chunk.code) - start)
 
 			fn.chunk.code[start-1] = uint8(jump & math.MaxUint8)
 			fn.chunk.code[start-2] = uint8((jump >> 8))
 			fn.chunk.code[start-3] = uint8((jump >> 16))
 			fn.chunk.code[start-4] = uint8((jump >> 24))
+
+			if current.Alternate != nil {
+				traverse(current.Alternate, heap, fn, scope, globals)
+				jump := uint32(len(fn.chunk.code) - trueJumpStart)
+
+				fn.chunk.code[trueJumpStart-1] = uint8(jump & math.MaxUint8)
+				fn.chunk.code[trueJumpStart-2] = uint8((jump >> 8))
+				fn.chunk.code[trueJumpStart-3] = uint8((jump >> 16))
+				fn.chunk.code[trueJumpStart-4] = uint8((jump >> 24))
+			}
+
 		}
 	case parser.NODE_LITERAL:
 		{

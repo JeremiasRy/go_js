@@ -1,8 +1,11 @@
-function fibo(n) {
-    if (n <= 1) {
-        return n
-    }
-    return fibo(n - 1) + fibo(n - 2)
+const value = 4
+
+if (value === 1) {
+    const hello = 1 + 1
+} else if (value === 2) {
+    const hello2 = 2 + 2
+} else {
+    const hello3 = 3 + 3
 }
 
-fibo(35)
+const weHaveArrived = 123
