@@ -35,6 +35,8 @@ func Compile(ast *parser.Node, heap *Heap, main *ObjFunction) error {
 }
 
 func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, globals *Globals) error {
+	isMain := fn.name == MAIN_FN_NAME
+
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
@@ -80,19 +82,11 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 	case parser.NODE_IF_STATEMENT:
 		{
 			traverse(current.Test, heap, fn, scope, globals)
-			fn.chunk.EmitByte(OP_JUMP_IF_FALSE)
-			fn.chunk.EmitByte(0)
-			fn.chunk.EmitByte(0)
-			fn.chunk.EmitByte(0)
-			fn.chunk.EmitByte(0)
+			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 
 			start := len(fn.chunk.code)
 			traverse(current.Consequent, heap, fn, scope, globals)
-			fn.chunk.EmitByte(OP_JUMP)
-			fn.chunk.EmitByte(0)
-			fn.chunk.EmitByte(0)
-			fn.chunk.EmitByte(0)
-			fn.chunk.EmitByte(0)
+			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
 
 			trueJumpStart := len(fn.chunk.code)
 
@@ -168,11 +162,40 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 				return nil
 			}
 		}
+	case parser.NODE_OBJECT_EXPRESSION:
+		{
+			hash := NewObjectHash()
+			register := heap.Allocate(hash)
+
+			for _, prop := range current.Properties {
+				key := prop.Key.Raw
+				valueNode := prop.Value.(*parser.Node)
+
+				switch valueNode.Type {
+				case parser.NODE_LITERAL:
+					{
+						switch v := valueNode.Value.(type) {
+						case float64:
+							{
+								hash.values[key] = ValueFromFloat64(v)
+							}
+						case []byte:
+							{
+								raw := string(v)
+								value := heap.AllocateString(raw)
+								hash.values[key] = value
+							}
+						}
+					}
+				}
+			}
+
+			fn.chunk.WriteConstant(EncodeObject(register))
+		}
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
 			function := NewFunction(current.Identifier.Name, len(current.Params))
 			register := heap.Allocate(function)
-			isMain := fn.name == MAIN_FN_NAME
 
 			if isMain {
 				globals.resolver[function.name] = globals.globals

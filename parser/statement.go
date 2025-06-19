@@ -999,6 +999,11 @@ func (p *Parser) parseWithStatement(node *Node) (*Node, error) {
 	}
 	node.Object = parenthesizedExpr
 	stmt, err := p.parseStatement("with", false, nil)
+
+	if err != nil {
+		return nil, err
+	}
+
 	node.BodyNode = stmt
 	return p.finishNode(node, NODE_WITH_STATEMENT), nil
 }

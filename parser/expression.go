@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -24,10 +25,15 @@ func (p *Parser) checkPropClash(prop *Node, propHash *PropertyHash, refDestructu
 	case NODE_IDENTIFIER:
 		name = key.Name
 	case NODE_LITERAL:
-		if val, ok := key.Value.(string); ok {
-			name = val
-		} else {
-			panic("Node was incorrectly typed expected string value from NODE_LITERAL")
+		switch key.Value.(type) {
+		case string:
+			{
+				name = key.Value.(string)
+			}
+		case float64:
+			{
+				name = strconv.FormatFloat(key.Value.(float64), 'g', -1, 64)
+			}
 		}
 	default:
 		return nil
@@ -1050,7 +1056,7 @@ func (p *Parser) checkUnreserved(opts struct {
 		return p.raise(opts.start, "Unexpected keyword "+opts.name)
 	}
 
-	if p.getEcmaVersion() < 6 && strings.Index(string(p.input[opts.start:opts.end]), "\\") != -1 {
+	if p.getEcmaVersion() < 6 && strings.Contains(string(p.input[opts.start:opts.end]), "\\") {
 		return nil
 	}
 	var re *regexp.Regexp

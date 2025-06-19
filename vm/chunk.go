@@ -66,12 +66,15 @@ func NewChunk() *Chunk {
 }
 
 func (c *Chunk) WriteConstant(v Value) {
-	c.EmitByte(OP_CONSTANT)
-	c.EmitByte(c.addConstant(v))
+	c.EmitBytes(OP_CONSTANT, c.addConstant(v))
 }
 
 func (c *Chunk) EmitByte(b uint8) {
 	c.code = append(c.code, b)
+}
+
+func (c *Chunk) EmitBytes(b ...uint8) {
+	c.code = append(c.code, b...)
 }
 
 func (c *Chunk) addConstant(v Value) uint8 {

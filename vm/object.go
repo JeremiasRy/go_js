@@ -5,6 +5,7 @@ type ObjType uint8
 const (
 	OBJ_FUNCTION ObjType = iota
 	OBJ_STRING
+	OBJ_HASH
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -44,4 +45,30 @@ func (ObjString) Type() ObjType {
 
 func (str ObjString) String() string {
 	return string("\"" + str + "\"")
+}
+
+type ObjHash struct {
+	values map[string]Value
+}
+
+func NewObjectHash() *ObjHash {
+	return &ObjHash{
+		values: map[string]Value{},
+	}
+}
+
+func (ObjHash) Type() ObjType {
+	return OBJ_HASH
+}
+
+func (ObjHash) String() string {
+	return "[object Object]"
+}
+
+func (obj *ObjHash) GetMember(member string) Value {
+	if value, found := obj.values[member]; found {
+		return value
+	}
+
+	return EncodedUndefined()
 }

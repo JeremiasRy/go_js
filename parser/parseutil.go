@@ -163,7 +163,7 @@ func (p *Parser) strictDirective(start int) bool {
 				return true
 			}
 
-			lineBreak := regexp.MustCompile(`\n|\r\n?|\u2028|\u2029`)
+			lineBreak := regexp.MustCompile("\n|\r\n?|\u2028|\u2029")
 			if lineBreak.MatchString(spaceAfter) {
 				quote := match[0][0]
 				if next == 0 || !regexp.MustCompile(`[(\[.`+string(quote)+`+\-/*%<>=,?\^&]`).MatchString(string(next)) {
