@@ -35,7 +35,9 @@ func (cf *CallFrame) GetLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
+
+var HEAP *Heap = NewHeap()
 
 type VM struct {
 	frames     []CallFrame
@@ -43,14 +45,12 @@ type VM struct {
 	stack      []Value
 	stackTop   int
 	globals    []Value
-
-	heap *Heap
 }
 
-func NewVM(heap *Heap) *VM {
+func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, heap: heap, globals: []Value{}}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}}
 }
 
 func (vm *VM) call(fn *ObjFunction, returnIp int) error {
@@ -83,38 +83,38 @@ func (vm *VM) currentFramePointer() *CallFrame {
 	return &vm.frames[vm.frameCount-1]
 }
 
-func (vm *VM) getHeapObject(v Value) Object {
-	return vm.heap.GetObject(v.getRegister())
-}
-
 func (vm *VM) concatenate(a, b Value) Value {
+	aIsObject := a.isObject()
+	bIsObject := b.isObject()
 
 	if a.isObject() && b.isObject() {
-		aObj := vm.getHeapObject(a)
-		bObj := vm.getHeapObject(b)
-
+		_, aObj := a.getObject()
+		_, bObj := b.getObject()
 		if aObj.Type() == OBJ_STRING && bObj.Type() == OBJ_STRING {
 			res := aObj.(ObjString) + bObj.(ObjString)
-			return vm.heap.AllocateString(string(res))
+			return HEAP.AllocateString(string(res))
+		} else {
+			// runtime error?
 		}
 	}
-	if a.isObject() && !b.isObject() {
-		aObj := vm.getHeapObject(a)
+
+	if aIsObject && !bIsObject {
+		_, aObj := a.getObject()
 
 		if aObj.Type() == OBJ_STRING {
 			res := aObj.(ObjString) + ObjString(b.String())
 
-			return vm.heap.AllocateString(string(res))
+			return HEAP.AllocateString(string(res))
 		}
 	}
 
-	if !a.isObject() && b.isObject() {
-		bObj := vm.getHeapObject(b)
+	if !aIsObject && bIsObject {
+		_, bObj := b.getObject()
 
 		if bObj.Type() == OBJ_STRING {
 			res := ObjString(a.String()) + bObj.(ObjString)
 
-			return vm.heap.AllocateString(string(res))
+			return HEAP.AllocateString(string(res))
 		}
 	}
 
@@ -122,26 +122,12 @@ func (vm *VM) concatenate(a, b Value) Value {
 }
 
 func (vm *VM) subtract(a, b Value) Value {
-
 	if a.isObject() || b.isObject() {
 		if a.isObject() && b.isObject() {
 			// todo
-		} else if !a.isObject() && b.isObject() {
-			switch vm.getHeapObject(b).(type) {
-			case ObjString:
-				{
-					return EncodeNaN()
-				}
-			}
-		} else if a.isObject() && !b.isObject() {
-			switch vm.getHeapObject(a).(type) {
-			case ObjString:
-				{
-					return EncodeNaN()
-				}
-			}
+		} else {
+			return EncodeNaN()
 		}
-
 	}
 
 	return ValueFromFloat64(a.asNumber() - b.asNumber())
@@ -150,7 +136,7 @@ func (vm *VM) subtract(a, b Value) Value {
 func (vm *VM) run() {
 	if DEBUG {
 		printFrame(vm.currentFramePointer())
-		for _, object := range h.objects {
+		for _, object := range HEAP.objects {
 			if object.Type() == OBJ_FUNCTION {
 				println(object.String())
 				printChunk(object.(*ObjFunction).chunk)
@@ -172,8 +158,8 @@ func (vm *VM) run() {
 			println("Current context: ", vm.currentFramePointer().fn.name)
 			print("Stack: [ ")
 			for _, v := range vm.stack[:vm.stackTop] {
-				if v.isObject() {
-					obj := vm.getHeapObject(v)
+				isObject, obj := v.getObject()
+				if isObject {
 					print(obj.String() + " | ")
 				} else {
 					print(v.String() + " | ")
@@ -266,8 +252,11 @@ func (vm *VM) run() {
 				b := vm.pop()
 				a := vm.pop()
 
-				if b.isObject() && a.isObject() {
-					if vm.heap.GetObject(b.getRegister()).Type() == vm.heap.GetObject(a.getRegister()).Type() {
+				bIsObject, bObj := b.getObject()
+				aIsObject, aObj := a.getObject()
+
+				if bIsObject && aIsObject {
+					if bObj.Type() == aObj.Type() {
 
 					} else {
 						vm.push(EncodeFalse())
@@ -318,12 +307,23 @@ func (vm *VM) run() {
 				vm.push(frame.GetLocal(int(slot)))
 				ip++
 			}
+		case OP_GET_OBJECT_MEMBER:
+			{
+				global := int(chunk.code[ip])
+				member := chunk.constants[chunk.code[ip+1]]
+
+				_, obj := vm.getGlobal(global).getObject()
+
+				value := obj.(*ObjHash).GetMember(member.String())
+				vm.push(value)
+				ip += 2
+			}
 		case OP_CALL:
 			{
 				callee := vm.pop()
 
 				if callee.isObject() {
-					obj := vm.heap.GetObject(callee.getRegister())
+					_, obj := callee.getObject()
 					switch obj.Type() {
 					case OBJ_FUNCTION:
 						{
@@ -334,6 +334,17 @@ func (vm *VM) run() {
 							frame = vm.frames[vm.frameCount-1]
 							chunk = *frame.fn.chunk
 							ip = 0
+						}
+					case OBJ_NATIVE_FN:
+						{
+							switch native := obj.(type) {
+							case *Log:
+								{
+									arg := vm.pop()
+									native.Log(arg)
+								}
+							}
+
 						}
 					}
 				} else {
@@ -376,21 +387,15 @@ func Interpret(source []byte) {
 		println()
 	}
 
-	heap := NewHeap()
-
-	if DEBUG {
-		initDebugger(heap)
-	}
-
 	main := NewFunction(MAIN_FN_NAME, 0)
 
-	err = Compile(ast, heap, main)
+	err = Compile(ast, main)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
 
-	vm := NewVM(heap)
+	vm := NewVM()
 	vm.call(main, 0)
 	vm.run()
 }

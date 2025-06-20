@@ -1,11 +1,14 @@
 package vm
 
+import "fmt"
+
 type ObjType uint8
 
 const (
 	OBJ_FUNCTION ObjType = iota
 	OBJ_STRING
 	OBJ_HASH
+	OBJ_NATIVE_FN
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -44,7 +47,7 @@ func (ObjString) Type() ObjType {
 }
 
 func (str ObjString) String() string {
-	return string("\"" + str + "\"")
+	return string(str)
 }
 
 type ObjHash struct {
@@ -71,4 +74,24 @@ func (obj *ObjHash) GetMember(member string) Value {
 	}
 
 	return EncodedUndefined()
+}
+
+type ObjNativeFn struct {
+	name string
+}
+
+func (ObjNativeFn) Type() ObjType {
+	return OBJ_NATIVE_FN
+}
+
+func (onf *ObjNativeFn) String() string {
+	return fmt.Sprintf("<native fn %s()>", onf.name)
+}
+
+type Log struct {
+	ObjNativeFn
+}
+
+func (*Log) Log(value Value) {
+	println(value.String())
 }

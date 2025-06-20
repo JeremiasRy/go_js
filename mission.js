@@ -1,4 +1,8 @@
-const myHash = {
-    jau: "hello",
-    123.234: 2
+function fibo(n) {
+    if (n <= 1) {
+        return n
+    }
+    return fibo(n - 1) + fibo(n - 2)
 }
+
+console.log(fibo(35))

@@ -23,6 +23,13 @@ func (v Value) isObject() bool {
 	return v&TAG_OBJ == TAG_OBJ
 }
 
+func (v Value) getObject() (bool, Object) {
+	if v&TAG_OBJ == TAG_OBJ {
+		return true, HEAP.GetObject(v.getRegister())
+	}
+	return false, nil
+}
+
 func (v Value) isNaN() bool {
 	return (v&STANDARD_NAN == STANDARD_NAN) &&
 		(v != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE)
@@ -77,14 +84,20 @@ func isType(tag Value, v Value) bool {
 	return tag&v == tag
 }
 
-func (v *Value) String() string {
-	if isType(TAG_FALSE, *v) {
+func (v Value) String() string {
+	isObj, obj := v.getObject()
+
+	if isObj {
+		return obj.String()
+	} else if isType(TAG_FALSE, v) {
 		return "False"
-	} else if isType(TAG_TRUE, *v) {
+	} else if isType(TAG_TRUE, v) {
 		return "True"
-	} else if !v.isObject() {
-		return strconv.FormatFloat(v.asNumber(), 'g', -1, 64)
+	} else if isType(TAG_NIL, v) {
+		return "null"
+	} else if isType(TAG_UNDEFINED, v) {
+		return "undefined"
 	} else {
-		return "<heap object> -> r" + strconv.Itoa(int(v.getRegister()))
+		return strconv.FormatFloat(v.asNumber(), 'g', -1, 64)
 	}
 }

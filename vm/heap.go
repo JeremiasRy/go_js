@@ -8,28 +8,28 @@ type Heap struct {
 }
 
 func (heap *Heap) Allocate(object Object) uint32 {
-	if len(heap.freeList) > 0 {
-		register := heap.freeList[len(heap.freeList)-1]
-		heap.freeList = heap.freeList[:len(heap.freeList)-1]
-		heap.objects[register] = object
+	if len(HEAP.freeList) > 0 {
+		register := HEAP.freeList[len(HEAP.freeList)-1]
+		HEAP.freeList = HEAP.freeList[:len(HEAP.freeList)-1]
+		HEAP.objects[register] = object
 		return register
 	}
 
-	heap.objects = append(heap.objects, object)
-	return uint32(len(heap.objects) - 1)
+	HEAP.objects = append(HEAP.objects, object)
+	return uint32(len(HEAP.objects) - 1)
 }
 
 func (heap *Heap) GetObject(register uint32) Object {
-	return heap.objects[register]
+	return HEAP.objects[register]
 }
 
 func (heap *Heap) AllocateString(str string) Value {
-	if str, found := heap.strings[str]; found {
-		register := heap.Allocate(str)
+	if str, found := HEAP.strings[str]; found {
+		register := HEAP.Allocate(str)
 		return EncodeObject(register)
 	}
 
-	register := heap.Allocate(ObjString(str))
+	register := HEAP.Allocate(ObjString(str))
 	return EncodeObject(register)
 
 }

@@ -4,26 +4,14 @@ import (
 	"fmt"
 )
 
-var h *Heap
-
-func initDebugger(heap *Heap) {
-	h = heap
-}
-
 func printCode(name string) {
 	fmt.Printf("%-23s |\n", name)
 }
 
 func printConstant(chunk *Chunk, i int) int {
 	constant := chunk.constants[chunk.code[i+1]]
-	var output string
-	if constant.isObject() {
-		output = h.GetObject(constant.getRegister()).String()
-	} else {
-		output = constant.String()
-	}
 
-	fmt.Printf("%-23s | %s\n", "OP_CONSTANT", output)
+	fmt.Printf("%-23s | %s\n", "OP_CONSTANT", constant)
 	return 1
 }
 
@@ -35,6 +23,11 @@ func printGetVariable(chunk *Chunk, i int, code uint8) int {
 func printJump(chunk *Chunk, i int, name string) int {
 	fmt.Printf("%-23s | %d\n", name, uint32(chunk.code[i+4])|(uint32(chunk.code[i+3])<<8)|(uint32(chunk.code[i+2])<<16)|(uint32(chunk.code[i+1])<<24))
 	return 4
+}
+
+func printGetMember(chunk *Chunk, i int) int {
+	fmt.Printf("%-23s | %d %s\n", "OP_GET_OBJECT_MEMBER", chunk.code[i+1], chunk.constants[chunk.code[i+2]])
+	return 2
 }
 
 func printChunk(chunk *Chunk) {
@@ -55,6 +48,9 @@ func printChunk(chunk *Chunk) {
 			i += offset
 		case OP_JUMP_IF_FALSE, OP_JUMP:
 			offset := printJump(chunk, i, OpcodeNames[code])
+			i += offset
+		case OP_GET_OBJECT_MEMBER:
+			offset := printGetMember(chunk, i)
 			i += offset
 		}
 

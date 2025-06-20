@@ -7,7 +7,7 @@ import (
 	"runtime/pprof"
 )
 
-const DEBUG = true
+const DEBUG = false
 
 func main() {
 	if DEBUG {

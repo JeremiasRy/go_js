@@ -21,10 +21,22 @@ func NewScope(parent *Scope) *Scope {
 	return &Scope{parent: parent, locals: 0, resolver: map[string]int{}}
 }
 
-func Compile(ast *parser.Node, heap *Heap, main *ObjFunction) error {
+func Compile(ast *parser.Node, main *ObjFunction) error {
 	scope := NewScope(nil)
 	globals := &Globals{0, map[string]int{}}
-	err := traverse(ast, heap, main, scope, globals)
+
+	// define native console.log
+	globals.resolver["console"] = 0
+	globals.globals++
+
+	log := &Log{}
+	log.name = "log"
+	console := NewObjectHash()
+	console.values["log"] = EncodeObject(HEAP.Allocate(log))
+	main.chunk.WriteConstant(EncodeObject(HEAP.Allocate(console)))
+	main.chunk.EmitByte(OP_DEFINE_GLOBAL)
+
+	err := traverse(ast, main, scope, globals)
 
 	if err != nil {
 		return err
@@ -34,30 +46,30 @@ func Compile(ast *parser.Node, heap *Heap, main *ObjFunction) error {
 	return nil
 }
 
-func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, globals *Globals) error {
+func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Globals) error {
 	isMain := fn.name == MAIN_FN_NAME
 
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
 			for _, statement := range current.Body {
-				traverse(statement, heap, fn, scope, globals)
+				traverse(statement, fn, scope, globals)
 			}
 		}
 	case parser.NODE_EXPRESSION_STATEMENT:
 		{
-			traverse(current.Expression, heap, fn, scope, globals)
+			traverse(current.Expression, fn, scope, globals)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
 			for _, stmt := range current.Body {
-				traverse(stmt, heap, fn, NewScope(scope), globals)
+				traverse(stmt, fn, NewScope(scope), globals)
 			}
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
-			traverse(current.Left, heap, fn, scope, globals)
-			traverse(current.Right, heap, fn, scope, globals)
+			traverse(current.Left, fn, scope, globals)
+			traverse(current.Right, fn, scope, globals)
 			switch current.BinaryOperator {
 			case parser.PLUS:
 				fn.chunk.EmitByte(OP_ADD)
@@ -81,11 +93,11 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 		}
 	case parser.NODE_IF_STATEMENT:
 		{
-			traverse(current.Test, heap, fn, scope, globals)
+			traverse(current.Test, fn, scope, globals)
 			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 
 			start := len(fn.chunk.code)
-			traverse(current.Consequent, heap, fn, scope, globals)
+			traverse(current.Consequent, fn, scope, globals)
 			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
 
 			trueJumpStart := len(fn.chunk.code)
@@ -98,7 +110,7 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 			fn.chunk.code[start-4] = uint8((jump >> 24))
 
 			if current.Alternate != nil {
-				traverse(current.Alternate, heap, fn, scope, globals)
+				traverse(current.Alternate, fn, scope, globals)
 				jump := uint32(len(fn.chunk.code) - trueJumpStart)
 
 				fn.chunk.code[trueJumpStart-1] = uint8(jump & math.MaxUint8)
@@ -118,7 +130,7 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 			case []byte:
 				{
 					raw := string(current.Value.([]byte))
-					value := heap.AllocateString(raw)
+					value := HEAP.AllocateString(raw)
 					fn.chunk.WriteConstant(value)
 				}
 			}
@@ -126,12 +138,12 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
 			for _, declaration := range current.Declarations {
-				traverse(declaration, heap, fn, scope, globals)
+				traverse(declaration, fn, scope, globals)
 			}
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
-			traverse(current.Initializer, heap, fn, scope, globals)
+			traverse(current.Initializer, fn, scope, globals)
 			if fn.name == MAIN_FN_NAME {
 				fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
 				globals.resolver[current.Identifier.Name] = globals.globals
@@ -165,7 +177,7 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
 			hash := NewObjectHash()
-			register := heap.Allocate(hash)
+			register := HEAP.Allocate(hash)
 
 			for _, prop := range current.Properties {
 				key := prop.Key.Raw
@@ -182,7 +194,7 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 						case []byte:
 							{
 								raw := string(v)
-								value := heap.AllocateString(raw)
+								value := HEAP.AllocateString(raw)
 								hash.values[key] = value
 							}
 						}
@@ -192,10 +204,16 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 
 			fn.chunk.WriteConstant(EncodeObject(register))
 		}
+	case parser.NODE_MEMBER_EXPRESSION:
+		{
+			obj := uint8(globals.resolver[current.Object.Name])
+			prop := fn.chunk.addConstant(HEAP.AllocateString(current.Property.Name))
+			fn.chunk.EmitBytes(OP_GET_OBJECT_MEMBER, obj, prop)
+		}
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
 			function := NewFunction(current.Identifier.Name, len(current.Params))
-			register := heap.Allocate(function)
+			register := HEAP.Allocate(function)
 
 			if isMain {
 				globals.resolver[function.name] = globals.globals
@@ -207,6 +225,7 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 
 			scope := NewScope(scope)
 			fn.chunk.WriteConstant(EncodeObject(register))
+
 			if isMain {
 				fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
 			} else {
@@ -219,7 +238,7 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 			}
 
 			for _, statement := range current.BodyNode.Body {
-				traverse(statement, heap, function, scope, globals)
+				traverse(statement, function, scope, globals)
 			}
 		}
 		// For now just gonna treat them as the same, once we start binding 'this', etc... need to separate the implementations
@@ -227,24 +246,24 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 		{
 			name := "ANONYMOUS_FN_" + strconv.Itoa(scope.locals)
 			function := NewFunction(name, len(current.Params))
-			register := heap.Allocate(function)
+			register := HEAP.Allocate(function)
 			scope.resolver[name] = int(register)
 			scope.locals++
 
 			scope := NewScope(scope)
 			fn.chunk.WriteConstant(EncodeObject(register))
-			// fn.chunk.EmitByte(OP_DEFINE_VARIABLE)
+
 			for _, param := range current.Params {
 				scope.resolver[param.Name] = scope.locals
 				scope.locals++
 			}
 
 			if current.IsExpression {
-				traverse(current.BodyNode, heap, function, scope, globals)
+				traverse(current.BodyNode, function, scope, globals)
 				function.chunk.EmitByte(OP_RETURN)
 			} else {
 				for _, statement := range current.BodyNode.Body {
-					traverse(statement, heap, function, scope, globals)
+					traverse(statement, function, scope, globals)
 				}
 			}
 
@@ -252,21 +271,27 @@ func traverse(current *parser.Node, heap *Heap, fn *ObjFunction, scope *Scope, g
 	case parser.NODE_CALL_EXPRESSION:
 		{
 			for _, arg := range current.Arguments {
-				traverse(arg, heap, fn, scope, globals)
+				traverse(arg, fn, scope, globals)
 			}
-			if slot, found := scope.resolver[current.Callee.Name]; found {
-				fn.chunk.EmitByte(OP_GET_LOCAL)
-				fn.chunk.EmitByte(uint8(slot))
-			}
-			if global, found := globals.resolver[current.Callee.Name]; found {
-				fn.chunk.EmitByte(OP_GET_GLOBAL)
-				fn.chunk.EmitByte(uint8(global))
+
+			if current.Callee.Type == parser.NODE_IDENTIFIER {
+				if slot, found := scope.resolver[current.Callee.Name]; found {
+					fn.chunk.EmitByte(OP_GET_LOCAL)
+					fn.chunk.EmitByte(uint8(slot))
+				}
+				if global, found := globals.resolver[current.Callee.Name]; found {
+					fn.chunk.EmitByte(OP_GET_GLOBAL)
+					fn.chunk.EmitByte(uint8(global))
+				}
+			} else {
+				traverse(current.Callee, fn, scope, globals)
+
 			}
 			fn.chunk.EmitByte(OP_CALL)
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
-			traverse(current.Argument, heap, fn, scope, globals)
+			traverse(current.Argument, fn, scope, globals)
 			fn.chunk.EmitByte(OP_RETURN)
 		}
 	}
