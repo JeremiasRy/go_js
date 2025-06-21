@@ -93,5 +93,5 @@ type Log struct {
 }
 
 func (*Log) Log(value Value) {
-	println(value.String())
+	fmt.Printf("%s\n", value)
 }

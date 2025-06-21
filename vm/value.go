@@ -98,6 +98,6 @@ func (v Value) String() string {
 	} else if isType(TAG_UNDEFINED, v) {
 		return "undefined"
 	} else {
-		return strconv.FormatFloat(v.asNumber(), 'g', -1, 64)
+		return strconv.FormatFloat(v.asNumber(), 'f', -1, 64)
 	}
 }

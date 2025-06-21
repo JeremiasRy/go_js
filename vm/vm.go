@@ -68,6 +68,10 @@ func (vm *VM) push(v Value) {
 	vm.stackTop++
 }
 
+func (vm *VM) peek() Value {
+	return vm.stack[vm.stackTop-1]
+}
+
 func (vm *VM) pop() Value {
 	vm.stackTop--
 	return vm.stack[vm.stackTop]
@@ -298,7 +302,7 @@ func (vm *VM) run() {
 			}
 		case OP_DEFINE_LOCAL:
 			{
-				variable := vm.pop()
+				variable := vm.peek()
 				frame.AddLocal(variable)
 			}
 		case OP_GET_LOCAL:
@@ -307,7 +311,7 @@ func (vm *VM) run() {
 				vm.push(frame.GetLocal(int(slot)))
 				ip++
 			}
-		case OP_GET_OBJECT_MEMBER:
+		case OP_GET_GLOBAL_OBJECT_MEMBER:
 			{
 				global := int(chunk.code[ip])
 				member := chunk.constants[chunk.code[ip+1]]
@@ -317,6 +321,21 @@ func (vm *VM) run() {
 				value := obj.(*ObjHash).GetMember(member.String())
 				vm.push(value)
 				ip += 2
+			}
+		case OP_GET_LOCAL_OBJECT_MEMBER:
+			{
+				slot := int(chunk.code[ip])
+				member := chunk.constants[chunk.code[ip+1]]
+
+				_, obj := frame.GetLocal(slot).getObject()
+
+				value := obj.(*ObjHash).GetMember(member.String())
+				vm.push(value)
+				ip += 2
+			}
+		case OP_PUSH_UNDEFINED:
+			{
+				vm.push(EncodedUndefined())
 			}
 		case OP_CALL:
 			{
@@ -354,18 +373,20 @@ func (vm *VM) run() {
 			}
 		case OP_RETURN:
 			{
-				ip = vm.frames[vm.frameCount-1].returnIp
-				vm.stack[vm.stackTop-2] = vm.stack[vm.stackTop-1]
-				vm.stackTop -= vm.frames[vm.frameCount-1].fn.arity - 1
-				vm.stackTop--
+				ip = frame.returnIp
+
+				if vm.stackTop >= 2 {
+					vm.stack[vm.stackTop-(len(frame.locals)+frame.fn.arity)] = vm.stack[vm.stackTop-1]
+					vm.stackTop -= frame.fn.arity + len(frame.locals) - 1
+				}
 
 				vm.frameCount--
+
 				frame = vm.frames[vm.frameCount-1]
 				chunk = *frame.fn.chunk
 			}
 		case OP_EOF:
 			{
-
 				fmt.Printf("Done :) %s\n", time.Since(start))
 				return
 			}
