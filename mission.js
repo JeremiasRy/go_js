@@ -6,4 +6,6 @@ function fibo(n) {
     return fibo(n - 1) + fibo(n - 2)
 }
 
-console.log(fibo(35))
+let start = clock()
+fibo(35)
+console.log(clock() - start + "ms")

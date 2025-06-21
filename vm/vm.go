@@ -5,7 +5,6 @@ import (
 	"go_js/parser"
 	"log"
 	"math"
-	"time"
 )
 
 type CallFrame struct {
@@ -151,7 +150,6 @@ func (vm *VM) run() {
 	frame := vm.frames[vm.frameCount-1]
 	chunk := *frame.fn.chunk
 	ip := 0
-	start := time.Now()
 
 	for {
 		//time.Sleep(time.Millisecond * 100)
@@ -362,6 +360,10 @@ func (vm *VM) run() {
 									arg := vm.pop()
 									native.Log(arg)
 								}
+							case *Clock:
+								{
+									vm.push(native.Clock())
+								}
 							}
 
 						}
@@ -387,7 +389,7 @@ func (vm *VM) run() {
 			}
 		case OP_EOF:
 			{
-				fmt.Printf("Done :) %s\n", time.Since(start))
+				fmt.Printf("Thanks!\n")
 				return
 			}
 		}

@@ -29,7 +29,7 @@ func NewScope(parent *Scope) *Scope {
 }
 
 func defineConsole(main *ObjFunction, globals *Scope) {
-	globals.resolver["console"] = 0
+	globals.resolver["console"] = globals.count
 	globals.count++
 
 	log := &Log{}
@@ -40,11 +40,24 @@ func defineConsole(main *ObjFunction, globals *Scope) {
 	main.chunk.EmitByte(OP_DEFINE_GLOBAL)
 }
 
+func defineClock(main *ObjFunction, globals *Scope) {
+	globals.resolver["clock"] = globals.count
+	globals.count++
+
+	clock := &Clock{}
+	clock.name = "Clock"
+
+	main.chunk.WriteConstant(EncodeObject(HEAP.Allocate(clock)))
+	main.chunk.EmitByte(OP_DEFINE_GLOBAL)
+
+}
+
 func Compile(ast *parser.Node, main *ObjFunction) error {
 	scope := NewScope(nil)
 	globals := &Scope{nil, 0, map[string]int{}}
 
 	defineConsole(main, globals)
+	defineClock(main, globals)
 
 	err := traverse(ast, main, scope, globals)
 

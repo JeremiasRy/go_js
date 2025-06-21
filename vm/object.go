@@ -1,6 +1,10 @@
 package vm
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+	"time"
+)
 
 type ObjType uint8
 
@@ -94,4 +98,12 @@ type Log struct {
 
 func (*Log) Log(value Value) {
 	fmt.Printf("%s\n", value)
+}
+
+type Clock struct {
+	ObjNativeFn
+}
+
+func (*Clock) Clock() Value {
+	return Value(math.Float64bits(float64(time.Now().UnixMilli())))
 }
