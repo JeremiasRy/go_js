@@ -96,12 +96,24 @@ type Log struct {
 	ObjNativeFn
 }
 
+func NewLog() *Log {
+	log := &Log{}
+	log.name = "log"
+	return log
+}
+
 func (*Log) Log(value Value) {
 	fmt.Printf("%s\n", value)
 }
 
 type Clock struct {
 	ObjNativeFn
+}
+
+func NewClock() *Clock {
+	clock := &Clock{}
+	clock.name = "Clock"
+	return clock
 }
 
 func (*Clock) Clock() Value {

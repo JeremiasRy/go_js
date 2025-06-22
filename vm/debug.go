@@ -25,7 +25,7 @@ func printJump(chunk *Chunk, i int, name string) int {
 	return 4
 }
 
-func printGetMember(chunk *Chunk, i int, name string) int {
+func printGetSet(chunk *Chunk, i int, name string) int {
 	fmt.Printf("%-28s | %d %s\n", name, chunk.code[i+1], chunk.constants[chunk.code[i+2]])
 	return 2
 }
@@ -49,11 +49,10 @@ func printChunk(chunk *Chunk) {
 		case OP_JUMP_IF_FALSE, OP_JUMP:
 			offset := printJump(chunk, i, OpcodeNames[code])
 			i += offset
-		case OP_GET_LOCAL_OBJECT_MEMBER, OP_GET_GLOBAL_OBJECT_MEMBER:
-			offset := printGetMember(chunk, i, OpcodeNames[code])
+		case OP_GET_LOCAL_OBJECT_MEMBER, OP_GET_GLOBAL_OBJECT_MEMBER, OP_SET_LOCAL, OP_SET_GLOBAL:
+			offset := printGetSet(chunk, i, OpcodeNames[code])
 			i += offset
 		}
-
 		i++
 	}
 }

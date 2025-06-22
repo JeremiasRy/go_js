@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"fmt"
 	"go_js/parser"
 	"math"
 	"strconv"
@@ -9,52 +10,77 @@ import (
 type Scope struct {
 	parent   *Scope
 	count    int
-	resolver map[string]int
+	resolver map[string]*Variable
 }
 
-func (s *Scope) findSlot(name string) (bool, uint8) {
+type VarKind int
+
+const (
+	VAR_CONST VarKind = iota
+	VAR_LET
+	VAR_NATIVE
+	VAR_FN_ARGUMENT
+	FN_NATIVE
+	FN
+)
+
+type Variable struct {
+	slot int
+	kind VarKind
+}
+
+func (s *Scope) addVariable(name string, kind VarKind) {
+	slot := s.count
+	s.count++
+	s.resolver[name] = &Variable{slot, kind}
+}
+
+func (s *Scope) findVariable(name string) (bool, *Variable) {
 	current := s
 
 	for current != nil {
-		if slot, found := current.resolver[name]; found {
-			return true, uint8(slot)
+		if variable, found := current.resolver[name]; found {
+			return true, variable
 		}
 		current = current.parent
 	}
-	return false, 0
+	return false, nil
 }
 
 func NewScope(parent *Scope) *Scope {
-	return &Scope{parent: parent, count: 0, resolver: map[string]int{}}
+	return &Scope{parent: parent, count: 0, resolver: map[string]*Variable{}}
 }
 
 func defineConsole(main *ObjFunction, globals *Scope) {
-	globals.resolver["console"] = globals.count
-	globals.count++
+	globals.addVariable("console", VAR_NATIVE)
 
-	log := &Log{}
-	log.name = "log"
 	console := NewObjectHash()
-	console.values["log"] = EncodeObject(HEAP.Allocate(log))
+	console.values["log"] = EncodeObject(HEAP.Allocate(NewLog()))
 	main.chunk.WriteConstant(EncodeObject(HEAP.Allocate(console)))
 	main.chunk.EmitByte(OP_DEFINE_GLOBAL)
 }
 
 func defineClock(main *ObjFunction, globals *Scope) {
-	globals.resolver["clock"] = globals.count
-	globals.count++
+	globals.addVariable("clock", FN_NATIVE)
 
-	clock := &Clock{}
-	clock.name = "Clock"
-
-	main.chunk.WriteConstant(EncodeObject(HEAP.Allocate(clock)))
+	main.chunk.WriteConstant(EncodeObject(HEAP.Allocate(NewClock())))
 	main.chunk.EmitByte(OP_DEFINE_GLOBAL)
+}
 
+func assertKind(k parser.Kind) (VarKind, error) {
+	switch k {
+	case parser.KIND_DECLARATION_CONST:
+		return VAR_CONST, nil
+	case parser.KIND_DECLARATION_LET:
+		return VAR_LET, nil
+	default:
+		return 0, fmt.Errorf("not supported variable kind: %d", k)
+	}
 }
 
 func Compile(ast *parser.Node, main *ObjFunction) error {
 	scope := NewScope(nil)
-	globals := &Scope{nil, 0, map[string]int{}}
+	globals := NewScope(nil)
 
 	defineConsole(main, globals)
 	defineClock(main, globals)
@@ -162,35 +188,56 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
 			for _, declaration := range current.Declarations {
-				traverse(declaration, fn, scope, globals)
+				kind, err := assertKind(current.Kind)
+
+				if err != nil {
+					panic(err.Error())
+				}
+
+				name := declaration.Identifier.Name
+
+				traverse(declaration.Initializer, fn, scope, globals)
+
+				if isMain {
+					fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
+					globals.addVariable(name, kind)
+				} else {
+					fn.chunk.EmitByte(OP_DEFINE_LOCAL)
+					scope.addVariable(name, kind)
+				}
 			}
 		}
-	case parser.NODE_VARIABLE_DECLARATOR:
+	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
-			traverse(current.Initializer, fn, scope, globals)
-			if fn.name == MAIN_FN_NAME {
-				fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
-				globals.resolver[current.Identifier.Name] = globals.count
-				globals.count++
-			} else {
-				fn.chunk.EmitByte(OP_DEFINE_LOCAL)
-				scope.resolver[current.Identifier.Name] = scope.count
-				scope.count++
+			op := OP_SET_LOCAL
+			found, left := scope.findVariable(current.Left.Name)
+
+			if !found {
+				found, left = globals.findVariable(current.Left.Name)
 			}
+
+			if !found {
+				panic("no identifier found, We'll do asignment here later")
+			} else {
+				op = OP_SET_GLOBAL
+			}
+			fn.chunk.EmitBytes(op, uint8(left.slot))
+			traverse(current.Right, fn, scope, globals)
+
 		}
 	case parser.NODE_IDENTIFIER:
 		{
-			found, slot := scope.findSlot(current.Name)
+			found, variable := scope.findVariable(current.Name)
 
 			if found {
-				fn.chunk.EmitBytes(OP_GET_LOCAL, slot)
+				fn.chunk.EmitBytes(OP_GET_LOCAL, uint8(variable.slot))
 				return nil
 			}
 
-			found, slot = globals.findSlot(current.Name)
+			found, variable = globals.findVariable(current.Name)
 
 			if found {
-				fn.chunk.EmitBytes(OP_GET_GLOBAL, slot)
+				fn.chunk.EmitBytes(OP_GET_GLOBAL, uint8(variable.slot))
 				return nil
 			}
 
@@ -229,17 +276,17 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			prop := fn.chunk.addConstant(HEAP.AllocateString(current.Property.Name))
-			found, slot := scope.findSlot(current.Object.Name)
+			found, variable := scope.findVariable(current.Object.Name)
 
 			if found {
-				fn.chunk.EmitBytes(OP_GET_LOCAL_OBJECT_MEMBER, slot, prop)
+				fn.chunk.EmitBytes(OP_GET_LOCAL_OBJECT_MEMBER, uint8(variable.slot), prop)
 				return nil
 			}
 
-			found, slot = globals.findSlot(current.Object.Name)
+			found, variable = globals.findVariable(current.Object.Name)
 
 			if found {
-				fn.chunk.EmitBytes(OP_GET_GLOBAL_OBJECT_MEMBER, slot, prop)
+				fn.chunk.EmitBytes(OP_GET_GLOBAL_OBJECT_MEMBER, uint8(variable.slot), prop)
 				return nil
 			}
 
@@ -251,11 +298,9 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			register := HEAP.Allocate(function)
 
 			if isMain {
-				globals.resolver[function.name] = globals.count
-				globals.count++
+				globals.addVariable(function.name, FN)
 			} else {
-				scope.resolver[function.name] = scope.count
-				scope.count++
+				scope.addVariable(function.name, FN)
 			}
 
 			scope := NewScope(scope)
@@ -268,14 +313,13 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			for _, param := range current.Params {
-				scope.resolver[param.Name] = scope.count
-				scope.count++
+				scope.addVariable(param.Name, VAR_LET)
 			}
 
 			for _, statement := range current.BodyNode.Body {
 				traverse(statement, function, scope, globals)
 			}
-			function.chunk.EmitByte(OP_RETURN)
+			function.chunk.EmitByte(OP_RETURN) // TODO: add a check if last instruction is return
 		}
 		// For now just gonna treat them as the same, once we start binding 'this', etc... need to separate the implementations
 	case parser.NODE_FUNCTION_EXPRESSION, parser.NODE_ARROW_FUNCTION_EXPRESSION:
@@ -283,26 +327,24 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			name := "ANONYMOUS_FN_" + strconv.Itoa(scope.count)
 			function := NewFunction(name, len(current.Params))
 			register := HEAP.Allocate(function)
-			scope.resolver[name] = int(register)
-			scope.count++
+
+			scope.addVariable(name, FN)
 
 			scope := NewScope(scope)
 			fn.chunk.WriteConstant(EncodeObject(register))
 
 			for _, param := range current.Params {
-				scope.resolver[param.Name] = scope.count
-				scope.count++
+				scope.addVariable(param.Name, VAR_FN_ARGUMENT)
 			}
 
 			if current.IsExpression {
 				traverse(current.BodyNode, function, scope, globals)
-				function.chunk.EmitByte(OP_RETURN)
 			} else {
 				for _, statement := range current.BodyNode.Body {
 					traverse(statement, function, scope, globals)
 				}
 			}
-
+			function.chunk.EmitByte(OP_RETURN) // TODO: add a check if last instruction is return
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
@@ -311,16 +353,15 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
-				if slot, found := scope.resolver[current.Callee.Name]; found {
+				if found, variable := scope.findVariable(current.Callee.Name); found {
 					fn.chunk.EmitByte(OP_GET_LOCAL)
-					fn.chunk.EmitByte(uint8(slot))
-				} else if global, found := globals.resolver[current.Callee.Name]; found {
+					fn.chunk.EmitByte(uint8(variable.slot))
+				} else if found, variable := globals.findVariable(current.Callee.Name); found {
 					fn.chunk.EmitByte(OP_GET_GLOBAL)
-					fn.chunk.EmitByte(uint8(global))
+					fn.chunk.EmitByte(uint8(variable.slot))
 				}
 			} else {
 				traverse(current.Callee, fn, scope, globals)
-
 			}
 			fn.chunk.EmitByte(OP_CALL)
 		}

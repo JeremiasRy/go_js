@@ -1,3 +1,11 @@
+function main(fn) {
+    const start = clock()
+    const result = fn(3)
+    console.log(clock() - start + "ms")
+    start = 123
+    return result
+}
+
 function fibo(n) {
     if (n <= 1) {
         return n
@@ -6,6 +14,4 @@ function fibo(n) {
     return fibo(n - 1) + fibo(n - 2)
 }
 
-let start = clock()
-fibo(35)
-console.log(clock() - start + "ms")
+console.log(main(fibo))

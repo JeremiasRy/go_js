@@ -23,18 +23,18 @@ func (cf *CallFrame) initCallFrame(fn *ObjFunction, locals []Value, returnIp int
 	cf.returnIp = returnIp
 }
 
-func (cf *CallFrame) AddLocal(v Value) int {
+func (cf *CallFrame) addLocal(v Value) int {
 	cf.locals = append(cf.locals, v)
 	return len(cf.locals) - 1
 }
 
-func (cf *CallFrame) GetLocal(index int) Value {
+func (cf *CallFrame) getLocal(index int) Value {
 	return cf.locals[index]
 }
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 var HEAP *Heap = NewHeap()
 
@@ -301,12 +301,12 @@ func (vm *VM) run() {
 		case OP_DEFINE_LOCAL:
 			{
 				variable := vm.peek()
-				frame.AddLocal(variable)
+				frame.addLocal(variable)
 			}
 		case OP_GET_LOCAL:
 			{
 				slot := chunk.code[ip]
-				vm.push(frame.GetLocal(int(slot)))
+				vm.push(frame.getLocal(int(slot)))
 				ip++
 			}
 		case OP_GET_GLOBAL_OBJECT_MEMBER:
@@ -325,7 +325,7 @@ func (vm *VM) run() {
 				slot := int(chunk.code[ip])
 				member := chunk.constants[chunk.code[ip+1]]
 
-				_, obj := frame.GetLocal(slot).getObject()
+				_, obj := frame.getLocal(slot).getObject()
 
 				value := obj.(*ObjHash).GetMember(member.String())
 				vm.push(value)
@@ -344,6 +344,8 @@ func (vm *VM) run() {
 					switch obj.Type() {
 					case OBJ_FUNCTION:
 						{
+							vm.frames[vm.frameCount-1].locals = frame.locals
+
 							fn := obj.(*ObjFunction)
 							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.arity:vm.stackTop], ip)
 							vm.frameCount++
