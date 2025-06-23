@@ -209,20 +209,27 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
+			traverse(current.Right, fn, scope, globals)
 			op := OP_SET_LOCAL
 			found, left := scope.findVariable(current.Left.Name)
-
 			if !found {
 				found, left = globals.findVariable(current.Left.Name)
+				if found {
+					op = OP_SET_GLOBAL
+				}
 			}
 
 			if !found {
-				panic("no identifier found, We'll do asignment here later")
+				if isMain {
+					fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
+					globals.addVariable(current.Left.Name, VAR_LET)
+				} else {
+					fn.chunk.EmitByte(OP_DEFINE_LOCAL)
+					scope.addVariable(current.Left.Name, VAR_LET)
+				}
 			} else {
-				op = OP_SET_GLOBAL
+				fn.chunk.EmitBytes(op, uint8(left.slot))
 			}
-			fn.chunk.EmitBytes(op, uint8(left.slot))
-			traverse(current.Right, fn, scope, globals)
 
 		}
 	case parser.NODE_IDENTIFIER:
@@ -319,7 +326,11 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			for _, statement := range current.BodyNode.Body {
 				traverse(statement, function, scope, globals)
 			}
-			function.chunk.EmitByte(OP_RETURN) // TODO: add a check if last instruction is return
+
+			if function.chunk.code[len(function.chunk.code)-1] != OP_RETURN {
+				function.chunk.WriteConstant(EncodedUndefined())
+				function.chunk.EmitByte(OP_RETURN)
+			}
 		}
 		// For now just gonna treat them as the same, once we start binding 'this', etc... need to separate the implementations
 	case parser.NODE_FUNCTION_EXPRESSION, parser.NODE_ARROW_FUNCTION_EXPRESSION:
@@ -344,7 +355,10 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 					traverse(statement, function, scope, globals)
 				}
 			}
-			function.chunk.EmitByte(OP_RETURN) // TODO: add a check if last instruction is return
+			if function.chunk.code[len(function.chunk.code)-1] != OP_RETURN {
+				function.chunk.WriteConstant(EncodedUndefined())
+				function.chunk.EmitByte(OP_RETURN)
+			}
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
@@ -354,11 +368,9 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
 				if found, variable := scope.findVariable(current.Callee.Name); found {
-					fn.chunk.EmitByte(OP_GET_LOCAL)
-					fn.chunk.EmitByte(uint8(variable.slot))
+					fn.chunk.EmitBytes(OP_GET_LOCAL, uint8(variable.slot))
 				} else if found, variable := globals.findVariable(current.Callee.Name); found {
-					fn.chunk.EmitByte(OP_GET_GLOBAL)
-					fn.chunk.EmitByte(uint8(variable.slot))
+					fn.chunk.EmitBytes(OP_GET_GLOBAL, uint8(variable.slot))
 				}
 			} else {
 				traverse(current.Callee, fn, scope, globals)
@@ -367,7 +379,11 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
-			traverse(current.Argument, fn, scope, globals)
+			if current.Argument == nil {
+				fn.chunk.WriteConstant(EncodedUndefined())
+			} else {
+				traverse(current.Argument, fn, scope, globals)
+			}
 			fn.chunk.EmitByte(OP_RETURN)
 		}
 	}

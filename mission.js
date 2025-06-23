@@ -1,8 +1,7 @@
 function main(fn) {
     const start = clock()
-    const result = fn(3)
+    const result = fn(35)
     console.log(clock() - start + "ms")
-    start = 123
     return result
 }
 

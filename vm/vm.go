@@ -34,7 +34,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 var HEAP *Heap = NewHeap()
 
@@ -296,7 +296,12 @@ func (vm *VM) run() {
 				global := chunk.code[ip]
 				vm.push(vm.getGlobal(int(global)))
 				ip++
-
+			}
+		case OP_SET_GLOBAL:
+			{
+				global := chunk.code[ip]
+				vm.globals[global] = vm.pop()
+				ip++
 			}
 		case OP_DEFINE_LOCAL:
 			{
@@ -307,6 +312,12 @@ func (vm *VM) run() {
 			{
 				slot := chunk.code[ip]
 				vm.push(frame.getLocal(int(slot)))
+				ip++
+			}
+		case OP_SET_LOCAL:
+			{
+				slot := chunk.code[ip]
+				frame.locals[slot] = vm.pop()
 				ip++
 			}
 		case OP_GET_GLOBAL_OBJECT_MEMBER:
@@ -378,12 +389,10 @@ func (vm *VM) run() {
 		case OP_RETURN:
 			{
 				ip = frame.returnIp
+				value := vm.pop()
+				vm.stackTop -= max(len(frame.locals), frame.fn.arity)
 
-				if vm.stackTop >= 2 {
-					vm.stack[vm.stackTop-(len(frame.locals)+frame.fn.arity)] = vm.stack[vm.stackTop-1]
-					vm.stackTop -= frame.fn.arity + len(frame.locals) - 1
-				}
-
+				vm.push(value)
 				vm.frameCount--
 
 				frame = vm.frames[vm.frameCount-1]
