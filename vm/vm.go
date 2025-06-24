@@ -34,7 +34,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 var HEAP *Heap = NewHeap()
 

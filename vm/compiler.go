@@ -392,6 +392,46 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			fn.chunk.code[start-3] = uint8((jump >> 16))
 			fn.chunk.code[start-4] = uint8((jump >> 24))
 		}
+	case parser.NODE_FOR_STATEMENT:
+		{
+			traverse(current.Initializer, fn, scope, globals)
+
+			testStart := len(fn.chunk.code)
+			traverse(current.Test, fn, scope, globals)
+			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+			conditionJump := len(fn.chunk.code)
+
+			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
+			bodyJump := len(fn.chunk.code)
+
+			traverse(current.Update, fn, scope, globals)
+			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
+			bodyStart := len(fn.chunk.code)
+
+			traverse(current.BodyNode, fn, scope, globals)
+			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
+			end := len(fn.chunk.code)
+
+			fn.chunk.code[conditionJump-1] = uint8(end & math.MaxUint8)
+			fn.chunk.code[conditionJump-2] = uint8(end >> 8)
+			fn.chunk.code[conditionJump-3] = uint8(end >> 16)
+			fn.chunk.code[conditionJump-4] = uint8(end >> 24)
+
+			fn.chunk.code[bodyJump-1] = uint8(bodyStart & math.MaxUint8)
+			fn.chunk.code[bodyJump-2] = uint8(bodyStart >> 8)
+			fn.chunk.code[bodyJump-3] = uint8(bodyStart >> 16)
+			fn.chunk.code[bodyJump-4] = uint8(bodyStart >> 24)
+
+			fn.chunk.code[end-1] = uint8(bodyJump & math.MaxUint8)
+			fn.chunk.code[end-2] = uint8(bodyJump >> 8)
+			fn.chunk.code[end-3] = uint8(bodyJump >> 16)
+			fn.chunk.code[end-4] = uint8(bodyJump >> 24)
+
+			fn.chunk.code[bodyStart-1] = uint8(testStart & math.MaxUint8)
+			fn.chunk.code[bodyStart-2] = uint8(testStart >> 8)
+			fn.chunk.code[bodyStart-3] = uint8(testStart >> 16)
+			fn.chunk.code[bodyStart-4] = uint8(testStart >> 24)
+		}
 	case parser.NODE_UPDATE_EXPRESSION:
 		{
 			traverse(current.Argument, fn, scope, globals)
