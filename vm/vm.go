@@ -179,6 +179,10 @@ func (vm *VM) run() {
 				vm.push(chunk.constants[chunk.code[ip]])
 				ip++
 			}
+		case OP_POP:
+			{
+				vm.pop()
+			}
 		case OP_ADD:
 			{
 				b := vm.pop()
@@ -275,21 +279,22 @@ func (vm *VM) run() {
 			{
 				value := vm.pop()
 				jump := int(chunk.code[ip+3]) | int(chunk.code[ip+2])<<8 | int(chunk.code[ip])<<16 | int(chunk.code[ip])<<24
-				ip += 4
+
 				if !AsBoolean(value) {
-					ip += jump
+					ip = jump
+				} else {
+					ip += 4
 				}
 			}
 		case OP_JUMP:
 			{
 				jump := int(chunk.code[ip+3]) | int(chunk.code[ip+2])<<8 | int(chunk.code[ip])<<16 | int(chunk.code[ip])<<24
-				ip += jump + 4
+				ip = jump
 			}
 		case OP_DEFINE_GLOBAL:
 			{
 				variable := vm.pop()
 				vm.addGlobal(variable)
-
 			}
 		case OP_GET_GLOBAL:
 			{

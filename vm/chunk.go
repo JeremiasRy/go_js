@@ -2,6 +2,7 @@ package vm
 
 const (
 	OP_CONSTANT uint8 = iota
+	OP_POP
 	OP_ADD
 	OP_SUBTRACT
 	OP_MULTIPLY
@@ -36,6 +37,7 @@ const (
 
 var OpcodeNames = map[uint8]string{
 	OP_CONSTANT:                 "OP_CONSTANT",
+	OP_POP:                      "OP_POP",
 	OP_ADD:                      "OP_ADD",
 	OP_SUBTRACT:                 "OP_SUBTRACT",
 	OP_MULTIPLY:                 "OP_MULTIPLY",

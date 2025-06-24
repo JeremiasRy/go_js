@@ -118,8 +118,10 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
+
 			traverse(current.Left, fn, scope, globals)
 			traverse(current.Right, fn, scope, globals)
+
 			switch current.BinaryOperator {
 			case parser.PLUS:
 				fn.chunk.EmitByte(OP_ADD)
@@ -148,11 +150,13 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 
 			start := len(fn.chunk.code)
 			traverse(current.Consequent, fn, scope, globals)
-			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
 
 			trueJumpStart := len(fn.chunk.code)
+			if current.Alternate != nil {
+				fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
+			}
 
-			jump := uint32(len(fn.chunk.code) - start)
+			jump := len(fn.chunk.code)
 
 			fn.chunk.code[start-1] = uint8(jump & math.MaxUint8)
 			fn.chunk.code[start-2] = uint8((jump >> 8))
@@ -161,7 +165,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 
 			if current.Alternate != nil {
 				traverse(current.Alternate, fn, scope, globals)
-				jump := uint32(len(fn.chunk.code) - trueJumpStart)
+				jump := len(fn.chunk.code)
 
 				fn.chunk.code[trueJumpStart-1] = uint8(jump & math.MaxUint8)
 				fn.chunk.code[trueJumpStart-2] = uint8((jump >> 8))
@@ -234,21 +238,14 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_IDENTIFIER:
 		{
-			found, variable := scope.findVariable(current.Name)
-
-			if found {
+			if found, variable := scope.findVariable(current.Name); found {
 				fn.chunk.EmitBytes(OP_GET_LOCAL, uint8(variable.slot))
-				return nil
-			}
-
-			found, variable = globals.findVariable(current.Name)
-
-			if found {
+			} else if found, variable = globals.findVariable(current.Name); found {
 				fn.chunk.EmitBytes(OP_GET_GLOBAL, uint8(variable.slot))
-				return nil
+			} else {
+				fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
 			}
 
-			fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
@@ -283,21 +280,13 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			prop := fn.chunk.addConstant(HEAP.AllocateString(current.Property.Name))
-			found, variable := scope.findVariable(current.Object.Name)
-
-			if found {
+			if found, variable := scope.findVariable(current.Object.Name); found {
 				fn.chunk.EmitBytes(OP_GET_LOCAL_OBJECT_MEMBER, uint8(variable.slot), prop)
-				return nil
-			}
-
-			found, variable = globals.findVariable(current.Object.Name)
-
-			if found {
+			} else if found, variable = globals.findVariable(current.Object.Name); found {
 				fn.chunk.EmitBytes(OP_GET_GLOBAL_OBJECT_MEMBER, uint8(variable.slot), prop)
-				return nil
+			} else {
+				fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
 			}
-
-			fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
 		}
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
@@ -376,6 +365,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 				traverse(current.Callee, fn, scope, globals)
 			}
 			fn.chunk.EmitByte(OP_CALL)
+
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
@@ -386,6 +376,40 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 			fn.chunk.EmitByte(OP_RETURN)
 		}
+	case parser.NODE_WHILE_STATEMENT:
+		{
+			loopStart := len(fn.chunk.code)
+			traverse(current.Test, fn, scope, globals)
+			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+			start := len(fn.chunk.code)
+			traverse(current.BodyNode, fn, scope, globals)
+			fn.chunk.EmitBytes(OP_JUMP, uint8(loopStart>>24), uint8(loopStart>>16), uint8(loopStart>>8), uint8(loopStart&math.MaxUint8))
+
+			jump := len(fn.chunk.code)
+
+			fn.chunk.code[start-1] = uint8(jump & math.MaxUint8)
+			fn.chunk.code[start-2] = uint8((jump >> 8))
+			fn.chunk.code[start-3] = uint8((jump >> 16))
+			fn.chunk.code[start-4] = uint8((jump >> 24))
+		}
+	case parser.NODE_UPDATE_EXPRESSION:
+		{
+			traverse(current.Argument, fn, scope, globals)
+			fn.chunk.WriteConstant(ValueFromFloat64(1))
+			switch current.UpdateOperator {
+			case "++":
+				fn.chunk.EmitByte(OP_ADD)
+			case "--":
+				fn.chunk.EmitByte(OP_SUBTRACT)
+			}
+
+			if found, variable := scope.findVariable(current.Argument.Name); found {
+				fn.chunk.EmitBytes(OP_SET_LOCAL, uint8(variable.slot))
+			} else if found, variable = globals.findVariable(current.Argument.Name); found {
+				fn.chunk.EmitBytes(OP_SET_GLOBAL, uint8(variable.slot))
+			}
+		}
 	}
+
 	return nil
 }

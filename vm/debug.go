@@ -41,7 +41,7 @@ func printChunk(chunk *Chunk) {
 
 		code := chunk.code[i]
 		switch code {
-		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_EOF:
+		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_EOF:
 			printCode(OpcodeNames[code])
 		case OP_CONSTANT:
 			offset := printConstant(chunk, i)
