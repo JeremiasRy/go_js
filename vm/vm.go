@@ -34,22 +34,25 @@ func (cf *CallFrame) getLocal(index int) Value {
 
 const STACK_MAX = 255
 const FRAMES_MAX = 64
-const DEBUG = true
+const CLOSURE_VARIABLES_MAX = 255
+const DEBUG = false
 
 var HEAP *Heap = NewHeap()
 
 type VM struct {
-	frames     []CallFrame
-	frameCount int
-	stack      []Value
-	stackTop   int
-	globals    []Value
+	frames           []CallFrame
+	frameCount       int
+	stack            []Value
+	stackTop         int
+	globals          []Value
+	closureVariables []Value
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}}
+	closureVariables := make([]Value, CLOSURE_VARIABLES_MAX)
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, closureVariables: closureVariables}
 }
 
 func (vm *VM) call(fn *ObjFunction, returnIp int) error {
@@ -136,7 +139,7 @@ func (vm *VM) subtract(a, b Value) Value {
 	return ValueFromFloat64(a.asNumber() - b.asNumber())
 }
 
-func (vm *VM) run() {
+func (vm *VM) run() error {
 	if DEBUG {
 		printFrame(vm.currentFramePointer())
 		for _, object := range HEAP.objects {
@@ -387,7 +390,7 @@ func (vm *VM) run() {
 						}
 					}
 				} else {
-					// .toString, __proto__, ...etc
+					return fmt.Errorf("%s is not a function", callee)
 				}
 
 			}
@@ -406,7 +409,7 @@ func (vm *VM) run() {
 		case OP_EOF:
 			{
 				fmt.Printf("Thanks!\n")
-				return
+				return nil
 			}
 		}
 	}
@@ -436,5 +439,9 @@ func Interpret(source []byte) {
 
 	vm := NewVM()
 	vm.call(main, 0)
-	vm.run()
+	err = vm.run()
+
+	if err != nil {
+		log.Fatalf("runtime error: %s", err.Error())
+	}
 }

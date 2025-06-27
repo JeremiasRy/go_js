@@ -4,34 +4,34 @@ import (
 	"fmt"
 )
 
-func printCode(name string) {
-	fmt.Printf("%-28s |\n", name)
+func printCode(name string, i int) {
+	fmt.Printf("%04d - %-28s |\n", i, name)
 }
 
 func printConstant(chunk *Chunk, i int) int {
 	constant := chunk.constants[chunk.code[i+1]]
 
-	fmt.Printf("%-28s | %s\n", "OP_CONSTANT", constant)
+	fmt.Printf("%04d - %-28s | %s\n", i, "OP_CONSTANT", constant)
 	return 1
 }
 
 func printGetVariable(chunk *Chunk, i int, code uint8) int {
-	fmt.Printf("%-28s | %v\n", OpcodeNames[code], chunk.code[i+1])
+	fmt.Printf("%04d - %-28s | %v\n", i, OpcodeNames[code], chunk.code[i+1])
 	return 1
 }
 
 func printJump(chunk *Chunk, i int, name string) int {
-	fmt.Printf("%-28s | %d\n", name, uint32(chunk.code[i+4])|(uint32(chunk.code[i+3])<<8)|(uint32(chunk.code[i+2])<<16)|(uint32(chunk.code[i+1])<<24))
+	fmt.Printf("%04d - %-28s | %d\n", i, name, uint32(chunk.code[i+4])|(uint32(chunk.code[i+3])<<8)|(uint32(chunk.code[i+2])<<16)|(uint32(chunk.code[i+1])<<24))
 	return 4
 }
 
 func printGet(chunk *Chunk, i int, name string) int {
-	fmt.Printf("%-28s | %d %s\n", name, chunk.code[i+1], chunk.constants[chunk.code[i+2]])
+	fmt.Printf("%04d - %-28s | %d %s\n", i, name, chunk.code[i+1], chunk.constants[chunk.code[i+2]])
 	return 2
 }
 
 func printSet(chunk *Chunk, i int, name string) int {
-	fmt.Printf("%-28s | %d\n", name, chunk.code[i+1])
+	fmt.Printf("%04d - %-28s | %d\n", i, name, chunk.code[i+1])
 	return 1
 }
 
@@ -41,14 +41,12 @@ func printChunk(chunk *Chunk) {
 
 		code := chunk.code[i]
 		switch code {
-		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_EOF:
-			printCode(OpcodeNames[code])
+		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_DEFINE_CLOSURE_VARIABLE, OP_EOF:
+			printCode(OpcodeNames[code], i)
 		case OP_CONSTANT:
 			offset := printConstant(chunk, i)
 			i += offset
-		case OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL:
-			printCode(OpcodeNames[code])
-		case OP_GET_LOCAL, OP_GET_GLOBAL:
+		case OP_GET_LOCAL, OP_GET_GLOBAL, OP_SET_CLOSURE_VARIABLE, OP_GET_CLOSURE_VARIABLE:
 			offset := printGetVariable(chunk, i, code)
 			i += offset
 		case OP_JUMP_IF_FALSE, OP_JUMP:

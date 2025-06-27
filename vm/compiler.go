@@ -214,38 +214,51 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
 			traverse(current.Right, fn, scope, globals)
-			op := OP_SET_LOCAL
-			found, left := scope.findVariable(current.Left.Name)
-			if !found {
-				found, left = globals.findVariable(current.Left.Name)
-				if found {
-					op = OP_SET_GLOBAL
-				}
-			}
+			name := current.Left.Name
+			var op, slot uint8 = 0, 0
 
-			if !found {
+			if found, variable := scope.findVariable(name); found {
+				op = OP_SET_LOCAL
+				slot = uint8(variable.slot)
+			} else if found, variable := globals.findVariable(name); found {
+				op = OP_SET_GLOBAL
+				slot = uint8(variable.slot)
+			} else {
 				if isMain {
 					fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
-					globals.addVariable(current.Left.Name, VAR_LET)
+					globals.addVariable(name, VAR_LET)
 				} else {
 					fn.chunk.EmitByte(OP_DEFINE_LOCAL)
-					scope.addVariable(current.Left.Name, VAR_LET)
+					scope.addVariable(name, VAR_LET)
 				}
-			} else {
-				fn.chunk.EmitBytes(op, uint8(left.slot))
+				return nil
 			}
 
+			fn.chunk.EmitBytes(op, slot)
 		}
 	case parser.NODE_IDENTIFIER:
 		{
-			if found, variable := scope.findVariable(current.Name); found {
-				fn.chunk.EmitBytes(OP_GET_LOCAL, uint8(variable.slot))
-			} else if found, variable = globals.findVariable(current.Name); found {
-				fn.chunk.EmitBytes(OP_GET_GLOBAL, uint8(variable.slot))
+			var variable *Variable
+			isGlobal := false
+
+			if found, v := scope.findVariable(current.Name); found {
+				variable = v
+			} else if found, v = globals.findVariable(current.Name); found {
+				variable = v
+				isGlobal = true
 			} else {
 				fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
+				return nil
 			}
 
+			var get, slot uint8 = 0, uint8(variable.slot)
+			if isGlobal {
+				get = OP_GET_GLOBAL
+			} else {
+				get = OP_GET_LOCAL
+			}
+
+			fn.chunk.EmitBytes(get, slot)
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
@@ -309,7 +322,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			for _, param := range current.Params {
-				scope.addVariable(param.Name, VAR_LET)
+				scope.addVariable(param.Name, VAR_FN_ARGUMENT)
 			}
 
 			for _, statement := range current.BodyNode.Body {
@@ -365,7 +378,6 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 				traverse(current.Callee, fn, scope, globals)
 			}
 			fn.chunk.EmitByte(OP_CALL)
-
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
@@ -405,7 +417,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			bodyJump := len(fn.chunk.code)
 
 			traverse(current.Update, fn, scope, globals)
-			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
+			fn.chunk.EmitBytes(OP_POP, OP_JUMP, 0, 0, 0, 0)
 			bodyStart := len(fn.chunk.code)
 
 			traverse(current.BodyNode, fn, scope, globals)
@@ -434,6 +446,31 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_UPDATE_EXPRESSION:
 		{
+			var variable *Variable
+			isGlobal := false
+
+			if found, v := scope.findVariable(current.Argument.Name); found {
+				variable = v
+			} else if found, v = globals.findVariable(current.Argument.Name); found {
+				variable = v
+				isGlobal = true
+			} else {
+				panic("this should now propagate upward")
+			}
+
+			var get, set, slot uint8 = 0, 0, uint8(variable.slot)
+			if isGlobal {
+				get = OP_GET_GLOBAL
+				set = OP_SET_GLOBAL
+			} else {
+				get = OP_GET_LOCAL
+				set = OP_SET_LOCAL
+			}
+
+			if !current.Prefix {
+				fn.chunk.EmitBytes(get, slot)
+			}
+
 			traverse(current.Argument, fn, scope, globals)
 			fn.chunk.WriteConstant(ValueFromFloat64(1))
 			switch current.UpdateOperator {
@@ -443,11 +480,12 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 				fn.chunk.EmitByte(OP_SUBTRACT)
 			}
 
-			if found, variable := scope.findVariable(current.Argument.Name); found {
-				fn.chunk.EmitBytes(OP_SET_LOCAL, uint8(variable.slot))
-			} else if found, variable = globals.findVariable(current.Argument.Name); found {
-				fn.chunk.EmitBytes(OP_SET_GLOBAL, uint8(variable.slot))
+			fn.chunk.EmitBytes(set, slot)
+
+			if current.Prefix {
+				fn.chunk.EmitBytes(get, slot)
 			}
+
 		}
 	}
 
