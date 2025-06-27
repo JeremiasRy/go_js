@@ -238,24 +238,17 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_IDENTIFIER:
 		{
-			var variable *Variable
-			isGlobal := false
+			var get, slot uint8 = 0, 0
 
 			if found, v := scope.findVariable(current.Name); found {
-				variable = v
+				get = OP_GET_LOCAL
+				slot = uint8(v.slot)
 			} else if found, v = globals.findVariable(current.Name); found {
-				variable = v
-				isGlobal = true
+				get = OP_GET_GLOBAL
+				slot = uint8(v.slot)
 			} else {
 				fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
 				return nil
-			}
-
-			var get, slot uint8 = 0, uint8(variable.slot)
-			if isGlobal {
-				get = OP_GET_GLOBAL
-			} else {
-				get = OP_GET_LOCAL
 			}
 
 			fn.chunk.EmitBytes(get, slot)
