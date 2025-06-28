@@ -41,7 +41,7 @@ func printChunk(chunk *Chunk) {
 
 		code := chunk.code[i]
 		switch code {
-		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_DEFINE_HEAP_VARIABLE, OP_EOF:
+		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_DEFINE_HEAP_VARIABLE, OP_DEFINE_OBJECT_MEMBER, OP_EOF:
 			printCode(OpcodeNames[code], i)
 		case OP_CONSTANT:
 			offset := printConstant(chunk, i)
@@ -55,10 +55,6 @@ func printChunk(chunk *Chunk) {
 		case OP_GET_LOCAL_OBJECT_MEMBER, OP_GET_GLOBAL_OBJECT_MEMBER, OP_SET_GLOBAL_OBJECT_MEMBER, OP_SET_LOCAL_OBJECT_MEMBER:
 			offset := printGet(chunk, i, OpcodeNames[code])
 			i += offset
-		case OP_DEFINE_GLOBAL_OBJECT_MEMBER, OP_DEFINE_LOCAL_OBJECT_MEMBER:
-			{
-				printCode(OpcodeNames[code], i)
-			}
 		case OP_SET_LOCAL, OP_SET_GLOBAL:
 			offset := printSet(chunk, i, OpcodeNames[code])
 			i += offset

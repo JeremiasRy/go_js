@@ -203,15 +203,18 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 				}
 
 				name := declaration.Identifier.Name
+				if isMain {
+					globals.addVariable(name, kind)
+				} else {
+					scope.addVariable(name, kind)
+				}
 
 				traverse(declaration.Initializer, fn, scope, globals)
 
 				if isMain {
 					fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
-					globals.addVariable(name, kind)
 				} else {
 					fn.chunk.EmitByte(OP_DEFINE_LOCAL)
-					scope.addVariable(name, kind)
 				}
 			}
 		}
@@ -261,19 +264,12 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		{
 			hash := NewObjectHash()
 			register := HEAP.Allocate(hash)
-			var op uint8 = 0
-
-			if isMain {
-				op = OP_DEFINE_GLOBAL_OBJECT_MEMBER
-			} else {
-				op = OP_DEFINE_LOCAL_OBJECT_MEMBER
-			}
 
 			fn.chunk.WriteConstant(EncodeObject(register))
 			for _, prop := range current.Properties {
 				traverse(prop.Value.(*parser.Node), fn, scope, globals)
 				fn.chunk.WriteConstant(HEAP.AllocateString(prop.Key.Name))
-				fn.chunk.EmitByte(op)
+				fn.chunk.EmitByte(OP_DEFINE_OBJECT_MEMBER)
 			}
 
 		}

@@ -328,9 +328,8 @@ func (vm *VM) run() error {
 				frame.locals[slot] = vm.pop()
 				ip++
 			}
-		case OP_DEFINE_GLOBAL_OBJECT_MEMBER:
+		case OP_DEFINE_OBJECT_MEMBER:
 			{
-
 				member := vm.pop()
 				value := vm.pop()
 				hash := vm.peek()
@@ -353,6 +352,7 @@ func (vm *VM) run() error {
 			{
 				slot := int(chunk.code[ip])
 				member := chunk.constants[chunk.code[ip+1]]
+				fmt.Printf("%d, %s\n", slot, member)
 
 				_, obj := frame.getLocal(slot).getObject()
 
