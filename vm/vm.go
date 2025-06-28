@@ -32,27 +32,27 @@ func (cf *CallFrame) getLocal(index int) Value {
 	return cf.locals[index]
 }
 
-const STACK_MAX = 255
+const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const CLOSURE_VARIABLES_MAX = 255
-const DEBUG = false
+const HEAP_VALUES_MAX = math.MaxUint8
+const DEBUG = true
 
 var HEAP *Heap = NewHeap()
 
 type VM struct {
-	frames           []CallFrame
-	frameCount       int
-	stack            []Value
-	stackTop         int
-	globals          []Value
-	closureVariables []Value
+	frames     []CallFrame
+	frameCount int
+	stack      []Value
+	stackTop   int
+	globals    []Value
+	heapValues []Value
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]Value, STACK_MAX)
-	closureVariables := make([]Value, CLOSURE_VARIABLES_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, closureVariables: closureVariables}
+	heapValues := make([]Value, HEAP_VALUES_MAX)
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, heapValues: heapValues}
 }
 
 func (vm *VM) call(fn *ObjFunction, returnIp int) error {
@@ -327,6 +327,16 @@ func (vm *VM) run() error {
 				slot := chunk.code[ip]
 				frame.locals[slot] = vm.pop()
 				ip++
+			}
+		case OP_DEFINE_GLOBAL_OBJECT_MEMBER:
+			{
+
+				member := vm.pop()
+				value := vm.pop()
+				hash := vm.peek()
+
+				_, hashObject := hash.getObject()
+				hashObject.(*ObjHash).SetMember(member.String(), value)
 			}
 		case OP_GET_GLOBAL_OBJECT_MEMBER:
 			{

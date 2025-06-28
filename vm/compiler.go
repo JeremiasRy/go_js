@@ -35,16 +35,20 @@ func (s *Scope) addVariable(name string, kind VarKind) {
 	s.resolver[name] = &Variable{slot, kind}
 }
 
-func (s *Scope) findVariable(name string) (bool, *Variable) {
+func (s *Scope) findVariable(name string) (*Variable, bool, bool) {
 	current := s
+	upperScope := false
 
 	for current != nil {
 		if variable, found := current.resolver[name]; found {
-			return true, variable
+			return variable, found, upperScope
 		}
 		current = current.parent
+		if !upperScope {
+			upperScope = true
+		}
 	}
-	return false, nil
+	return nil, false, false
 }
 
 func NewScope(parent *Scope) *Scope {
@@ -217,10 +221,10 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			name := current.Left.Name
 			var op, slot uint8 = 0, 0
 
-			if found, variable := scope.findVariable(name); found {
+			if variable, found, _ := scope.findVariable(name); found {
 				op = OP_SET_LOCAL
 				slot = uint8(variable.slot)
-			} else if found, variable := globals.findVariable(name); found {
+			} else if variable, found, _ := globals.findVariable(name); found {
 				op = OP_SET_GLOBAL
 				slot = uint8(variable.slot)
 			} else {
@@ -240,12 +244,12 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		{
 			var get, slot uint8 = 0, 0
 
-			if found, v := scope.findVariable(current.Name); found {
+			if variable, found, _ := scope.findVariable(current.Name); found {
 				get = OP_GET_LOCAL
-				slot = uint8(v.slot)
-			} else if found, v = globals.findVariable(current.Name); found {
+				slot = uint8(variable.slot)
+			} else if variable, found, _ = globals.findVariable(current.Name); found {
 				get = OP_GET_GLOBAL
-				slot = uint8(v.slot)
+				slot = uint8(variable.slot)
 			} else {
 				fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
 				return nil
@@ -257,38 +261,28 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		{
 			hash := NewObjectHash()
 			register := HEAP.Allocate(hash)
+			var op uint8 = 0
 
-			for _, prop := range current.Properties {
-				key := prop.Key.Name
-				valueNode := prop.Value.(*parser.Node)
-
-				switch valueNode.Type {
-				case parser.NODE_LITERAL:
-					{
-						switch v := valueNode.Value.(type) {
-						case float64:
-							{
-								hash.values[key] = ValueFromFloat64(v)
-							}
-						case []byte:
-							{
-								raw := string(v)
-								value := HEAP.AllocateString(raw)
-								hash.values[key] = value
-							}
-						}
-					}
-				}
+			if isMain {
+				op = OP_DEFINE_GLOBAL_OBJECT_MEMBER
+			} else {
+				op = OP_DEFINE_LOCAL_OBJECT_MEMBER
 			}
 
 			fn.chunk.WriteConstant(EncodeObject(register))
+			for _, prop := range current.Properties {
+				traverse(prop.Value.(*parser.Node), fn, scope, globals)
+				fn.chunk.WriteConstant(HEAP.AllocateString(prop.Key.Name))
+				fn.chunk.EmitByte(op)
+			}
+
 		}
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			prop := fn.chunk.addConstant(HEAP.AllocateString(current.Property.Name))
-			if found, variable := scope.findVariable(current.Object.Name); found {
+			if variable, found, _ := scope.findVariable(current.Object.Name); found {
 				fn.chunk.EmitBytes(OP_GET_LOCAL_OBJECT_MEMBER, uint8(variable.slot), prop)
-			} else if found, variable = globals.findVariable(current.Object.Name); found {
+			} else if variable, found, _ = globals.findVariable(current.Object.Name); found {
 				fn.chunk.EmitBytes(OP_GET_GLOBAL_OBJECT_MEMBER, uint8(variable.slot), prop)
 			} else {
 				fn.chunk.EmitByte(OP_PUSH_UNDEFINED)
@@ -345,6 +339,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 
 			if current.IsExpression {
 				traverse(current.BodyNode, function, scope, globals)
+				function.chunk.EmitByte(OP_RETURN)
 			} else {
 				for _, statement := range current.BodyNode.Body {
 					traverse(statement, function, scope, globals)
@@ -362,9 +357,9 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
-				if found, variable := scope.findVariable(current.Callee.Name); found {
+				if variable, found, _ := scope.findVariable(current.Callee.Name); found {
 					fn.chunk.EmitBytes(OP_GET_LOCAL, uint8(variable.slot))
-				} else if found, variable := globals.findVariable(current.Callee.Name); found {
+				} else if variable, found, _ := globals.findVariable(current.Callee.Name); found {
 					fn.chunk.EmitBytes(OP_GET_GLOBAL, uint8(variable.slot))
 				}
 			} else {
@@ -442,9 +437,9 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			var variable *Variable
 			isGlobal := false
 
-			if found, v := scope.findVariable(current.Argument.Name); found {
+			if v, found, _ := scope.findVariable(current.Argument.Name); found {
 				variable = v
-			} else if found, v = globals.findVariable(current.Argument.Name); found {
+			} else if v, found, _ = globals.findVariable(current.Argument.Name); found {
 				variable = v
 				isGlobal = true
 			} else {

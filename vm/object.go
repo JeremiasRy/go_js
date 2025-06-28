@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"time"
 )
 
@@ -12,6 +13,7 @@ const (
 	OBJ_FUNCTION ObjType = iota
 	OBJ_STRING
 	OBJ_HASH
+	OBJ_HEAP_VALUE
 	OBJ_NATIVE_FN
 )
 
@@ -78,6 +80,33 @@ func (obj *ObjHash) GetMember(member string) Value {
 	}
 
 	return EncodedUndefined()
+}
+
+func (obj *ObjHash) SetMember(member string, value Value) {
+	obj.values[member] = value
+}
+
+type ObjHeapValue struct {
+	value *Value
+}
+
+func (ObjHeapValue) Type() ObjType {
+	return OBJ_HEAP_VALUE
+}
+
+func (objHeapValue ObjHeapValue) String() string {
+	v := objHeapValue.value
+	if isType(TAG_FALSE, *v) {
+		return "False"
+	} else if isType(TAG_TRUE, *v) {
+		return "True"
+	} else if isType(TAG_NIL, *v) {
+		return "null"
+	} else if isType(TAG_UNDEFINED, *v) {
+		return "undefined"
+	} else {
+		return strconv.FormatFloat(v.asNumber(), 'f', -1, 64)
+	}
 }
 
 type ObjNativeFn struct {
