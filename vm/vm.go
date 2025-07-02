@@ -35,7 +35,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
 const HEAP_VALUES_MAX = math.MaxUint8
-const DEBUG = true
+const DEBUG = false
 
 var HEAP *Heap = NewHeap()
 
@@ -318,14 +318,12 @@ func (vm *VM) run() error {
 			}
 		case OP_GET_LOCAL:
 			{
-				slot := chunk.code[ip]
-				vm.push(frame.getLocal(int(slot)))
+				vm.push(frame.getLocal(int(chunk.code[ip])))
 				ip++
 			}
 		case OP_SET_LOCAL:
 			{
-				slot := chunk.code[ip]
-				frame.locals[slot] = vm.pop()
+				frame.locals[chunk.code[ip]] = vm.pop()
 				ip++
 			}
 		case OP_DEFINE_OBJECT_MEMBER:
@@ -370,12 +368,11 @@ func (vm *VM) run() error {
 
 				if callee.isObject() {
 					_, obj := callee.getObject()
-					switch obj.Type() {
-					case OBJ_FUNCTION:
+					switch fn := obj.(type) {
+					case *ObjFunction:
 						{
 							vm.frames[vm.frameCount-1].locals = frame.locals
 
-							fn := obj.(*ObjFunction)
 							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.arity:vm.stackTop], ip)
 							vm.frameCount++
 
@@ -383,22 +380,17 @@ func (vm *VM) run() error {
 							chunk = *frame.fn.chunk
 							ip = 0
 						}
-					case OBJ_NATIVE_FN:
+					case *Log:
 						{
-							switch native := obj.(type) {
-							case *Log:
-								{
-									arg := vm.pop()
-									native.Log(arg)
-								}
-							case *Clock:
-								{
-									vm.push(native.Clock())
-								}
-							}
-
+							arg := vm.pop()
+							fn.Log(arg)
+						}
+					case *Clock:
+						{
+							vm.push(fn.Clock())
 						}
 					}
+
 				} else {
 					return fmt.Errorf("%s is not a function", callee)
 				}
