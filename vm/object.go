@@ -11,6 +11,7 @@ type ObjType uint8
 
 const (
 	OBJ_FUNCTION ObjType = iota
+	OBJ_CLOSURE
 	OBJ_STRING
 	OBJ_HASH
 	OBJ_HEAP_VALUE
@@ -30,10 +31,6 @@ type ObjFunction struct {
 	arity int
 }
 
-func (ObjFunction) Type() ObjType {
-	return OBJ_FUNCTION
-}
-
 func NewFunction(name string, arity int) *ObjFunction {
 	return &ObjFunction{
 		name:  name,
@@ -42,8 +39,66 @@ func NewFunction(name string, arity int) *ObjFunction {
 	}
 }
 
+func (ObjFunction) Type() ObjType {
+	return OBJ_FUNCTION
+}
+
 func (fn ObjFunction) String() string {
 	return "<fn " + fn.name + ">"
+}
+
+func (fn *ObjFunction) Name() string {
+	return fn.name
+}
+
+func (fn *ObjFunction) Code() []uint8 {
+	return fn.chunk.code
+}
+
+func (fn *ObjFunction) WriteConstant(v Value) {
+	fn.chunk.WriteConstant(v)
+}
+func (fn *ObjFunction) EmitByte(b uint8) {
+	fn.chunk.EmitByte(b)
+}
+
+func (fn *ObjFunction) EmitBytes(b ...uint8) {
+	fn.chunk.EmitBytes(b...)
+}
+
+func (fn *ObjFunction) AddConstant(v Value) uint8 {
+	return fn.chunk.addConstant(v)
+}
+
+type ObjClosure struct {
+	ObjFunction
+	upvalues []Value
+}
+
+func (closure *ObjClosure) Name() string {
+	return closure.name
+}
+
+func (ObjClosure) Type() ObjType {
+	return OBJ_CLOSURE
+}
+
+func (closure ObjClosure) String() string {
+	return "<fn " + closure.name + ">"
+}
+
+func (fn *ObjClosure) WriteConstant(v Value) {
+	fn.chunk.WriteConstant(v)
+}
+func (fn *ObjClosure) EmitByte(b uint8) {
+	fn.chunk.EmitByte(b)
+}
+
+func (fn *ObjClosure) EmitBytes(b ...uint8) {
+	fn.chunk.EmitBytes(b...)
+}
+func (fn *ObjClosure) AddConstant(v Value) uint8 {
+	return fn.chunk.addConstant(v)
 }
 
 type ObjString string

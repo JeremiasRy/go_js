@@ -35,7 +35,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
 const HEAP_VALUES_MAX = math.MaxUint8
-const DEBUG = false
+const DEBUG = true
 
 var HEAP *Heap = NewHeap()
 
@@ -45,14 +45,15 @@ type VM struct {
 	stack      []Value
 	stackTop   int
 	globals    []Value
-	heapValues []Value
+
+	openUpValues []Value
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]Value, STACK_MAX)
-	heapValues := make([]Value, HEAP_VALUES_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, heapValues: heapValues}
+	openUpValues := make([]Value, HEAP_VALUES_MAX)
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, openUpValues: openUpValues}
 }
 
 func (vm *VM) call(fn *ObjFunction, returnIp int) error {
