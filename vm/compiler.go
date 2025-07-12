@@ -14,12 +14,16 @@ type Function interface {
 	EmitByte(op uint8)
 	EmitBytes(op ...uint8)
 	Code() []uint8
+	IsClosure() bool
+	ToClosure() *ObjClosure
 }
 
 type Scope struct {
-	parent   *Scope
-	count    int
-	resolver map[string]*Variable
+	parent        *Scope
+	localsCount   int
+	locals        map[string]*Variable
+	upvaluesCount int
+	upvalues      map[string]*Upvalue
 }
 
 type VarKind int
@@ -36,34 +40,115 @@ const (
 type Variable struct {
 	slot     int
 	kind     VarKind
-	isClosed bool
+	captured bool
+}
+
+type Upvalue struct {
+	local bool
+	slot  int
 }
 
 func (s *Scope) addVariable(name string, kind VarKind) {
-	slot := s.count
-	s.count++
-	s.resolver[name] = &Variable{slot, kind, false}
+	slot := s.localsCount
+	s.localsCount++
+	s.locals[name] = &Variable{slot, kind, false}
 }
 
-func (s *Scope) findVariable(name string) (*Variable, bool, bool) {
-	current := s
-	upperScope := false
+func (s *Scope) addUpValue(name string, local bool) uint8 {
+	slot := s.upvaluesCount
+	s.upvaluesCount++
+	s.upvalues[name] = &Upvalue{local, slot}
+	return uint8(slot)
+}
 
-	for current != nil {
-		if variable, found := current.resolver[name]; found {
-			return variable, found, upperScope
+func resolveUpvalue(scope *Scope, name string) (uint8, bool) {
+	if scope.parent == nil {
+		return 0, false
+	}
+	if variable, found := scope.parent.locals[name]; found {
+		variable.captured = true
+
+		return scope.addUpValue(name, true), true
+	}
+
+	_, found := resolveUpvalue(scope.parent, name)
+
+	if found {
+		return scope.addUpValue(name, false), true
+	}
+
+	return 0, false
+}
+
+// returns: op, arg, found
+func getVariable(name string, scope *Scope, globals *Scope) (uint8, uint8, bool) {
+
+	var op, arg uint8
+	if scope == nil {
+		if variable, found := globals.locals[name]; found {
+			op = OP_GET_GLOBAL
+			arg = uint8(variable.slot)
+			return op, arg, true
 		}
-		current = current.parent
+		return 0, 0, false
+	}
 
-		if !upperScope {
-			upperScope = true
+	resolved := false
+
+	if variable, found := scope.locals[name]; found {
+		op = OP_GET_LOCAL
+		arg = uint8(variable.slot)
+		resolved = true
+	} else if arg, found = resolveUpvalue(scope, name); found {
+		op = OP_GET_UPVALUE
+		resolved = true
+	}
+
+	if !resolved {
+		if variable, found := globals.locals[name]; found {
+			op = OP_GET_GLOBAL
+			arg = uint8(variable.slot)
 		}
 	}
-	return nil, false, false
+
+	return op, arg, true
+}
+
+func setVariable(name string, scope *Scope, globals *Scope) (uint8, uint8, bool) {
+
+	var op, arg uint8
+	if scope == nil {
+		if variable, found := globals.locals[name]; found {
+			op = OP_SET_GLOBAL
+			arg = uint8(variable.slot)
+			return op, arg, true
+		}
+		return 0, 0, false
+	}
+
+	resolved := false
+
+	if variable, found := scope.locals[name]; found {
+		op = OP_SET_LOCAL
+		arg = uint8(variable.slot)
+		resolved = true
+	} else if arg, found = resolveUpvalue(scope, name); found {
+		op = OP_SET_UPVALUE
+		resolved = true
+	}
+
+	if !resolved {
+		if variable, found := globals.locals[name]; found {
+			op = OP_SET_GLOBAL
+			arg = uint8(variable.slot)
+		}
+	}
+
+	return op, arg, true
 }
 
 func NewScope(parent *Scope) *Scope {
-	return &Scope{parent: parent, count: 0, resolver: map[string]*Variable{}}
+	return &Scope{parent: parent, localsCount: 0, locals: map[string]*Variable{}, upvaluesCount: 0, upvalues: map[string]*Upvalue{}}
 }
 
 func defineConsole(main Function, globals *Scope) {
@@ -125,7 +210,7 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			scope := NewScope(scope)
+			// scope := NewScope(scope)
 			for _, stmt := range current.Body {
 				traverse(stmt, fn, scope, globals)
 			}
@@ -232,15 +317,9 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 		{
 			traverse(current.Right, fn, scope, globals)
 			name := current.Left.Name
-			var op, slot uint8 = 0, 0
+			op, arg, found := setVariable(name, scope, globals)
 
-			if variable, found, _ := scope.findVariable(name); found {
-				op = OP_SET_LOCAL
-				slot = uint8(variable.slot)
-			} else if variable, found, _ := globals.findVariable(name); found {
-				op = OP_SET_GLOBAL
-				slot = uint8(variable.slot)
-			} else {
+			if !found {
 				if isMain {
 					fn.EmitByte(OP_DEFINE_GLOBAL)
 					globals.addVariable(name, VAR_LET)
@@ -251,24 +330,12 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 				return nil
 			}
 
-			fn.EmitBytes(op, slot)
+			fn.EmitBytes(op, arg)
 		}
 	case parser.NODE_IDENTIFIER:
 		{
-			var get, slot uint8 = 0, 0
-
-			if variable, found, _ := scope.findVariable(current.Name); found {
-				get = OP_GET_LOCAL
-				slot = uint8(variable.slot)
-			} else if variable, found, _ = globals.findVariable(current.Name); found {
-				get = OP_GET_GLOBAL
-				slot = uint8(variable.slot)
-			} else {
-				fn.EmitByte(OP_PUSH_UNDEFINED)
-				return nil
-			}
-
-			fn.EmitBytes(get, slot)
+			op, arg, _ := getVariable(current.Name, scope, globals)
+			fn.EmitBytes(op, arg)
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
@@ -286,13 +353,19 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			prop := fn.AddConstant(HEAP.AllocateString(current.Property.Name))
-			if variable, found, _ := scope.findVariable(current.Object.Name); found {
-				fn.EmitBytes(OP_GET_LOCAL_OBJECT_MEMBER, uint8(variable.slot), prop)
-			} else if variable, found, _ = globals.findVariable(current.Object.Name); found {
-				fn.EmitBytes(OP_GET_GLOBAL_OBJECT_MEMBER, uint8(variable.slot), prop)
-			} else {
+			op, arg, found := getVariable(current.Object.Name, scope, globals)
+
+			if !found {
 				fn.EmitByte(OP_PUSH_UNDEFINED)
 			}
+
+			if op == OP_GET_LOCAL {
+				op = OP_GET_LOCAL_OBJECT_MEMBER
+			} else {
+				op = OP_GET_GLOBAL_OBJECT_MEMBER
+			} // add OP_GET_UPVALUE_OBJECT_MEMBER
+
+			fn.EmitBytes(op, arg, prop)
 		}
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
@@ -330,7 +403,7 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 		// For now just gonna treat them as the same, once we start binding 'this', etc... need to separate the implementations
 	case parser.NODE_FUNCTION_EXPRESSION, parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		{
-			name := "ANONYMOUS_FN_" + strconv.Itoa(scope.count)
+			name := "ANONYMOUS_FN_" + strconv.Itoa(scope.localsCount)
 			function := NewFunction(name, len(current.Params))
 			register := HEAP.Allocate(function)
 
@@ -363,11 +436,8 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 			}
 
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
-				if variable, found, _ := scope.findVariable(current.Callee.Name); found {
-					fn.EmitBytes(OP_GET_LOCAL, uint8(variable.slot))
-				} else if variable, found, _ := globals.findVariable(current.Callee.Name); found {
-					fn.EmitBytes(OP_GET_GLOBAL, uint8(variable.slot))
-				}
+				op, arg, _ := getVariable(current.Callee.Name, scope, globals)
+				fn.EmitBytes(op, arg)
 			} else {
 				traverse(current.Callee, fn, scope, globals)
 			}
@@ -440,29 +510,16 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 		}
 	case parser.NODE_UPDATE_EXPRESSION:
 		{
-			var variable *Variable
-			isGlobal := false
+			name := current.Argument.Name
+			opSet, arg, found := setVariable(name, scope, globals)
+			opGet, _, _ := getVariable(name, scope, globals)
 
-			if v, found, _ := scope.findVariable(current.Argument.Name); found {
-				variable = v
-			} else if v, found, _ = globals.findVariable(current.Argument.Name); found {
-				variable = v
-				isGlobal = true
-			} else {
-				panic("this should now propagate upward")
-			}
-
-			var get, set, slot uint8 = 0, 0, uint8(variable.slot)
-			if isGlobal {
-				get = OP_GET_GLOBAL
-				set = OP_SET_GLOBAL
-			} else {
-				get = OP_GET_LOCAL
-				set = OP_SET_LOCAL
+			if !found {
+				panic("oh no")
 			}
 
 			if !current.Prefix {
-				fn.EmitBytes(get, slot)
+				fn.EmitBytes(opGet, arg)
 			}
 
 			traverse(current.Argument, fn, scope, globals)
@@ -474,10 +531,10 @@ func traverse(current *parser.Node, fn Function, scope *Scope, globals *Scope) e
 				fn.EmitByte(OP_SUBTRACT)
 			}
 
-			fn.EmitBytes(set, slot)
+			fn.EmitBytes(opSet, arg)
 
 			if current.Prefix {
-				fn.EmitBytes(get, slot)
+				fn.EmitBytes(opGet, arg)
 			}
 
 		}

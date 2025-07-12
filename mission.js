@@ -1,6 +1,6 @@
 function main(fn) {
     const start = clock()
-    const result = fn(5)
+    const result = fn(35)
     console.log(clock() - start + "ms")
     return result
 }
