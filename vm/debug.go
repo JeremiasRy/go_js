@@ -4,6 +4,45 @@ import (
 	"fmt"
 )
 
+var OpcodeNames = map[uint8]string{
+	OP_CONSTANT:                 "OP_CONSTANT",
+	OP_POP:                      "OP_POP",
+	OP_ADD:                      "OP_ADD",
+	OP_SUBTRACT:                 "OP_SUBTRACT",
+	OP_MULTIPLY:                 "OP_MULTIPLY",
+	OP_DIVIDE:                   "OP_DIVIDE",
+	OP_NILL:                     "OP_NILL",
+	OP_UNDEFINED:                "OP_UNDEFINED",
+	OP_TRUE:                     "OP_TRUE",
+	OP_FALSE:                    "OP_FALSE",
+	OP_EQUALS:                   "OP_EQUALS",
+	OP_STRICT_EQUALS:            "OP_STRICT_EQUALS",
+	OP_LESS_THAN_EQUAL:          "OP_LESS_THAN_EQUAL",
+	OP_GET_LOCAL:                "OP_GET_LOCAL",
+	OP_SET_LOCAL:                "OP_SET_LOCAL",
+	OP_DEFINE_LOCAL:             "OP_DEFINE_LOCAL",
+	OP_GET_GLOBAL:               "OP_GET_GLOBAL",
+	OP_SET_GLOBAL:               "OP_SET_GLOBAL",
+	OP_DEFINE_GLOBAL:            "OP_DEFINE_GLOBAL",
+	OP_CLOSE_UPVALUES:           "OP_CLOSE_UPVALUES",
+	OP_GET_UPVALUE:              "OP_GET_UPVALUE",
+	OP_SET_UPVALUE:              "OP_SET_UPVALUE",
+	OP_CLOSURE:                  "OP_CLOSURE",
+	OP_CALL:                     "OP_CALL",
+	OP_RETURN:                   "OP_RETURN",
+	OP_END_OF_FN:                "OP_END_OF_FN",
+	OP_TEMPLATE_LITERAL:         "OP_TEMPLATE_LITERAL",
+	OP_JUMP_IF_FALSE:            "OP_JUMP_IF_FALSE",
+	OP_JUMP:                     "OP_JUMP",
+	OP_DEFINE_OBJECT_MEMBER:     "OP_DEFINE_OBJECT_MEMBER",
+	OP_SET_LOCAL_OBJECT_MEMBER:  "OP_SET_LOCAL_OBJECT_MEMBER",
+	OP_GET_LOCAL_OBJECT_MEMBER:  "OP_GET_LOCAL_OBJECT_MEMBER",
+	OP_SET_GLOBAL_OBJECT_MEMBER: "OP_SET_GLOBAL_OBJECT_MEMBER",
+	OP_GET_GLOBAL_OBJECT_MEMBER: "OP_GET_GLOBAL_OBJECT_MEMBER",
+	OP_PUSH_UNDEFINED:           "OP_PUSH_UNDEFINED",
+	OP_EOF:                      "OP_EOF",
+}
+
 func printCode(name string, i int) {
 	fmt.Printf("%04d - %-32s |\n", i, name)
 }
@@ -41,7 +80,7 @@ func printChunk(chunk *Chunk) {
 
 		code := chunk.code[i]
 		switch code {
-		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_CLOSE_UPVALUES, OP_DEFINE_OBJECT_MEMBER, OP_EOF:
+		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_CLOSE_UPVALUES, OP_DEFINE_OBJECT_MEMBER, OP_CLOSURE, OP_EOF:
 			printCode(OpcodeNames[code], i)
 		case OP_CONSTANT:
 			offset := printConstant(chunk, i)

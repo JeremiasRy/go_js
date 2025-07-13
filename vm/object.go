@@ -26,9 +26,11 @@ type Object interface {
 }
 
 type ObjFunction struct {
-	name  string
-	chunk *Chunk
-	arity int
+	name      string
+	chunk     *Chunk
+	arity     int
+	isClosure bool
+	upvalues  []*ObjUpvalue
 }
 
 func NewFunction(name string, arity int) *ObjFunction {
@@ -51,91 +53,15 @@ func (fn *ObjFunction) Name() string {
 	return fn.name
 }
 
-func (fn *ObjFunction) Code() []uint8 {
-	return fn.chunk.code
-}
-
-func (fn *ObjFunction) WriteConstant(v Value) {
-	fn.chunk.WriteConstant(v)
-}
-func (fn *ObjFunction) EmitByte(b uint8) {
-	fn.chunk.EmitByte(b)
-}
-
-func (fn *ObjFunction) EmitBytes(b ...uint8) {
-	fn.chunk.EmitBytes(b...)
-}
-
-func (fn *ObjFunction) AddConstant(v Value) uint8 {
-	return fn.chunk.addConstant(v)
-}
-
-func (fn *ObjFunction) IsClosure() bool {
-	return false
-}
-
-func (fn *ObjFunction) ToClosure() *ObjClosure {
-	return NewObjClosure(fn.name, fn.arity, fn)
-}
-
 type ObjUpvalue struct {
 	location *Value
 	closed   Value
+	next     *ObjUpvalue
 }
 
 func (upvalue *ObjUpvalue) Close() {
 	upvalue.closed = *upvalue.location
 	upvalue.location = &upvalue.closed
-}
-
-type ObjClosure struct {
-	ObjFunction
-	upvalues []*ObjUpvalue
-}
-
-func NewObjClosure(name string, arity int, objFn *ObjFunction) *ObjClosure {
-	if objFn == nil {
-		objFn = NewFunction(name, arity)
-	}
-
-	return &ObjClosure{
-		ObjFunction: *objFn,
-		upvalues:    []*ObjUpvalue{},
-	}
-}
-
-func (cloure *ObjClosure) IsClosure() bool {
-	return true
-}
-
-func (closure *ObjClosure) ToClosure() *ObjClosure {
-	return closure
-}
-
-func (closure *ObjClosure) Name() string {
-	return closure.name
-}
-
-func (ObjClosure) Type() ObjType {
-	return OBJ_CLOSURE
-}
-
-func (closure ObjClosure) String() string {
-	return "<fn " + closure.name + ">"
-}
-
-func (fn *ObjClosure) WriteConstant(v Value) {
-	fn.chunk.WriteConstant(v)
-}
-func (fn *ObjClosure) EmitByte(b uint8) {
-	fn.chunk.EmitByte(b)
-}
-
-func (fn *ObjClosure) EmitBytes(b ...uint8) {
-	fn.chunk.EmitBytes(b...)
-}
-func (fn *ObjClosure) AddConstant(v Value) uint8 {
-	return fn.chunk.addConstant(v)
 }
 
 type ObjString string

@@ -34,8 +34,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const HEAP_VALUES_MAX = math.MaxUint8
-const DEBUG = false
+const DEBUG = true
 
 var HEAP *Heap = NewHeap()
 
@@ -45,12 +44,14 @@ type VM struct {
 	stack      []Value
 	stackTop   int
 	globals    []Value
+
+	openUpvalues *ObjUpvalue
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, openUpvalues: nil}
 }
 
 func (vm *VM) call(fn *ObjFunction, returnIp int) error {
@@ -359,6 +360,10 @@ func (vm *VM) run() error {
 		case OP_PUSH_UNDEFINED:
 			{
 				vm.push(EncodedUndefined())
+			}
+		case OP_CLOSURE:
+			{
+				vm.pop()
 			}
 		case OP_CALL:
 			{

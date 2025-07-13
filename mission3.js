@@ -7,4 +7,6 @@ function counter() {
     }
 }
 
+const c = counter()
+
 
