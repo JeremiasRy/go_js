@@ -26,11 +26,12 @@ type Object interface {
 }
 
 type ObjFunction struct {
-	name      string
-	chunk     *Chunk
-	arity     int
-	isClosure bool
-	upvalues  []*ObjUpvalue
+	name         string
+	chunk        *Chunk
+	arity        int
+	isClosure    bool
+	upvalues     []*ObjUpvalue
+	upvalueCount int
 }
 
 func NewFunction(name string, arity int) *ObjFunction {
@@ -54,9 +55,10 @@ func (fn *ObjFunction) Name() string {
 }
 
 type ObjUpvalue struct {
-	location *Value
-	closed   Value
-	next     *ObjUpvalue
+	location      *Value
+	closed        Value
+	next          *ObjUpvalue
+	stackLocation int
 }
 
 func (upvalue *ObjUpvalue) Close() {

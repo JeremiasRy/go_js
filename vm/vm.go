@@ -8,19 +8,21 @@ import (
 )
 
 type CallFrame struct {
-	fn       *ObjFunction
-	locals   []Value
-	returnIp int
+	fn         *ObjFunction
+	locals     []Value
+	stackStart int
+	returnIp   int
 }
 
 func NewCallFrame(fn *ObjFunction, locals []Value) *CallFrame {
 	return &CallFrame{fn: fn, locals: locals, returnIp: 0}
 }
 
-func (cf *CallFrame) initCallFrame(fn *ObjFunction, locals []Value, returnIp int) {
+func (cf *CallFrame) initCallFrame(fn *ObjFunction, stackStart int, locals []Value, returnIp int) {
 	cf.fn = fn
 	cf.locals = locals
 	cf.returnIp = returnIp
+	cf.stackStart = stackStart
 }
 
 func (cf *CallFrame) addLocal(v Value) int {
@@ -34,7 +36,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 var HEAP *Heap = NewHeap()
 
@@ -59,7 +61,7 @@ func (vm *VM) call(fn *ObjFunction, returnIp int) error {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.arity:vm.stackTop], returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop, vm.stack[vm.stackTop-fn.arity:vm.stackTop], returnIp)
 	vm.frameCount++
 	return nil
 }
@@ -325,6 +327,17 @@ func (vm *VM) run() error {
 				frame.locals[chunk.code[ip]] = vm.pop()
 				ip++
 			}
+		case OP_GET_UPVALUE:
+			{
+				vm.push(*frame.fn.upvalues[chunk.code[ip]].location)
+				ip++
+			}
+		case OP_SET_UPVALUE:
+			{
+				value := vm.pop()
+				frame.fn.upvalues[chunk.code[ip]].location = &value
+				ip++
+			}
 		case OP_DEFINE_OBJECT_MEMBER:
 			{
 				member := vm.pop()
@@ -363,7 +376,47 @@ func (vm *VM) run() error {
 			}
 		case OP_CLOSURE:
 			{
-				vm.pop()
+				closure := vm.pop()
+				_, obj := closure.getObject()
+
+				fn := obj.(*ObjFunction)
+				upvalueCount := chunk.code[ip]
+				fn.upvalues = make([]*ObjUpvalue, upvalueCount)
+				for i := 0; i < int(upvalueCount); i++ {
+					isLocalByte := chunk.code[ip+1]
+					slot := chunk.code[ip+2]
+					ip = ip + 2
+
+					if isLocalByte > 0 {
+						var prevUpvalue *ObjUpvalue
+						upvalue := vm.openUpvalues
+						local := &frame.locals[slot]
+						stackLocation := frame.stackStart + int(slot)
+
+						for upvalue != nil && upvalue.stackLocation > stackLocation {
+							prevUpvalue = upvalue
+							upvalue = upvalue.next
+						}
+
+						if upvalue != nil && upvalue.stackLocation == stackLocation {
+							fn.upvalues[i] = upvalue
+						} else {
+
+							newUpvalue := &ObjUpvalue{location: local, closed: EncodeNil(), next: nil, stackLocation: stackLocation}
+
+							if prevUpvalue == nil {
+								vm.openUpvalues = newUpvalue
+							} else {
+								prevUpvalue.next = newUpvalue
+							}
+							fn.upvalues[i] = newUpvalue
+						}
+
+					} else {
+						fn.upvalues[i] = frame.fn.upvalues[slot]
+					}
+				}
+				ip++
 			}
 		case OP_CALL:
 			{
@@ -376,7 +429,7 @@ func (vm *VM) run() error {
 						{
 							vm.frames[vm.frameCount-1].locals = frame.locals
 
-							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.arity:vm.stackTop], ip)
+							vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop, vm.stack[vm.stackTop-fn.arity:vm.stackTop], ip)
 							vm.frameCount++
 
 							frame = vm.frames[vm.frameCount-1]
@@ -403,6 +456,14 @@ func (vm *VM) run() error {
 			{
 				ip = frame.returnIp
 				value := vm.pop()
+
+				for vm.openUpvalues != nil && vm.openUpvalues.stackLocation >= frame.stackStart {
+					upvalue := vm.openUpvalues
+					upvalue.closed = *upvalue.location
+					upvalue.location = &upvalue.closed
+					vm.openUpvalues = upvalue.next
+				}
+
 				vm.stackTop -= max(len(frame.locals), frame.fn.arity)
 
 				vm.push(value)

@@ -74,13 +74,39 @@ func printSet(chunk *Chunk, i int, name string) int {
 	return 1
 }
 
+func printClosure(chunk *Chunk, i int, name string) int {
+	upvalueCount := chunk.code[i+1]
+
+	fmt.Printf("%04d - %-32s | upvalues %d\n", i, name, upvalueCount)
+
+	i++
+
+	for range upvalueCount {
+		isLocal := chunk.code[i+1]
+		slot := chunk.code[i+2]
+
+		str := ""
+
+		if isLocal > 0 {
+			str = "local"
+		} else {
+			str = "upvalue"
+		}
+
+		fmt.Printf("%04d   %-32s | %s %d\n", i+2, "", str, slot)
+		i = i + 2
+	}
+
+	return 2*int(upvalueCount) + 1
+}
+
 func printChunk(chunk *Chunk) {
 	i := 0
 	for i < len(chunk.code) {
 
 		code := chunk.code[i]
 		switch code {
-		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_CLOSE_UPVALUES, OP_DEFINE_OBJECT_MEMBER, OP_CLOSURE, OP_EOF:
+		case OP_ADD, OP_SUBTRACT, OP_DIVIDE, OP_MULTIPLY, OP_LESS_THAN_EQUAL, OP_CALL, OP_RETURN, OP_END_OF_FN, OP_POP, OP_DEFINE_LOCAL, OP_DEFINE_GLOBAL, OP_CLOSE_UPVALUES, OP_DEFINE_OBJECT_MEMBER, OP_EOF:
 			printCode(OpcodeNames[code], i)
 		case OP_CONSTANT:
 			offset := printConstant(chunk, i)
@@ -97,6 +123,11 @@ func printChunk(chunk *Chunk) {
 		case OP_SET_LOCAL, OP_SET_GLOBAL:
 			offset := printSet(chunk, i, OpcodeNames[code])
 			i += offset
+		case OP_CLOSURE:
+			{
+				offset := printClosure(chunk, i, OpcodeNames[code])
+				i += offset
+			}
 		}
 		i++
 	}

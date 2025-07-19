@@ -47,6 +47,10 @@ func (s *Scope) addVariable(name string, kind VarKind) uint8 {
 }
 
 func (s *Scope) addUpValue(name string, local bool) uint8 {
+	if variable, found := s.upvalues[name]; found {
+		return uint8(variable.slot)
+	}
+
 	slot := s.upvaluesCount
 	s.upvaluesCount++
 	s.upvalues[name] = &Upvalue{local, slot}
@@ -59,7 +63,6 @@ func resolveUpvalue(scope *Scope, name string) (uint8, bool) {
 	}
 	if variable, found := scope.parent.locals[name]; found {
 		variable.captured = true
-
 		return scope.addUpValue(name, true), true
 	}
 
@@ -425,7 +428,6 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			if current.IsExpression {
-				println("is expression")
 				traverse(current.BodyNode, function, scope, globals)
 				function.chunk.EmitByte(OP_RETURN)
 			} else {
@@ -440,9 +442,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 
 			if function.isClosure {
 				closureChunk := []uint8{OP_CONSTANT, slot, OP_CLOSURE}
-				scope := FUNCTION_SCOPES[fn.name]
-
-				fmt.Printf("%v\n", scope)
+				scope := FUNCTION_SCOPES[function.name]
 
 				closureChunk = append(closureChunk, uint8(scope.upvaluesCount))
 
