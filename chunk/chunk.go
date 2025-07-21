@@ -1,4 +1,4 @@
-package vm
+package chunk
 
 const (
 	OP_CONSTANT uint8 = iota
@@ -41,34 +41,3 @@ const (
 	OP_PUSH_UNDEFINED
 	OP_EOF
 )
-
-type Chunk struct {
-	code      []uint8
-	constants []Value
-}
-
-func NewChunk() *Chunk {
-	return &Chunk{
-		code:      []uint8{},
-		constants: []Value{},
-	}
-}
-
-func (c *Chunk) WriteConstant(v Value) uint8 {
-	arg := c.addConstant(v)
-	c.EmitBytes(OP_CONSTANT, arg)
-	return arg
-}
-
-func (c *Chunk) EmitByte(b uint8) {
-	c.code = append(c.code, b)
-}
-
-func (c *Chunk) EmitBytes(b ...uint8) {
-	c.code = append(c.code, b...)
-}
-
-func (c *Chunk) addConstant(v Value) uint8 {
-	c.constants = append(c.constants, v)
-	return uint8(len(c.constants) - 1)
-}

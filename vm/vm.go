@@ -2,35 +2,38 @@ package vm
 
 import (
 	"fmt"
+	"go_js/chunk"
+	"go_js/compiler"
+	"go_js/object"
 	"go_js/parser"
+	"go_js/value"
 	"log"
 	"math"
 )
 
 type CallFrame struct {
-	fn         *ObjFunction
-	locals     []Value
+	fn         *object.ObjFunction
+	locals     []value.Value
 	stackStart int
 	returnIp   int
 }
 
-func NewCallFrame(fn *ObjFunction, locals []Value) *CallFrame {
+func NewCallFrame(fn *object.ObjFunction, locals []value.Value) *CallFrame {
 	return &CallFrame{fn: fn, locals: locals, returnIp: 0}
 }
 
-func (cf *CallFrame) initCallFrame(fn *ObjFunction, stackStart int, locals []Value, returnIp int) {
+func (cf *CallFrame) initCallFrame(fn *object.ObjFunction, locals []value.Value, returnIp int) {
 	cf.fn = fn
 	cf.locals = locals
 	cf.returnIp = returnIp
-	cf.stackStart = stackStart
 }
 
-func (cf *CallFrame) addLocal(v Value) int {
+func (cf *CallFrame) addLocal(v value.Value) int {
 	cf.locals = append(cf.locals, v)
 	return len(cf.locals) - 1
 }
 
-func (cf *CallFrame) getLocal(index int) Value {
+func (cf *CallFrame) getLocal(index int) value.Value {
 	return cf.locals[index]
 }
 
@@ -38,51 +41,48 @@ const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
 const DEBUG = true
 
-var HEAP *Heap = NewHeap()
-
 type VM struct {
 	frames     []CallFrame
 	frameCount int
-	stack      []Value
+	stack      []value.Value
 	stackTop   int
-	globals    []Value
 
-	openUpvalues *ObjUpvalue
+	globals []value.Value
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
-	stack := make([]Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []Value{}, openUpvalues: nil}
+	stack := make([]value.Value, STACK_MAX)
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}}
 }
 
-func (vm *VM) call(fn *ObjFunction, returnIp int) error {
+func (vm *VM) call(fn *object.ObjFunction, returnIp int) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop, vm.stack[vm.stackTop-fn.arity:vm.stackTop], returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity:vm.stackTop], returnIp)
 	vm.frameCount++
 	return nil
 }
 
-func (vm *VM) push(v Value) {
+func (vm *VM) push(v value.Value) {
 	vm.stack[vm.stackTop] = v
 	vm.stackTop++
 }
 
-func (vm *VM) peek() Value {
+func (vm *VM) peek() value.Value {
 	return vm.stack[vm.stackTop-1]
 }
 
-func (vm *VM) pop() Value {
+func (vm *VM) pop() value.Value {
 	vm.stackTop--
 	return vm.stack[vm.stackTop]
 }
-func (vm *VM) addGlobal(v Value) {
+func (vm *VM) addGlobal(v value.Value) {
 	vm.globals = append(vm.globals, v)
 }
-func (vm *VM) getGlobal(global int) Value {
+func (vm *VM) getGlobal(global int) value.Value {
 	return vm.globals[global]
 }
 
@@ -90,15 +90,20 @@ func (vm *VM) currentFramePointer() *CallFrame {
 	return &vm.frames[vm.frameCount-1]
 }
 
-func (vm *VM) concatenate(a, b Value) Value {
-	aIsObject := a.isObject()
-	bIsObject := b.isObject()
+func (vm *VM) string(v value.Value) string {
+	return ""
+}
 
-	if a.isObject() && b.isObject() {
-		_, aObj := a.getObject()
-		_, bObj := b.getObject()
-		if aObj.Type() == OBJ_STRING && bObj.Type() == OBJ_STRING {
-			res := aObj.(ObjString) + bObj.(ObjString)
+func (vm *VM) concatenate(a, b value.Value) value.Value {
+	aIsObject, aRegister := object.GetObject(a)
+	bIsObject, bRegister := object.GetObject(b)
+
+	if aIsObject && bIsObject {
+		aObj := HEAP.GetObject(aRegister)
+		bObj := HEAP.GetObject(bRegister)
+
+		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
+			res := aObj.(object.ObjString) + bObj.(object.ObjString)
 			return HEAP.AllocateString(string(res))
 		} else {
 			// runtime error?
@@ -106,69 +111,73 @@ func (vm *VM) concatenate(a, b Value) Value {
 	}
 
 	if aIsObject && !bIsObject {
-		_, aObj := a.getObject()
+		aObj := HEAP.GetObject(aRegister)
 
-		if aObj.Type() == OBJ_STRING {
-			res := aObj.(ObjString) + ObjString(b.String())
+		if aObj.Type() == object.OBJ_STRING {
+			res := aObj.(object.ObjString) + object.ObjString(vm.string(b))
 
 			return HEAP.AllocateString(string(res))
 		}
 	}
 
 	if !aIsObject && bIsObject {
-		_, bObj := b.getObject()
+		bObj := HEAP.GetObject(bRegister)
 
-		if bObj.Type() == OBJ_STRING {
-			res := ObjString(a.String()) + bObj.(ObjString)
+		if bObj.Type() == object.OBJ_STRING {
+			res := object.ObjString(vm.string(a)) + bObj.(object.ObjString)
 
 			return HEAP.AllocateString(string(res))
 		}
 	}
 
-	return Value(math.Float64bits(a.asNumber() + b.asNumber()))
+	return value.Value(math.Float64bits(a.AsNumber() + b.AsNumber()))
 }
 
-func (vm *VM) subtract(a, b Value) Value {
-	if a.isObject() || b.isObject() {
-		if a.isObject() && b.isObject() {
+func (vm *VM) subtract(a, b value.Value) value.Value {
+	aIsObject, _ := object.GetObject(a)
+	bIsObject, _ := object.GetObject(b)
+	if aIsObject || bIsObject {
+		if aIsObject && bIsObject {
 			// todo
 		} else {
-			return EncodeNaN()
+			return value.EncodeNaN()
 		}
 	}
 
-	return ValueFromFloat64(a.asNumber() - b.asNumber())
+	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
 }
 
 func (vm *VM) run() error {
 	if DEBUG {
 		printFrame(vm.currentFramePointer())
-		for _, object := range HEAP.objects {
-			if object.Type() == OBJ_FUNCTION {
-				println(object.String())
-				printChunk(object.(*ObjFunction).chunk)
+		for _, obj := range HEAP.objects {
+			if obj.Type() == object.OBJ_FUNCTION {
+				println(obj.String())
+				printChunk(obj.(*object.ObjFunction).ValueChunk())
 				println()
 			}
 		}
 	}
 	frame := vm.frames[vm.frameCount-1]
-	chunk := *frame.fn.chunk
+	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
 
 	for {
 		//time.Sleep(time.Millisecond * 100)
-		code := chunk.code[ip]
+		code := valueChunk.Code[ip]
 		ip++
 
 		if DEBUG {
-			println("Current context: ", vm.currentFramePointer().fn.name)
+			println("Current context: ", vm.currentFramePointer().fn.Name())
 			print("Stack: [ ")
 			for _, v := range vm.stack[:vm.stackTop] {
-				isObject, obj := v.getObject()
+				isObject, register := object.GetObject(v)
+
 				if isObject {
+					obj := HEAP.GetObject(register)
 					print(obj.String() + " | ")
 				} else {
-					print(v.String() + " | ")
+					// print(v.String() + " | ")
 				}
 
 			}
@@ -178,271 +187,223 @@ func (vm *VM) run() error {
 		}
 
 		switch code {
-		case OP_CONSTANT:
+		case chunk.OP_CONSTANT:
 			{
-				vm.push(chunk.constants[chunk.code[ip]])
+				vm.push(valueChunk.Constants[valueChunk.Code[ip]])
 				ip++
 			}
-		case OP_POP:
+		case chunk.OP_POP:
 			{
 				vm.pop()
 			}
-		case OP_ADD:
+		case chunk.OP_ADD:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
 				vm.push(vm.concatenate(a, b))
 			}
-		case OP_SUBTRACT:
+		case chunk.OP_SUBTRACT:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
 				vm.push(vm.subtract(a, b))
 			}
-		case OP_DIVIDE:
+		case chunk.OP_DIVIDE:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				vm.push(ValueFromFloat64(a.asNumber() / b.asNumber()))
+				vm.push(value.ValueFromFloat64(a.AsNumber() / b.AsNumber()))
 			}
-		case OP_MULTIPLY:
+		case chunk.OP_MULTIPLY:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				vm.push(ValueFromFloat64(a.asNumber() * b.asNumber()))
+				vm.push(value.ValueFromFloat64(a.AsNumber() * b.AsNumber()))
 			}
-		case OP_LESS_THAN:
+		case chunk.OP_LESS_THAN:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				if a.asNumber() < b.asNumber() {
-					vm.push(EncodeTrue())
+				if a.AsNumber() < b.AsNumber() {
+					vm.push(value.EncodeTrue())
 				} else {
-					vm.push(EncodeFalse())
+					vm.push(value.EncodeFalse())
 				}
 			}
-		case OP_LESS_THAN_EQUAL:
+		case chunk.OP_LESS_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				if a.asNumber() <= b.asNumber() {
-					vm.push(EncodeTrue())
+				if a.AsNumber() <= b.AsNumber() {
+					vm.push(value.EncodeTrue())
 				} else {
-					vm.push(EncodeFalse())
+					vm.push(value.EncodeFalse())
 				}
 			}
-		case OP_GREATER_THAN:
+		case chunk.OP_GREATER_THAN:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				if a.asNumber() > b.asNumber() {
-					vm.push(EncodeTrue())
+				if a.AsNumber() > b.AsNumber() {
+					vm.push(value.EncodeTrue())
 				} else {
-					vm.push(EncodeFalse())
+					vm.push(value.EncodeFalse())
 				}
 			}
-		case OP_GREATER_THAN_EQUAL:
+		case chunk.OP_GREATER_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				if a.asNumber() >= b.asNumber() {
-					vm.push(EncodeTrue())
+				if a.AsNumber() >= b.AsNumber() {
+					vm.push(value.EncodeTrue())
 				} else {
-					vm.push(EncodeFalse())
+					vm.push(value.EncodeFalse())
 				}
 			}
-		case OP_STRICT_EQUALS:
+		case chunk.OP_STRICT_EQUALS:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				bIsObject, bObj := b.getObject()
-				aIsObject, aObj := a.getObject()
+				bIsObject, bObjRegister := object.GetObject(b)
+				aIsObject, aObjRegister := object.GetObject(a)
 
 				if bIsObject && aIsObject {
-					if bObj.Type() == aObj.Type() {
+					if HEAP.GetObject(bObjRegister).Type() == HEAP.GetObject(aObjRegister).Type() {
 
 					} else {
-						vm.push(EncodeFalse())
+						vm.push(value.EncodeFalse())
 					}
 				}
 
 				if a == b {
-					vm.push(EncodeTrue())
+					vm.push(value.EncodeTrue())
 				} else {
-					vm.push(EncodeFalse())
+					vm.push(value.EncodeFalse())
 				}
 			}
-		case OP_JUMP_IF_FALSE:
+		case chunk.OP_JUMP_IF_FALSE:
 			{
-				value := vm.pop()
-				jump := int(chunk.code[ip+3]) | int(chunk.code[ip+2])<<8 | int(chunk.code[ip])<<16 | int(chunk.code[ip])<<24
+				v := vm.pop()
+				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip])<<16 | int(valueChunk.Code[ip])<<24
 
-				if !AsBoolean(value) {
+				if !value.AsBoolean(v) {
 					ip = jump
 				} else {
 					ip += 4
 				}
 			}
-		case OP_JUMP:
+		case chunk.OP_JUMP:
 			{
-				jump := int(chunk.code[ip+3]) | int(chunk.code[ip+2])<<8 | int(chunk.code[ip])<<16 | int(chunk.code[ip])<<24
+				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip])<<16 | int(valueChunk.Code[ip])<<24
 				ip = jump
 			}
-		case OP_DEFINE_GLOBAL:
+		case chunk.OP_DEFINE_GLOBAL:
 			{
 				variable := vm.pop()
 				vm.addGlobal(variable)
 			}
-		case OP_GET_GLOBAL:
+		case chunk.OP_GET_GLOBAL:
 			{
-				global := chunk.code[ip]
+				global := valueChunk.Code[ip]
 				vm.push(vm.getGlobal(int(global)))
 				ip++
 			}
-		case OP_SET_GLOBAL:
+		case chunk.OP_SET_GLOBAL:
 			{
-				global := chunk.code[ip]
+				global := valueChunk.Code[ip]
 				vm.globals[global] = vm.pop()
 				ip++
 			}
-		case OP_DEFINE_LOCAL:
+		case chunk.OP_DEFINE_LOCAL:
 			{
 				variable := vm.peek()
 				frame.addLocal(variable)
 			}
-		case OP_GET_LOCAL:
+		case chunk.OP_GET_LOCAL:
 			{
-				vm.push(frame.getLocal(int(chunk.code[ip])))
+				vm.push(frame.getLocal(int(valueChunk.Code[ip])))
 				ip++
 			}
-		case OP_SET_LOCAL:
+		case chunk.OP_SET_LOCAL:
 			{
-				frame.locals[chunk.code[ip]] = vm.pop()
+				frame.locals[valueChunk.Code[ip]] = vm.pop()
 				ip++
 			}
-		case OP_GET_UPVALUE:
-			{
-				vm.push(*frame.fn.upvalues[chunk.code[ip]].location)
-				ip++
-			}
-		case OP_SET_UPVALUE:
-			{
-				value := vm.pop()
-				frame.fn.upvalues[chunk.code[ip]].location = &value
-				ip++
-			}
-		case OP_DEFINE_OBJECT_MEMBER:
+		case chunk.OP_DEFINE_OBJECT_MEMBER:
 			{
 				member := vm.pop()
 				value := vm.pop()
 				hash := vm.peek()
 
-				_, hashObject := hash.getObject()
-				hashObject.(*ObjHash).SetMember(member.String(), value)
+				isObject, register := object.GetObject(hash)
+
+				if !isObject {
+					return fmt.Errorf("%v is not an object", hash)
+				}
+
+				hashObject := HEAP.GetObject(register)
+				hashObject.(*object.ObjHash).SetMember(vm.string(member), value)
 			}
-		case OP_GET_GLOBAL_OBJECT_MEMBER:
+		case chunk.OP_GET_GLOBAL_OBJECT_MEMBER:
 			{
-				global := int(chunk.code[ip])
-				member := chunk.constants[chunk.code[ip+1]]
+				global := int(valueChunk.Code[ip])
+				member := valueChunk.Constants[valueChunk.Code[ip+1]]
 
-				_, obj := vm.getGlobal(global).getObject()
+				_, obj := object.GetObject(vm.getGlobal(global))
 
-				value := obj.(*ObjHash).GetMember(member.String())
+				value := HEAP.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
 				vm.push(value)
 				ip += 2
 			}
-		case OP_GET_LOCAL_OBJECT_MEMBER:
+		case chunk.OP_GET_LOCAL_OBJECT_MEMBER:
 			{
-				slot := int(chunk.code[ip])
-				member := chunk.constants[chunk.code[ip+1]]
+				slot := int(valueChunk.Code[ip])
+				member := valueChunk.Constants[valueChunk.Code[ip+1]]
 				fmt.Printf("%d, %s\n", slot, member)
 
-				_, obj := frame.getLocal(slot).getObject()
+				_, obj := object.GetObject(frame.getLocal(slot))
 
-				value := obj.(*ObjHash).GetMember(member.String())
+				value := HEAP.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
 				vm.push(value)
 				ip += 2
 			}
-		case OP_PUSH_UNDEFINED:
+		case chunk.OP_PUSH_UNDEFINED:
 			{
-				vm.push(EncodedUndefined())
+				vm.push(value.EncodedUndefined())
 			}
-		case OP_CLOSURE:
-			{
-				closure := vm.pop()
-				_, obj := closure.getObject()
-
-				fn := obj.(*ObjFunction)
-				upvalueCount := chunk.code[ip]
-				fn.upvalues = make([]*ObjUpvalue, upvalueCount)
-				for i := 0; i < int(upvalueCount); i++ {
-					isLocalByte := chunk.code[ip+1]
-					slot := chunk.code[ip+2]
-					ip = ip + 2
-
-					if isLocalByte > 0 {
-						var prevUpvalue *ObjUpvalue
-						upvalue := vm.openUpvalues
-						local := &frame.locals[slot]
-						stackLocation := frame.stackStart + int(slot)
-
-						for upvalue != nil && upvalue.stackLocation > stackLocation {
-							prevUpvalue = upvalue
-							upvalue = upvalue.next
-						}
-
-						if upvalue != nil && upvalue.stackLocation == stackLocation {
-							fn.upvalues[i] = upvalue
-						} else {
-
-							newUpvalue := &ObjUpvalue{location: local, closed: EncodeNil(), next: nil, stackLocation: stackLocation}
-
-							if prevUpvalue == nil {
-								vm.openUpvalues = newUpvalue
-							} else {
-								prevUpvalue.next = newUpvalue
-							}
-							fn.upvalues[i] = newUpvalue
-						}
-
-					} else {
-						fn.upvalues[i] = frame.fn.upvalues[slot]
-					}
-				}
-				ip++
-			}
-		case OP_CALL:
+		case chunk.OP_CALL:
 			{
 				callee := vm.pop()
+				isObject, register := object.GetObject(callee)
 
-				if callee.isObject() {
-					_, obj := callee.getObject()
+				if isObject {
+					obj := HEAP.GetObject(register)
 					switch fn := obj.(type) {
-					case *ObjFunction:
+					case *object.ObjFunction:
 						{
 							vm.frames[vm.frameCount-1].locals = frame.locals
 
-							vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop, vm.stack[vm.stackTop-fn.arity:vm.stackTop], ip)
+							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity:vm.stackTop], ip)
 							vm.frameCount++
 
 							frame = vm.frames[vm.frameCount-1]
-							chunk = *frame.fn.chunk
+							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
 						}
-					case *Log:
+					case *object.Log:
 						{
 							arg := vm.pop()
 							fn.Log(arg)
-							vm.push(EncodedUndefined())
+							vm.push(value.EncodedUndefined())
 						}
-					case *Clock:
+					case *object.Clock:
 						{
 							vm.push(fn.Clock())
 						}
@@ -453,26 +414,20 @@ func (vm *VM) run() error {
 				}
 
 			}
-		case OP_RETURN:
+		case chunk.OP_RETURN:
 			{
 				ip = frame.returnIp
 				value := vm.pop()
 
-				for vm.openUpvalues != nil && vm.openUpvalues.stackLocation >= frame.stackStart {
-					upvalue := vm.openUpvalues
-					upvalue.Close()
-					vm.openUpvalues = upvalue.next
-				}
-
-				vm.stackTop -= max(len(frame.locals), frame.fn.arity)
+				vm.stackTop -= max(len(frame.locals), frame.fn.Arity)
 
 				vm.push(value)
 				vm.frameCount--
 
 				frame = vm.frames[vm.frameCount-1]
-				chunk = *frame.fn.chunk
+				valueChunk = *frame.fn.ValueChunk()
 			}
-		case OP_EOF:
+		case chunk.OP_EOF:
 			{
 				fmt.Printf("Thanks!\n")
 				return nil
@@ -495,9 +450,7 @@ func Interpret(source []byte) {
 		println()
 	}
 
-	main := NewFunction(MAIN_FN_NAME, 0)
-
-	err = Compile(ast, main)
+	main, err := compiler.Compile(ast)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)

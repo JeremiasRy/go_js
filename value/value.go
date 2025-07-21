@@ -1,8 +1,8 @@
-package vm
+package value
 
 import (
+	"go_js/chunk"
 	"math"
-	"strconv"
 )
 
 type Value uint64
@@ -19,15 +19,39 @@ const (
 	TAG_FALSE     Value = QNAN | 0x0000000000000004
 )
 
-func (v Value) isObject() bool {
-	return v&TAG_OBJ == TAG_OBJ
+type ValueChunk struct {
+	Code      []uint8
+	Constants []Value
 }
 
-func (v Value) getObject() (bool, Object) {
-	if v&TAG_OBJ == TAG_OBJ {
-		return true, HEAP.GetObject(v.getRegister())
+func NewChunk() *ValueChunk {
+	return &ValueChunk{
+		Code:      []uint8{},
+		Constants: []Value{},
 	}
-	return false, nil
+}
+
+func (c *ValueChunk) WriteConstant(v Value) uint8 {
+	arg := c.addConstant(v)
+	c.EmitBytes(chunk.OP_CONSTANT, arg)
+	return arg
+}
+
+func (c *ValueChunk) EmitByte(b uint8) {
+	c.Code = append(c.Code, b)
+}
+
+func (c *ValueChunk) EmitBytes(b ...uint8) {
+	c.Code = append(c.Code, b...)
+}
+
+func (c *ValueChunk) addConstant(v Value) uint8 {
+	c.Constants = append(c.Constants, v)
+	return uint8(len(c.Constants) - 1)
+}
+
+func (v Value) IsObject() bool {
+	return v&TAG_OBJ == TAG_OBJ
 }
 
 func (v Value) isNaN() bool {
@@ -35,11 +59,11 @@ func (v Value) isNaN() bool {
 		(v != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE)
 }
 
-func (v Value) asNumber() float64 {
+func (v Value) AsNumber() float64 {
 	return math.Float64frombits(uint64(v))
 }
 
-func (v Value) getRegister() uint32 {
+func (v Value) GetRegister() uint32 {
 	return uint32(v & ENCODE_MASK)
 }
 
@@ -82,22 +106,4 @@ func AsBoolean(v Value) bool {
 
 func isType(tag Value, v Value) bool {
 	return tag&v == tag
-}
-
-func (v Value) String() string {
-	isObj, obj := v.getObject()
-
-	if isObj {
-		return obj.String()
-	} else if isType(TAG_FALSE, v) {
-		return "False"
-	} else if isType(TAG_TRUE, v) {
-		return "True"
-	} else if isType(TAG_NIL, v) {
-		return "null"
-	} else if isType(TAG_UNDEFINED, v) {
-		return "undefined"
-	} else {
-		return strconv.FormatFloat(v.asNumber(), 'f', -1, 64)
-	}
 }

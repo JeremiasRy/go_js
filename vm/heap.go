@@ -1,13 +1,20 @@
 package vm
 
+import (
+	"go_js/object"
+	"go_js/value"
+)
+
 type Heap struct {
-	objects  []Object
+	objects  []object.Object
 	freeList []uint32
 
-	strings map[string]ObjString
+	strings map[string]object.ObjString
 }
 
-func (heap *Heap) Allocate(object Object) uint32 {
+var HEAP *Heap = NewHeap()
+
+func (heap *Heap) Allocate(object object.Object) uint32 {
 	if len(HEAP.freeList) > 0 {
 		register := HEAP.freeList[len(HEAP.freeList)-1]
 		HEAP.freeList = HEAP.freeList[:len(HEAP.freeList)-1]
@@ -19,21 +26,21 @@ func (heap *Heap) Allocate(object Object) uint32 {
 	return uint32(len(HEAP.objects) - 1)
 }
 
-func (heap *Heap) GetObject(register uint32) Object {
+func (heap *Heap) GetObject(register uint32) object.Object {
 	return HEAP.objects[register]
 }
 
-func (heap *Heap) AllocateString(str string) Value {
+func (heap *Heap) AllocateString(str string) value.Value {
 	if str, found := HEAP.strings[str]; found {
 		register := HEAP.Allocate(str)
-		return EncodeObject(register)
+		return value.EncodeObject(register)
 	}
 
-	register := HEAP.Allocate(ObjString(str))
-	return EncodeObject(register)
+	register := HEAP.Allocate(object.ObjString(str))
+	return value.EncodeObject(register)
 
 }
 
 func NewHeap() *Heap {
-	return &Heap{objects: []Object{}, freeList: []uint32{}, strings: map[string]ObjString{}}
+	return &Heap{objects: []object.Object{}, freeList: []uint32{}, strings: map[string]object.ObjString{}}
 }

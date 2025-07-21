@@ -1,9 +1,9 @@
-package vm
+package object
 
 import (
 	"fmt"
+	"go_js/value"
 	"math"
-	"strconv"
 	"time"
 )
 
@@ -20,31 +20,37 @@ const (
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
 
+func GetObject(v value.Value) (bool, uint32) {
+	if v&value.TAG_OBJ == value.TAG_OBJ {
+		return true, v.GetRegister()
+	}
+	return false, 0
+}
+
 type Object interface {
 	Type() ObjType
 	String() string
 }
 
 type ObjFunction struct {
-	name     string
-	chunk    *Chunk
-	arity    int
-	upvalues []*ObjUpvalue
+	name  string
+	chunk *value.ValueChunk
+	Arity int
 }
 
 func NewFunction(name string, arity int) *ObjFunction {
 	return &ObjFunction{
 		name:  name,
-		chunk: NewChunk(),
-		arity: arity,
+		chunk: value.NewChunk(),
+		Arity: arity,
 	}
 }
 
-func (ObjFunction) Type() ObjType {
+func (*ObjFunction) Type() ObjType {
 	return OBJ_FUNCTION
 }
 
-func (fn ObjFunction) String() string {
+func (fn *ObjFunction) String() string {
 	return "<fn " + fn.name + ">"
 }
 
@@ -52,16 +58,8 @@ func (fn *ObjFunction) Name() string {
 	return fn.name
 }
 
-type ObjUpvalue struct {
-	location      *Value
-	closed        Value
-	next          *ObjUpvalue
-	stackLocation int
-}
-
-func (upvalue *ObjUpvalue) Close() {
-	upvalue.closed = *upvalue.location
-	upvalue.location = &upvalue.closed
+func (fn *ObjFunction) ValueChunk() *value.ValueChunk {
+	return fn.chunk
 }
 
 type ObjString string
@@ -75,12 +73,12 @@ func (str ObjString) String() string {
 }
 
 type ObjHash struct {
-	values map[string]Value
+	values map[string]value.Value
 }
 
 func NewObjectHash() *ObjHash {
 	return &ObjHash{
-		values: map[string]Value{},
+		values: map[string]value.Value{},
 	}
 }
 
@@ -92,39 +90,16 @@ func (ObjHash) String() string {
 	return "[object Object]"
 }
 
-func (obj *ObjHash) GetMember(member string) Value {
+func (obj *ObjHash) GetMember(member string) value.Value {
 	if value, found := obj.values[member]; found {
 		return value
 	}
 
-	return EncodedUndefined()
+	return value.EncodedUndefined()
 }
 
-func (obj *ObjHash) SetMember(member string, value Value) {
+func (obj *ObjHash) SetMember(member string, value value.Value) {
 	obj.values[member] = value
-}
-
-type ObjHeapValue struct {
-	value *Value
-}
-
-func (ObjHeapValue) Type() ObjType {
-	return OBJ_HEAP_VALUE
-}
-
-func (objHeapValue ObjHeapValue) String() string {
-	v := objHeapValue.value
-	if isType(TAG_FALSE, *v) {
-		return "False"
-	} else if isType(TAG_TRUE, *v) {
-		return "True"
-	} else if isType(TAG_NIL, *v) {
-		return "null"
-	} else if isType(TAG_UNDEFINED, *v) {
-		return "undefined"
-	} else {
-		return strconv.FormatFloat(v.asNumber(), 'f', -1, 64)
-	}
 }
 
 type ObjNativeFn struct {
@@ -149,7 +124,7 @@ func NewLog() *Log {
 	return log
 }
 
-func (*Log) Log(value Value) {
+func (*Log) Log(value value.Value) {
 	fmt.Printf("%s\n", value)
 }
 
@@ -163,6 +138,6 @@ func NewClock() *Clock {
 	return clock
 }
 
-func (*Clock) Clock() Value {
-	return Value(math.Float64bits(float64(time.Now().UnixMilli())))
+func (*Clock) Clock() value.Value {
+	return value.Value(math.Float64bits(float64(time.Now().UnixMilli())))
 }
