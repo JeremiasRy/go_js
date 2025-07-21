@@ -2,7 +2,4 @@
 
 Make a JS runtime (not that the world needs another js runtime, I just want to make one)
 
-- Port acorn to go - Done, bugs may appear later, let's fix them as they appear
-- transpile AST -> bytecode 
-- build a VM to run this bytecode
-- try not to quit... 
+Currently trying straight up AST -> bytecode, but I think I'm going to do one pass before bytecode just to get all variables declared. Currently facing some troubles with my approach.

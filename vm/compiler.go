@@ -46,14 +46,20 @@ func (s *Scope) addVariable(name string, kind VarKind) uint8 {
 	return uint8(slot)
 }
 
-func (s *Scope) addUpValue(name string, local bool) uint8 {
+func (s *Scope) addUpValue(name string, local bool, index int) uint8 {
 	if variable, found := s.upvalues[name]; found {
 		return uint8(variable.slot)
 	}
 
 	slot := s.upvaluesCount
 	s.upvaluesCount++
-	s.upvalues[name] = &Upvalue{local, slot}
+	if local {
+		s.upvalues[name] = &Upvalue{local, index}
+	} else {
+		s.upvalues[name] = &Upvalue{local, slot}
+
+	}
+
 	return uint8(slot)
 }
 
@@ -63,13 +69,14 @@ func resolveUpvalue(scope *Scope, name string) (uint8, bool) {
 	}
 	if variable, found := scope.parent.locals[name]; found {
 		variable.captured = true
-		return scope.addUpValue(name, true), true
+
+		return scope.addUpValue(name, true, variable.slot), true
 	}
 
 	_, found := resolveUpvalue(scope.parent, name)
 
 	if found {
-		return scope.addUpValue(name, false), true
+		return scope.addUpValue(name, false, -1), true
 	}
 
 	return 0, false
@@ -180,7 +187,7 @@ func Compile(ast *parser.Node, main *ObjFunction) error {
 	defineConsole(main, globals)
 	defineClock(main, globals)
 
-	err := traverse(ast, main, nil, globals)
+	err := traverse(ast, main, nil, globals, false)
 
 	if err != nil {
 		return err
@@ -190,31 +197,31 @@ func Compile(ast *parser.Node, main *ObjFunction) error {
 	return nil
 }
 
-func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scope) error {
+func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scope, isAssign bool) error {
 	isMain := fn.Name() == MAIN_FN_NAME
 
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
 			for _, statement := range current.Body {
-				traverse(statement, fn, scope, globals)
+				traverse(statement, fn, scope, globals, isAssign)
 			}
 		}
 	case parser.NODE_EXPRESSION_STATEMENT:
 		{
-			traverse(current.Expression, fn, scope, globals)
+			traverse(current.Expression, fn, scope, globals, isAssign)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
 			for _, stmt := range current.Body {
-				traverse(stmt, fn, scope, globals)
+				traverse(stmt, fn, scope, globals, isAssign)
 			}
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
 
-			traverse(current.Left, fn, scope, globals)
-			traverse(current.Right, fn, scope, globals)
+			traverse(current.Left, fn, scope, globals, isAssign)
+			traverse(current.Right, fn, scope, globals, isAssign)
 
 			switch current.BinaryOperator {
 			case parser.PLUS:
@@ -239,11 +246,11 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_IF_STATEMENT:
 		{
-			traverse(current.Test, fn, scope, globals)
+			traverse(current.Test, fn, scope, globals, isAssign)
 			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 
 			start := len(fn.chunk.code)
-			traverse(current.Consequent, fn, scope, globals)
+			traverse(current.Consequent, fn, scope, globals, isAssign)
 
 			trueJumpStart := len(fn.chunk.code)
 			if current.Alternate != nil {
@@ -258,7 +265,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			fn.chunk.code[start-4] = uint8((jump >> 24))
 
 			if current.Alternate != nil {
-				traverse(current.Alternate, fn, scope, globals)
+				traverse(current.Alternate, fn, scope, globals, isAssign)
 				jump := len(fn.chunk.code)
 
 				fn.chunk.code[trueJumpStart-1] = uint8(jump & math.MaxUint8)
@@ -299,7 +306,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 					scope.addVariable(name, kind)
 				}
 
-				traverse(declaration.Initializer, fn, scope, globals)
+				traverse(declaration.Initializer, fn, scope, globals, true)
 
 				if isMain {
 					fn.chunk.EmitByte(OP_DEFINE_GLOBAL)
@@ -310,7 +317,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
-			traverse(current.Right, fn, scope, globals)
+			traverse(current.Right, fn, scope, globals, true)
 			name := current.Left.Name
 			op, arg, found := setVariable(name, scope, globals)
 
@@ -331,10 +338,6 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		{
 			op, arg, _ := getVariable(current.Name, scope, globals)
 			fn.chunk.EmitBytes(op, arg)
-
-			if op == OP_GET_UPVALUE {
-				fn.isClosure = true
-			}
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
@@ -343,7 +346,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 
 			fn.chunk.WriteConstant(EncodeObject(register))
 			for _, prop := range current.Properties {
-				traverse(prop.Value.(*parser.Node), fn, scope, globals)
+				traverse(prop.Value.(*parser.Node), fn, scope, globals, isAssign)
 				fn.chunk.WriteConstant(HEAP.AllocateString(prop.Key.Name))
 				fn.chunk.EmitByte(OP_DEFINE_OBJECT_MEMBER)
 			}
@@ -394,7 +397,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			for _, statement := range current.BodyNode.Body {
-				traverse(statement, function, scope, globals)
+				traverse(statement, function, scope, globals, isAssign)
 			}
 
 			if function.chunk.code[len(function.chunk.code)-1] != OP_RETURN {
@@ -402,8 +405,22 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 				function.chunk.EmitByte(OP_RETURN)
 			}
 
-			if function.isClosure {
-				fn.chunk.code = append(fn.chunk.code[:start], append([]uint8{OP_CONSTANT, slot, OP_CLOSURE}, fn.chunk.code[start:]...)...)
+			if FUNCTION_SCOPES[function.name].upvaluesCount > 0 {
+				closureChunk := []uint8{OP_CONSTANT, slot, OP_CLOSURE}
+				scope := FUNCTION_SCOPES[function.name]
+
+				closureChunk = append(closureChunk, uint8(scope.upvaluesCount))
+
+				for _, up := range scope.upvalues {
+					if up.local {
+						closureChunk = append(closureChunk, 1)
+					} else {
+						closureChunk = append(closureChunk, 0)
+					}
+					closureChunk = append(closureChunk, uint8(up.slot))
+				}
+
+				fn.chunk.code = append(fn.chunk.code[:start], append(closureChunk, fn.chunk.code[start:]...)...)
 			}
 		}
 		// For now just gonna treat them as the same, once we start binding 'this', etc... need to separate the implementations
@@ -428,11 +445,11 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			}
 
 			if current.IsExpression {
-				traverse(current.BodyNode, function, scope, globals)
+				traverse(current.BodyNode, function, scope, globals, isAssign)
 				function.chunk.EmitByte(OP_RETURN)
 			} else {
 				for _, statement := range current.BodyNode.Body {
-					traverse(statement, function, scope, globals)
+					traverse(statement, function, scope, globals, isAssign)
 				}
 			}
 			if function.chunk.code[len(function.chunk.code)-1] != OP_RETURN {
@@ -440,7 +457,7 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 				function.chunk.EmitByte(OP_RETURN)
 			}
 
-			if function.isClosure {
+			if FUNCTION_SCOPES[function.name].upvaluesCount > 0 {
 				closureChunk := []uint8{OP_CONSTANT, slot, OP_CLOSURE}
 				scope := FUNCTION_SCOPES[function.name]
 
@@ -461,33 +478,36 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 	case parser.NODE_CALL_EXPRESSION:
 		{
 			for _, arg := range current.Arguments {
-				traverse(arg, fn, scope, globals)
+				traverse(arg, fn, scope, globals, true)
 			}
 
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
 				op, arg, _ := getVariable(current.Callee.Name, scope, globals)
 				fn.chunk.EmitBytes(op, arg)
 			} else {
-				traverse(current.Callee, fn, scope, globals)
+				traverse(current.Callee, fn, scope, globals, isAssign)
 			}
 			fn.chunk.EmitByte(OP_CALL)
+			if !isAssign {
+				fn.chunk.EmitByte(OP_POP)
+			}
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
 			if current.Argument == nil {
 				fn.chunk.WriteConstant(EncodedUndefined())
 			} else {
-				traverse(current.Argument, fn, scope, globals)
+				traverse(current.Argument, fn, scope, globals, isAssign)
 			}
 			fn.chunk.EmitByte(OP_RETURN)
 		}
 	case parser.NODE_WHILE_STATEMENT:
 		{
 			loopStart := len(fn.chunk.code)
-			traverse(current.Test, fn, scope, globals)
+			traverse(current.Test, fn, scope, globals, isAssign)
 			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			start := len(fn.chunk.code)
-			traverse(current.BodyNode, fn, scope, globals)
+			traverse(current.BodyNode, fn, scope, globals, isAssign)
 			fn.chunk.EmitBytes(OP_JUMP, uint8(loopStart>>24), uint8(loopStart>>16), uint8(loopStart>>8), uint8(loopStart&math.MaxUint8))
 
 			jump := len(fn.chunk.code)
@@ -499,21 +519,21 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 		}
 	case parser.NODE_FOR_STATEMENT:
 		{
-			traverse(current.Initializer, fn, scope, globals)
+			traverse(current.Initializer, fn, scope, globals, isAssign)
 
 			testStart := len(fn.chunk.code)
-			traverse(current.Test, fn, scope, globals)
+			traverse(current.Test, fn, scope, globals, isAssign)
 			fn.chunk.EmitBytes(OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			conditionJump := len(fn.chunk.code)
 
 			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
 			bodyJump := len(fn.chunk.code)
 
-			traverse(current.Update, fn, scope, globals)
+			traverse(current.Update, fn, scope, globals, isAssign)
 			fn.chunk.EmitBytes(OP_POP, OP_JUMP, 0, 0, 0, 0)
 			bodyStart := len(fn.chunk.code)
 
-			traverse(current.BodyNode, fn, scope, globals)
+			traverse(current.BodyNode, fn, scope, globals, isAssign)
 			fn.chunk.EmitBytes(OP_JUMP, 0, 0, 0, 0)
 			end := len(fn.chunk.code)
 
@@ -542,10 +562,6 @@ func traverse(current *parser.Node, fn *ObjFunction, scope *Scope, globals *Scop
 			name := current.Argument.Name
 			opSet, arg, found := setVariable(name, scope, globals)
 			opGet, _, _ := getVariable(name, scope, globals)
-
-			if opGet == OP_GET_UPVALUE {
-				fn.isClosure = true
-			}
 
 			if !found {
 				panic("oh no")

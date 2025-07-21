@@ -26,12 +26,10 @@ type Object interface {
 }
 
 type ObjFunction struct {
-	name         string
-	chunk        *Chunk
-	arity        int
-	isClosure    bool
-	upvalues     []*ObjUpvalue
-	upvalueCount int
+	name     string
+	chunk    *Chunk
+	arity    int
+	upvalues []*ObjUpvalue
 }
 
 func NewFunction(name string, arity int) *ObjFunction {

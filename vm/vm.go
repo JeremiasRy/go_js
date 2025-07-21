@@ -36,7 +36,7 @@ func (cf *CallFrame) getLocal(index int) Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 var HEAP *Heap = NewHeap()
 
@@ -440,6 +440,7 @@ func (vm *VM) run() error {
 						{
 							arg := vm.pop()
 							fn.Log(arg)
+							vm.push(EncodedUndefined())
 						}
 					case *Clock:
 						{
@@ -459,8 +460,7 @@ func (vm *VM) run() error {
 
 				for vm.openUpvalues != nil && vm.openUpvalues.stackLocation >= frame.stackStart {
 					upvalue := vm.openUpvalues
-					upvalue.closed = *upvalue.location
-					upvalue.location = &upvalue.closed
+					upvalue.Close()
 					vm.openUpvalues = upvalue.next
 				}
 
