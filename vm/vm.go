@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/chunk"
 	"go_js/compiler"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
 	"go_js/value"
@@ -12,10 +13,9 @@ import (
 )
 
 type CallFrame struct {
-	fn         *object.ObjFunction
-	locals     []value.Value
-	stackStart int
-	returnIp   int
+	fn       *object.ObjFunction
+	locals   []value.Value
+	returnIp int
 }
 
 func NewCallFrame(fn *object.ObjFunction, locals []value.Value) *CallFrame {
@@ -79,9 +79,11 @@ func (vm *VM) pop() value.Value {
 	vm.stackTop--
 	return vm.stack[vm.stackTop]
 }
+
 func (vm *VM) addGlobal(v value.Value) {
 	vm.globals = append(vm.globals, v)
 }
+
 func (vm *VM) getGlobal(global int) value.Value {
 	return vm.globals[global]
 }
@@ -99,34 +101,34 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 	bIsObject, bRegister := object.GetObject(b)
 
 	if aIsObject && bIsObject {
-		aObj := HEAP.GetObject(aRegister)
-		bObj := HEAP.GetObject(bRegister)
+		aObj := heap.GetObject(aRegister)
+		bObj := heap.GetObject(bRegister)
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + bObj.(object.ObjString)
-			return HEAP.AllocateString(string(res))
+			return heap.Allocate(object.ObjString(string(res)))
 		} else {
 			// runtime error?
 		}
 	}
 
 	if aIsObject && !bIsObject {
-		aObj := HEAP.GetObject(aRegister)
+		aObj := heap.GetObject(aRegister)
 
 		if aObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + object.ObjString(vm.string(b))
 
-			return HEAP.AllocateString(string(res))
+			return heap.Allocate(object.ObjString(string(res)))
 		}
 	}
 
 	if !aIsObject && bIsObject {
-		bObj := HEAP.GetObject(bRegister)
+		bObj := heap.GetObject(bRegister)
 
 		if bObj.Type() == object.OBJ_STRING {
 			res := object.ObjString(vm.string(a)) + bObj.(object.ObjString)
 
-			return HEAP.AllocateString(string(res))
+			return heap.Allocate(object.ObjString(string(res)))
 		}
 	}
 
@@ -149,14 +151,7 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 
 func (vm *VM) run() error {
 	if DEBUG {
-		printFrame(vm.currentFramePointer())
-		for _, obj := range HEAP.objects {
-			if obj.Type() == object.OBJ_FUNCTION {
-				println(obj.String())
-				printChunk(obj.(*object.ObjFunction).ValueChunk())
-				println()
-			}
-		}
+		//
 	}
 	frame := vm.frames[vm.frameCount-1]
 	valueChunk := *frame.fn.ValueChunk()
@@ -168,22 +163,7 @@ func (vm *VM) run() error {
 		ip++
 
 		if DEBUG {
-			println("Current context: ", vm.currentFramePointer().fn.Name())
-			print("Stack: [ ")
-			for _, v := range vm.stack[:vm.stackTop] {
-				isObject, register := object.GetObject(v)
-
-				if isObject {
-					obj := HEAP.GetObject(register)
-					print(obj.String() + " | ")
-				} else {
-					// print(v.String() + " | ")
-				}
-
-			}
-			println("-top- ]")
-			println("Instsruction: ", OpcodeNames[code])
-			println("---")
+			//
 		}
 
 		switch code {
@@ -275,7 +255,7 @@ func (vm *VM) run() error {
 				aIsObject, aObjRegister := object.GetObject(a)
 
 				if bIsObject && aIsObject {
-					if HEAP.GetObject(bObjRegister).Type() == HEAP.GetObject(aObjRegister).Type() {
+					if heap.GetObject(bObjRegister).Type() == heap.GetObject(aObjRegister).Type() {
 
 					} else {
 						vm.push(value.EncodeFalse())
@@ -293,7 +273,7 @@ func (vm *VM) run() error {
 				v := vm.pop()
 				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip])<<16 | int(valueChunk.Code[ip])<<24
 
-				if !value.AsBoolean(v) {
+				if !v.AsBoolean() {
 					ip = jump
 				} else {
 					ip += 4
@@ -348,7 +328,7 @@ func (vm *VM) run() error {
 					return fmt.Errorf("%v is not an object", hash)
 				}
 
-				hashObject := HEAP.GetObject(register)
+				hashObject := heap.GetObject(register)
 				hashObject.(*object.ObjHash).SetMember(vm.string(member), value)
 			}
 		case chunk.OP_GET_GLOBAL_OBJECT_MEMBER:
@@ -358,7 +338,7 @@ func (vm *VM) run() error {
 
 				_, obj := object.GetObject(vm.getGlobal(global))
 
-				value := HEAP.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
 				vm.push(value)
 				ip += 2
 			}
@@ -370,7 +350,7 @@ func (vm *VM) run() error {
 
 				_, obj := object.GetObject(frame.getLocal(slot))
 
-				value := HEAP.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
 				vm.push(value)
 				ip += 2
 			}
@@ -384,7 +364,7 @@ func (vm *VM) run() error {
 				isObject, register := object.GetObject(callee)
 
 				if isObject {
-					obj := HEAP.GetObject(register)
+					obj := heap.GetObject(register)
 					switch fn := obj.(type) {
 					case *object.ObjFunction:
 						{
@@ -400,7 +380,7 @@ func (vm *VM) run() error {
 					case *object.Log:
 						{
 							arg := vm.pop()
-							fn.Log(arg)
+							vm.log(arg)
 							vm.push(value.EncodedUndefined())
 						}
 					case *object.Clock:
@@ -435,6 +415,10 @@ func (vm *VM) run() error {
 		}
 	}
 
+}
+
+func (vm *VM) log(arg value.Value) {
+	panic("unimplemented")
 }
 
 func Interpret(source []byte) {

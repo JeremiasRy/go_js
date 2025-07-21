@@ -124,10 +124,6 @@ func NewLog() *Log {
 	return log
 }
 
-func (*Log) Log(value value.Value) {
-	fmt.Printf("%s\n", value)
-}
-
 type Clock struct {
 	ObjNativeFn
 }
