@@ -47,13 +47,14 @@ type VM struct {
 	stack      []value.Value
 	stackTop   int
 
-	globals []value.Value
+	globals       []value.Value
+	heapVariables map[string]value.Value
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVariables: map[string]value.Value{}}
 }
 
 func (vm *VM) call(fn *object.ObjFunction, returnIp int) error {
@@ -194,12 +195,14 @@ func (vm *VM) run() error {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				// type checks required
 				vm.push(value.ValueFromFloat64(a.AsNumber() / b.AsNumber()))
 			}
 		case chunk.OP_MULTIPLY:
 			{
 				b := vm.pop()
 				a := vm.pop()
+				// type checks required
 				vm.push(value.ValueFromFloat64(a.AsNumber() * b.AsNumber()))
 			}
 		case chunk.OP_LESS_THAN:
