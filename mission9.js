@@ -1,7 +1,13 @@
-function hello(arg) {
-    console.log("hello")
+const a = 1
+
+function hello() {
+    const a = 2
+    const b = 2
+    console.log(hallo())
 }
+
 hallo()
+
 function hallo() {
-    console.log("hallo")
+    return "hallo"
 }

@@ -6,7 +6,7 @@ function counter() {
         count: () => count,
     }
 }
-
+/*
 const c1 = counter()
 
 c1.increment()
@@ -21,3 +21,4 @@ c2.increment()
 
 console.log("c1 count " + c1.count())
 console.log("c2 count " + c2.count())
+*/
