@@ -151,9 +151,6 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 }
 
 func (vm *VM) run() error {
-	if DEBUG {
-		//
-	}
 	frame := vm.frames[vm.frameCount-1]
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
@@ -161,11 +158,11 @@ func (vm *VM) run() error {
 	for {
 		//time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
-		ip++
-
 		if DEBUG {
-			//
+			PrintCode(code)
+			println()
 		}
+		ip++
 
 		switch code {
 		case chunk.OP_CONSTANT:

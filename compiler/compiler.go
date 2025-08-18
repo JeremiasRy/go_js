@@ -2,6 +2,8 @@ package compiler
 
 import (
 	"fmt"
+	"go_js/chunk"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
 )
@@ -95,6 +97,8 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0)
 	var symbolTable *SymbolTable = newSymbolTable(nil, FN)
 	prePass(ast, symbolTable, FN)
+	generateByteCode(ast, symbolTable, main)
+	main.ValueChunk().EmitByte(chunk.OP_EOF)
 
 	return main, nil
 }
@@ -175,6 +179,7 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 	case parser.NODE_IDENTIFIER:
 		variable, table := sTable.findVariable(current.Name)
 
+		// check that we found anything and if it's from a upper function scope
 		if table != nil && variable != nil && table != sTable && variable.scope != HEAP {
 			table.localCount--
 			variable.scope = HEAP
@@ -182,6 +187,28 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 	}
 }
 
-func generateByteCode() {
+func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object.ObjFunction) {
+	switch current.Type {
+	case parser.NODE_PROGRAM:
+		{
+			for _, variable := range symbolTable.vars {
+				if variable.type_ != FUNCTION {
+					continue
+				}
+
+				fnValue := heap.Allocate(variable.fn)
+				slot := fn.ValueChunk().WriteConstant(fnValue)
+
+				if uint8(variable.slot) != slot {
+					panic("things went south")
+				}
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+
+			}
+			for _, node := range current.Body {
+				generateByteCode(node, symbolTable, fn)
+			}
+		}
+	}
 
 }
