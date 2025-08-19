@@ -1,11 +1,13 @@
 package compiler
 
 import (
+	"cmp"
 	"fmt"
 	"go_js/chunk"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
+	"slices"
 )
 
 type VariableType uint8
@@ -96,6 +98,7 @@ func (st *SymbolTable) findVariable(name string) (*Variable, *SymbolTable) {
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0)
 	var symbolTable *SymbolTable = newSymbolTable(nil, FN)
+
 	prePass(ast, symbolTable, FN)
 	generateByteCode(ast, symbolTable, main)
 	main.ValueChunk().EmitByte(chunk.OP_EOF)
@@ -191,19 +194,26 @@ func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
+			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
-				if variable.type_ != FUNCTION {
-					continue
+				if variable.type_ == FUNCTION {
+					functions = append(functions, variable)
 				}
+			}
 
+			slices.SortFunc(functions, func(a *Variable, b *Variable) int {
+				return cmp.Compare(a.slot, b.slot)
+			})
+
+			for _, variable := range functions {
 				fnValue := heap.Allocate(variable.fn)
 				slot := fn.ValueChunk().WriteConstant(fnValue)
 
 				if uint8(variable.slot) != slot {
 					panic("things went south")
 				}
-				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 			}
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)

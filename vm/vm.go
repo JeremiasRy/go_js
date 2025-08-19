@@ -155,13 +155,13 @@ func (vm *VM) run() error {
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
 
+	if DEBUG {
+		PrintChunk(valueChunk)
+	}
+
 	for {
 		//time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
-		if DEBUG {
-			PrintCode(code)
-			println()
-		}
 		ip++
 
 		switch code {
