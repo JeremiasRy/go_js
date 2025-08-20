@@ -7,6 +7,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
+	"go_js/value"
 	"slices"
 )
 
@@ -168,7 +169,7 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 
 		for _, declaration := range current.Declarations {
 			name := declaration.Identifier.Name
-			sTable.addVariable(name, LOCAL, kind, nil)
+			sTable.addVariable(name, GLOBAL, kind, nil)
 		}
 
 	case parser.NODE_RETURN_STATEMENT:
@@ -217,6 +218,29 @@ func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object
 			}
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
+			}
+		}
+	case parser.NODE_VARIABLE_DECLARATION:
+		{
+			for _, declaration := range current.Declarations {
+				generateByteCode(declaration, symbolTable, fn)
+			}
+		}
+	case parser.NODE_VARIABLE_DECLARATOR:
+		{
+			name := current.Identifier.Name
+			if _, found := symbolTable.vars[name]; found {
+				generateByteCode(current.Initializer, symbolTable, fn)
+			}
+		}
+	case parser.NODE_LITERAL:
+		{
+			switch v := current.Value.(type) {
+			case float64:
+				{
+					slot := fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
+					fmt.Printf("slot: %d\n", slot)
+				}
 			}
 		}
 	}
