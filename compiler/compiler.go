@@ -27,13 +27,6 @@ const (
 	GLOBAL
 )
 
-type TableScope uint8
-
-const (
-	FN TableScope = iota
-	BLOCK
-)
-
 type Variable struct {
 	scope VariableScope
 	type_ VariableType
@@ -45,30 +38,26 @@ type Variables map[string]*Variable
 
 type SymbolTable struct {
 	parent      *SymbolTable
-	next        *SymbolTable
-	tableScope  TableScope
+	tableScope  VariableScope
 	vars        Variables
 	globalCount int
 	localCount  int
 }
 
-func newSymbolTable(parent *SymbolTable, tableScope TableScope) *SymbolTable {
-	new := &SymbolTable{parent: parent, next: nil, tableScope: tableScope, vars: map[string]*Variable{}, globalCount: -1, localCount: -1}
-	if parent != nil {
-		parent.next = new
-	}
+func newSymbolTable(parent *SymbolTable, tableScope VariableScope) *SymbolTable {
+	new := &SymbolTable{parent: parent, tableScope: tableScope, vars: map[string]*Variable{}, globalCount: -1, localCount: -1}
 
 	return new
 }
 
-func (st *SymbolTable) addVariable(name string, scope VariableScope, type_ VariableType, fn *object.ObjFunction) {
+func (st *SymbolTable) addVariable(name string, type_ VariableType, fn *object.ObjFunction) {
 	if _, found := st.vars[name]; found {
 		fmt.Printf("WARN: Already found variable %s from symbol table\n", name)
 		return
 	}
-	variable := &Variable{scope: scope, type_: type_, slot: -1, fn: fn}
+	variable := &Variable{scope: st.tableScope, type_: type_, slot: -1, fn: fn}
 
-	switch scope {
+	switch st.tableScope {
 	case LOCAL:
 		st.localCount++
 		variable.slot = st.localCount
@@ -76,8 +65,6 @@ func (st *SymbolTable) addVariable(name string, scope VariableScope, type_ Varia
 	case GLOBAL:
 		st.globalCount++
 		variable.slot = st.globalCount
-		st.vars[name] = variable
-	case HEAP:
 		st.vars[name] = variable
 	}
 }
@@ -98,16 +85,16 @@ func (st *SymbolTable) findVariable(name string) (*Variable, *SymbolTable) {
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0)
-	var symbolTable *SymbolTable = newSymbolTable(nil, FN)
+	var symbolTable *SymbolTable = newSymbolTable(nil, GLOBAL)
 
-	prePass(ast, symbolTable, FN)
+	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
 	main.ValueChunk().EmitByte(chunk.OP_EOF)
 
 	return main, nil
 }
 
-func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
+func prePass(current *parser.Node, sTable *SymbolTable) {
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 
@@ -117,12 +104,12 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 				name := node.Identifier.Name
 				arity := len(node.Arguments)
 
-				sTable.addVariable(name, GLOBAL, FUNCTION, object.NewFunction(name, arity))
+				sTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
 			}
 		}
 
 		for _, node := range current.Body {
-			prePass(node, sTable, tableScope)
+			prePass(node, sTable)
 		}
 
 	case parser.NODE_FUNCTION_DECLARATION:
@@ -130,15 +117,15 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 			if fnVar.type_ != FUNCTION {
 				panic("should be a function we are declaring")
 			}
-			sTable := newSymbolTable(sTable, tableScope)
-			prePass(current.BodyNode, sTable, FN)
+			sTable := newSymbolTable(sTable, LOCAL)
+			prePass(current.BodyNode, sTable)
 		} else {
 			panic("extreme failure to hoist function declaration")
 		}
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
-		sTable := newSymbolTable(sTable, tableScope)
-		prePass(current.BodyNode, sTable, FN)
+		sTable := newSymbolTable(sTable, LOCAL)
+		prePass(current.BodyNode, sTable)
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
@@ -148,12 +135,12 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 					name := node.Identifier.Name
 					arity := len(node.Arguments)
 
-					sTable.addVariable(name, LOCAL, FUNCTION, object.NewFunction(name, arity))
+					sTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
 				}
 			}
 
 			for _, node := range current.Body {
-				prePass(node, sTable, tableScope)
+				prePass(node, sTable)
 			}
 		}
 
@@ -169,17 +156,17 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 
 		for _, declaration := range current.Declarations {
 			name := declaration.Identifier.Name
-			sTable.addVariable(name, GLOBAL, kind, nil)
+			sTable.addVariable(name, kind, nil)
 		}
 
 	case parser.NODE_RETURN_STATEMENT:
-		prePass(current.Argument, sTable, tableScope)
+		prePass(current.Argument, sTable)
 	case parser.NODE_OBJECT_EXPRESSION:
 		for _, node := range current.Properties {
-			prePass(node, sTable, tableScope)
+			prePass(node, sTable)
 		}
 	case parser.NODE_PROPERTY:
-		prePass(current.Value.(*parser.Node), sTable, tableScope)
+		prePass(current.Value.(*parser.Node), sTable)
 	case parser.NODE_IDENTIFIER:
 		variable, table := sTable.findVariable(current.Name)
 
@@ -192,6 +179,7 @@ func prePass(current *parser.Node, sTable *SymbolTable, tableScope TableScope) {
 }
 
 func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object.ObjFunction) {
+	isMain := fn.Name() == object.MAIN_FN_NAME
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
@@ -229,8 +217,21 @@ func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
 			name := current.Identifier.Name
-			if _, found := symbolTable.vars[name]; found {
+			if variable, found := symbolTable.vars[name]; found {
 				generateByteCode(current.Initializer, symbolTable, fn)
+
+				// check that our slots match
+				if variable.slot != int(fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1]) {
+					panic("failure in pre pass")
+				}
+
+				if isMain {
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+
+				}
+
 			}
 		}
 	case parser.NODE_LITERAL:
@@ -238,8 +239,7 @@ func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object
 			switch v := current.Value.(type) {
 			case float64:
 				{
-					slot := fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
-					fmt.Printf("slot: %d\n", slot)
+					fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
 				}
 			}
 		}
