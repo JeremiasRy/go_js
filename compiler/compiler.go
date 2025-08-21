@@ -35,62 +35,84 @@ type Variable struct {
 }
 
 type Variables map[string]*Variable
-
-// NEXT TASK: we need next table for code generation
-type SymbolTable struct {
-	prev         *SymbolTable
-	next         *SymbolTable
-	tableScope   VariableScope
-	vars         Variables
-	varCount     int
-	currentBlock int
-	blocks       []Variables
+type BlockScope struct {
+	parent *BlockScope
+	vars   Variables
 }
 
-func newSymbolTable(parent *SymbolTable, tableScope VariableScope) *SymbolTable {
-	new := &SymbolTable{prev: parent, tableScope: tableScope, vars: Variables{}, varCount: -1, currentBlock: -1, blocks: []Variables{}}
+// NEXT TASK: we need next table for code generation
+type FunctionScope struct {
+	prev       *FunctionScope
+	next       *FunctionScope
+	tableScope VariableScope
+	vars       Variables
+	varCount   int
+
+	block *BlockScope
+}
+
+var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
+
+func newBlockScope(parent *BlockScope) *BlockScope {
+	return &BlockScope{vars: Variables{}, parent: parent}
+}
+
+func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
+	new := &FunctionScope{prev: parent, tableScope: tableScope, vars: Variables{}, varCount: -1, block: nil}
 
 	if parent != nil {
-
 		parent.next = new
 	}
 
 	return new
 }
 
-func (st *SymbolTable) addVariable(name string, type_ VariableType, fn *object.ObjFunction) {
+func (fs *FunctionScope) enterScope(node *parser.Node) {
+	if b, found := BLOCK_SCOPES[node]; found {
+		fs.block = b
+	} else {
+		panic("no block scope found for ast node")
+	}
+}
+
+func (fs *FunctionScope) exitScope() {
+	fs.block = nil
+}
+
+func (fs *FunctionScope) addVariable(name string, type_ VariableType, fn *object.ObjFunction) {
 	var mapToAddTo Variables
 
-	if st.currentBlock >= 0 {
-		mapToAddTo = st.blocks[st.currentBlock]
+	if fs.block != nil {
+		mapToAddTo = fs.block.vars
 	} else {
-		mapToAddTo = st.vars
+		mapToAddTo = fs.vars
 	}
+
 	if _, found := mapToAddTo[name]; found {
 		fmt.Printf("WARN: Already found variable %s from scope\n", name)
 		return
 	}
-	variable := &Variable{scope: st.tableScope, type_: type_, slot: -1, fn: fn}
+	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn}
 
-	st.varCount++
-	variable.slot = st.varCount
+	fs.varCount++
+	variable.slot = fs.varCount
 	mapToAddTo[name] = variable
 }
 
-func (st *SymbolTable) findVariable(name string) (*Variable, *SymbolTable) {
-	current := st
+func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
+	current := fs
 
 	for current != nil {
-		if current.currentBlock >= 0 {
-			blockIndex := st.currentBlock
+		block := fs.block
 
-			for blockIndex >= 0 {
-				if variable, found := current.blocks[blockIndex][name]; found {
-					return variable, current
-				}
-				blockIndex--
+		// check that are we in a block statement
+		for block != nil {
+			if variable, found := block.vars[name]; found {
+				return variable, current
 			}
+			block = block.parent
 		}
+
 		if variable, found := current.vars[name]; found {
 			return variable, current
 		}
@@ -101,22 +123,9 @@ func (st *SymbolTable) findVariable(name string) (*Variable, *SymbolTable) {
 	return nil, nil
 }
 
-func (st *SymbolTable) newBlock() {
-	st.currentBlock++
-	st.blocks = append(st.blocks, Variables{})
-}
-
-func (st *SymbolTable) enterBlock() {
-	st.currentBlock++
-}
-
-func (st *SymbolTable) exitBlock() {
-	st.currentBlock--
-}
-
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0)
-	var symbolTable *SymbolTable = newSymbolTable(nil, GLOBAL)
+	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
@@ -125,7 +134,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	return main, nil
 }
 
-func prePass(current *parser.Node, symbolTable *SymbolTable) {
+func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 
@@ -146,7 +155,8 @@ func prePass(current *parser.Node, symbolTable *SymbolTable) {
 	case parser.NODE_FUNCTION_DECLARATION:
 		if _, found := symbolTable.vars[current.Identifier.Name]; found {
 
-			symbolTable := newSymbolTable(symbolTable, LOCAL)
+			symbolTable := newFunctionScope(symbolTable, LOCAL)
+			println("creating next sym table")
 			for _, node := range current.BodyNode.Body {
 				prePass(node, symbolTable)
 			}
@@ -155,7 +165,7 @@ func prePass(current *parser.Node, symbolTable *SymbolTable) {
 		}
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
-		sTable := newSymbolTable(symbolTable, LOCAL)
+		symbolTable := newFunctionScope(symbolTable, LOCAL)
 
 		// hoist function declarations
 		for _, node := range current.BodyNode.Body {
@@ -163,21 +173,22 @@ func prePass(current *parser.Node, symbolTable *SymbolTable) {
 				name := node.Identifier.Name
 				arity := len(node.Arguments)
 
-				sTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
+				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
 			}
 		}
 
 		for _, node := range current.BodyNode.Body {
-			prePass(node, sTable)
+			prePass(node, symbolTable)
 		}
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			symbolTable.newBlock()
+			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
+			symbolTable.enterScope(current)
 			for _, node := range current.Body {
 				prePass(node, symbolTable)
 			}
-			symbolTable.exitBlock()
+			symbolTable.exitScope()
 		}
 
 	case parser.NODE_VARIABLE_DECLARATION:
@@ -214,7 +225,7 @@ func prePass(current *parser.Node, symbolTable *SymbolTable) {
 	}
 }
 
-func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object.ObjFunction) {
+func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *object.ObjFunction) {
 	isMain := fn.Name() == object.MAIN_FN_NAME
 	switch current.Type {
 	case parser.NODE_PROGRAM:
@@ -247,18 +258,17 @@ func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
 			nextFn, _ := symbolTable.findVariable(current.Identifier.Name)
+			symbolTable = symbolTable.next
 			for _, node := range current.BodyNode.Body {
-				symbolTable = symbolTable.next
 				generateByteCode(node, symbolTable, nextFn.fn)
 			}
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			symbolTable.enterBlock()
+			symbolTable.enterScope(current)
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
-			symbolTable.exitBlock()
 		}
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
@@ -270,6 +280,7 @@ func generateByteCode(current *parser.Node, symbolTable *SymbolTable, fn *object
 		{
 			name := current.Identifier.Name
 			variable, _ := symbolTable.findVariable(name)
+			fmt.Printf("name: %s, slot: %d\n", name, variable.slot)
 			if variable != nil {
 				generateByteCode(current.Initializer, symbolTable, fn)
 
