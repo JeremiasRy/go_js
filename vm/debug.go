@@ -3,6 +3,8 @@ package vm
 import (
 	"fmt"
 	"go_js/chunk"
+	"go_js/heap"
+	"go_js/object"
 	"go_js/value"
 )
 
@@ -49,26 +51,70 @@ var opNames = map[uint8]string{
 }
 
 func PrintChunk(c value.ValueChunk) {
-	ip := 0
+	println("--DEBUG BYTECODE--\n")
+	println("<MAIN PROGRAM>")
+	printFunction(c.Code)
+	println()
+
+	for _, value := range c.Constants {
+		if value.IsObject() {
+			obj := heap.GetObject(value.GetRegister())
+
+			switch f := obj.(type) {
+			case *object.ObjFunction:
+				{
+					fmt.Printf("<fn %s>\n", f.Name())
+					printFunction(f.ValueChunk().Code)
+				}
+			}
+		}
+	}
 	println("--DEBUG BYTECODE--")
+}
+
+func printFunction(opCode []uint8) {
+	ip := 0
 	for {
-		code := c.Code[ip]
+		if ip >= int(len(opCode)) {
+			return
+		}
+		code := opCode[ip]
 		switch code {
 		case chunk.OP_CONSTANT:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 				ip++
-				fmt.Printf("%04d | %d \n", ip*4, c.Code[ip])
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
+		case chunk.OP_GET_GLOBAL:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_DEFINE_LOCAL:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			}
+		case chunk.OP_GET_LOCAL:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_PUSH_UNDEFINED:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			}
 		case chunk.OP_EOF:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				println("--DEBUG BYTECODE--")
+
 				return
 			}
 		}

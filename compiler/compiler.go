@@ -42,8 +42,7 @@ type BlockScope struct {
 
 // NEXT TASK: we need next table for code generation
 type FunctionScope struct {
-	prev       *FunctionScope
-	next       *FunctionScope
+	parent     *FunctionScope
 	tableScope VariableScope
 	vars       Variables
 	varCount   int
@@ -52,22 +51,17 @@ type FunctionScope struct {
 }
 
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
+var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
 
 func newBlockScope(parent *BlockScope) *BlockScope {
 	return &BlockScope{vars: Variables{}, parent: parent}
 }
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
-	new := &FunctionScope{prev: parent, tableScope: tableScope, vars: Variables{}, varCount: -1, block: nil}
-
-	if parent != nil {
-		parent.next = new
-	}
-
-	return new
+	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, varCount: -1, block: nil}
 }
 
-func (fs *FunctionScope) enterScope(node *parser.Node) {
+func (fs *FunctionScope) enterBlockScope(node *parser.Node) {
 	if b, found := BLOCK_SCOPES[node]; found {
 		fs.block = b
 	} else {
@@ -76,7 +70,7 @@ func (fs *FunctionScope) enterScope(node *parser.Node) {
 }
 
 func (fs *FunctionScope) exitScope() {
-	fs.block = nil
+	fs.block = fs.block.parent
 }
 
 func (fs *FunctionScope) addVariable(name string, type_ VariableType, fn *object.ObjFunction) {
@@ -102,22 +96,22 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, fn *object
 func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 	current := fs
 
-	for current != nil {
-		block := fs.block
+	// check that are we in a block statement
+	block := fs.block
 
-		// check that are we in a block statement
-		for block != nil {
-			if variable, found := block.vars[name]; found {
-				return variable, current
-			}
-			block = block.parent
+	for block != nil {
+		if variable, found := block.vars[name]; found {
+			return variable, current
 		}
+		block = block.parent
+	}
 
+	for current != nil {
 		if variable, found := current.vars[name]; found {
 			return variable, current
 		}
 
-		current = current.prev
+		current = current.parent
 	}
 
 	return nil, nil
@@ -156,7 +150,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		if _, found := symbolTable.vars[current.Identifier.Name]; found {
 
 			symbolTable := newFunctionScope(symbolTable, LOCAL)
-			println("creating next sym table")
+			FUNCTION_SCOPES[current] = symbolTable
 			for _, node := range current.BodyNode.Body {
 				prePass(node, symbolTable)
 			}
@@ -166,6 +160,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
+		FUNCTION_SCOPES[current] = symbolTable
 
 		// hoist function declarations
 		for _, node := range current.BodyNode.Body {
@@ -184,7 +179,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_BLOCK_STATEMENT:
 		{
 			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
-			symbolTable.enterScope(current)
+			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				prePass(node, symbolTable)
 			}
@@ -226,7 +221,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 }
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *object.ObjFunction) {
-	isMain := fn.Name() == object.MAIN_FN_NAME
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
@@ -258,17 +252,44 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
 			nextFn, _ := symbolTable.findVariable(current.Identifier.Name)
-			symbolTable = symbolTable.next
+			symbolTable = FUNCTION_SCOPES[current]
+
+			fn = nextFn.fn
+
+			// hoisting...
+			functions := []*Variable{}
+			for _, variable := range symbolTable.vars {
+				if variable.type_ == FUNCTION {
+					functions = append(functions, variable)
+				}
+			}
+
+			slices.SortFunc(functions, func(a *Variable, b *Variable) int {
+				return cmp.Compare(a.slot, b.slot)
+			})
+
+			for _, variable := range functions {
+				fnValue := heap.Allocate(variable.fn)
+				slot := fn.ValueChunk().WriteConstant(fnValue)
+
+				if uint8(variable.slot) != slot {
+					panic("things went south")
+				}
+
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			}
+
 			for _, node := range current.BodyNode.Body {
-				generateByteCode(node, symbolTable, nextFn.fn)
+				generateByteCode(node, symbolTable, fn)
 			}
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			symbolTable.enterScope(current)
+			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+			symbolTable.exitScope()
 		}
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
@@ -276,27 +297,33 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				generateByteCode(declaration, symbolTable, fn)
 			}
 		}
+	case parser.NODE_CALL_EXPRESSION:
+		{
+			for _, node := range current.Arguments {
+				generateByteCode(node, symbolTable, fn)
+			}
+		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
 			name := current.Identifier.Name
 			variable, _ := symbolTable.findVariable(name)
-			fmt.Printf("name: %s, slot: %d\n", name, variable.slot)
 			if variable != nil {
 				generateByteCode(current.Initializer, symbolTable, fn)
 
-				// check that our slots match
-				if variable.slot != int(fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1]) {
-					panic("failure in pre pass")
-				}
-
-				if isMain {
+				switch variable.scope {
+				case GLOBAL:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
-				} else {
+				case LOCAL:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-
+				case HEAP:
+					//
 				}
 
 			}
+		}
+	case parser.NODE_EXPRESSION_STATEMENT:
+		{
+			generateByteCode(current.Expression, symbolTable, fn)
 		}
 	case parser.NODE_LITERAL:
 		{
@@ -306,6 +333,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 					fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
 				}
 			}
+		}
+	case parser.NODE_IDENTIFIER:
+		{
+			variable, _ := symbolTable.findVariable(current.Name)
+			if variable == nil {
+				println("didnt find ", current.Name)
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+				return
+			}
+
+			switch variable.scope {
+			case GLOBAL:
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(variable.slot))
+			case LOCAL:
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
+			case HEAP:
+				//
+			}
+
 		}
 	}
 
