@@ -76,6 +76,7 @@ func printFunction(opCode []uint8) {
 	ip := 0
 	for {
 		if ip >= int(len(opCode)) {
+			println()
 			return
 		}
 		code := opCode[ip]
@@ -107,6 +108,26 @@ func printFunction(opCode []uint8) {
 				ip++
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			}
+		case chunk.OP_GET_GLOBAL_OBJECT_MEMBER:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_GET_LOCAL_OBJECT_MEMBER:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_CALL:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			}
 		case chunk.OP_PUSH_UNDEFINED:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
@@ -114,7 +135,6 @@ func printFunction(opCode []uint8) {
 		case chunk.OP_EOF:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-
 				return
 			}
 		}

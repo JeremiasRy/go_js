@@ -11,9 +11,13 @@ function hello() {
         }
         {
             const e = 4
-            console.log(d)
-            const a = console.log(c)
             console.log(b)
         }
     }
 }
+
+function hallo() {
+    console.log("ok")
+}
+
+hello()

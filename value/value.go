@@ -33,7 +33,7 @@ func NewChunk() *ValueChunk {
 }
 
 func (c *ValueChunk) WriteConstant(v Value) uint8 {
-	arg := c.addConstant(v)
+	arg := c.AddConstant(v)
 	c.EmitBytes(chunk.OP_CONSTANT, arg)
 	return arg
 }
@@ -46,7 +46,7 @@ func (c *ValueChunk) EmitBytes(b ...uint8) {
 	c.Code = append(c.Code, b...)
 }
 
-func (c *ValueChunk) addConstant(v Value) uint8 {
+func (c *ValueChunk) AddConstant(v Value) uint8 {
 	c.Constants = append(c.Constants, v)
 	return uint8(len(c.Constants) - 1)
 }

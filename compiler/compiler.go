@@ -117,14 +117,26 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 	return nil, nil
 }
 
+func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
+	console := object.NewObjectHash()
+	global := heap.Allocate(console)
+	log := heap.Allocate(object.NewLog())
+	console.SetMember("log", log)
+	symbolTable.addVariable("console", CONST, nil)
+
+	main.ValueChunk().WriteConstant(global)
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
-
+	defineConsole(main, symbolTable)
 	prePass(ast, symbolTable)
-	generateByteCode(ast, symbolTable, main)
-	main.ValueChunk().EmitByte(chunk.OP_EOF)
 
+	generateByteCode(ast, symbolTable, main)
+
+	main.ValueChunk().EmitByte(chunk.OP_EOF)
 	return main, nil
 }
 
@@ -237,12 +249,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 
 			for _, variable := range functions {
 				fnValue := heap.Allocate(variable.fn)
-				slot := fn.ValueChunk().WriteConstant(fnValue)
 
-				if uint8(variable.slot) != slot {
-					panic("things went south")
-				}
-
+				fn.ValueChunk().WriteConstant(fnValue)
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 			}
 			for _, node := range current.Body {
@@ -302,6 +310,26 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
+			generateByteCode(current.Callee, symbolTable, fn)
+
+			fn.ValueChunk().EmitByte(chunk.OP_CALL)
+		}
+	case parser.NODE_MEMBER_EXPRESSION:
+		{
+			variable, _ := symbolTable.findVariable(current.Object.Name)
+			member := heap.Allocate(object.ObjString(current.Property.Name))
+			memberSlot := fn.ValueChunk().AddConstant(member)
+
+			var op uint8
+
+			switch variable.scope {
+			case LOCAL:
+				op = chunk.OP_GET_LOCAL_OBJECT_MEMBER
+			case GLOBAL:
+				op = chunk.OP_GET_GLOBAL_OBJECT_MEMBER
+			}
+
+			fn.ValueChunk().EmitBytes(op, uint8(variable.slot), memberSlot)
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{

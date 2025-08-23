@@ -164,6 +164,10 @@ func (vm *VM) run() error {
 		code := valueChunk.Code[ip]
 		ip++
 
+		if DEBUG {
+			println(opNames[code])
+		}
+
 		switch code {
 		case chunk.OP_CONSTANT:
 			{
@@ -338,7 +342,7 @@ func (vm *VM) run() error {
 
 				_, obj := object.GetObject(vm.getGlobal(global))
 
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(member.String())
 				vm.push(value)
 				ip += 2
 			}
@@ -346,7 +350,6 @@ func (vm *VM) run() error {
 			{
 				slot := int(valueChunk.Code[ip])
 				member := valueChunk.Constants[valueChunk.Code[ip+1]]
-				fmt.Printf("%d, %s\n", slot, member)
 
 				_, obj := object.GetObject(frame.getLocal(slot))
 
@@ -381,7 +384,6 @@ func (vm *VM) run() error {
 						{
 							arg := vm.pop()
 							vm.log(arg)
-							vm.push(value.EncodedUndefined())
 						}
 					case *object.Clock:
 						{
