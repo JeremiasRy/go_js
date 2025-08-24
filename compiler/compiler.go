@@ -290,6 +290,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+			fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{

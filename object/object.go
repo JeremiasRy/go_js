@@ -86,8 +86,8 @@ func (ObjHash) Type() ObjType {
 	return OBJ_HASH
 }
 
-func (ObjHash) String() string {
-	return "[object Object]"
+func (oh ObjHash) String() string {
+	return fmt.Sprintf("%v", oh.values)
 }
 
 func (obj *ObjHash) GetMember(member string) value.Value {

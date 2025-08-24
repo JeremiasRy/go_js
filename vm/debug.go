@@ -132,6 +132,10 @@ func printFunction(opCode []uint8) {
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
+		case chunk.OP_RETURN:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			}
 		case chunk.OP_EOF:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
@@ -140,4 +144,12 @@ func printFunction(opCode []uint8) {
 		}
 		ip++
 	}
+}
+
+func printStack(stack []value.Value) {
+	print("[")
+	for _, val := range stack {
+		fmt.Printf("%v | ", val)
+	}
+	println("]")
 }

@@ -16,8 +16,8 @@ const (
 	TAG_OBJ       Value = QNAN | SIGN
 	TAG_NIL       Value = QNAN | 0x0000000000000001
 	TAG_UNDEFINED Value = QNAN | 0x0000000000000002
-	TAG_TRUE      Value = QNAN | 0x0000000000000003
-	TAG_FALSE     Value = QNAN | 0x0000000000000004
+	TAG_TRUE      Value = QNAN | 0x2000000000000
+	TAG_FALSE     Value = QNAN | 0x1000000000000
 )
 
 type ValueChunk struct {
@@ -111,16 +111,16 @@ func (v Value) AsBoolean() bool {
 
 func (v Value) String() string {
 	if v.IsBoolean() {
-		return fmt.Sprintf("<%v>\n", v.AsBoolean())
-	} else if v.isNaN() {
-		return "<NaN>"
+		return fmt.Sprintf("%v", v.AsBoolean())
 	} else if v.IsObject() {
-		return fmt.Sprintf("<Object %d", v.GetRegister())
+		return fmt.Sprintf("<Object %d>", v.GetRegister())
+	} else if v.isNaN() {
+		return "NaN"
 	} else if v.isType(TAG_UNDEFINED) {
-		return "<undefined>"
+		return "undefined"
 	} else if v.isType(TAG_NIL) {
-		return "<null>"
+		return "null"
 	} else {
-		return fmt.Sprintf("<%v>", v.AsNumber())
+		return fmt.Sprintf("%v", v.AsNumber())
 	}
 }

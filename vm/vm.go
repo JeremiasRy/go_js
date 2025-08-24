@@ -165,7 +165,9 @@ func (vm *VM) run() error {
 		ip++
 
 		if DEBUG {
+			printStack(vm.stack[0:vm.stackTop])
 			println(opNames[code])
+			println()
 		}
 
 		switch code {
@@ -341,8 +343,9 @@ func (vm *VM) run() error {
 				member := valueChunk.Constants[valueChunk.Code[ip+1]]
 
 				_, obj := object.GetObject(vm.getGlobal(global))
+				_, str := object.GetObject(member)
 
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(member.String())
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(heap.GetObject(str).String())
 				vm.push(value)
 				ip += 2
 			}
@@ -420,7 +423,7 @@ func (vm *VM) run() error {
 }
 
 func (vm *VM) log(arg value.Value) {
-	panic("unimplemented")
+	fmt.Printf("%v\n", arg)
 }
 
 func Interpret(source []byte) {
