@@ -3,6 +3,7 @@ package object
 import (
 	"fmt"
 	"go_js/value"
+
 	"math"
 	"time"
 )

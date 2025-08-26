@@ -107,7 +107,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + bObj.(object.ObjString)
-			return heap.Allocate(object.ObjString(string(res)))
+			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		} else {
 			// runtime error?
 		}
@@ -119,7 +119,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		if aObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + object.ObjString(vm.string(b))
 
-			return heap.Allocate(object.ObjString(string(res)))
+			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		}
 	}
 
@@ -129,7 +129,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		if bObj.Type() == object.OBJ_STRING {
 			res := object.ObjString(vm.string(a)) + bObj.(object.ObjString)
 
-			return heap.Allocate(object.ObjString(string(res)))
+			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		}
 	}
 
@@ -167,7 +167,6 @@ func (vm *VM) run() error {
 		if DEBUG {
 			printStack(vm.stack[0:vm.stackTop])
 			println(opNames[code])
-			println()
 		}
 
 		switch code {

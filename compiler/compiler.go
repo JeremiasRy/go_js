@@ -121,10 +121,10 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := object.NewObjectHash()
 	global := heap.Allocate(console)
 	log := heap.Allocate(object.NewLog())
-	console.SetMember("log", log)
+	console.SetMember("log", value.EncodeObject(log))
 	symbolTable.addVariable("console", CONST, nil)
 
-	main.ValueChunk().WriteConstant(global)
+	main.ValueChunk().WriteConstant(value.EncodeObject(global))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
@@ -250,7 +250,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, variable := range functions {
 				fnValue := heap.Allocate(variable.fn)
 
-				fn.ValueChunk().WriteConstant(fnValue)
+				fn.ValueChunk().WriteConstant(value.EncodeObject(fnValue))
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 			}
 			for _, node := range current.Body {
@@ -278,7 +278,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 
 			for _, variable := range functions {
 				fnValue := heap.Allocate(variable.fn)
-				slot := fn.ValueChunk().WriteConstant(fnValue)
+				slot := fn.ValueChunk().WriteConstant(value.EncodeObject(fnValue))
 
 				if uint8(variable.slot) != slot {
 					panic("things went south")
@@ -318,8 +318,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			variable, _ := symbolTable.findVariable(current.Object.Name)
-			member := heap.Allocate(object.ObjString(current.Property.Name))
-			memberSlot := fn.ValueChunk().AddConstant(member)
+			member := heap.AllocateString(object.ObjString(current.Property.Name))
+			memberSlot := fn.ValueChunk().AddConstant(value.EncodeObject(member))
 
 			var op uint8
 

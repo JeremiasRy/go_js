@@ -68,8 +68,8 @@ func (v Value) GetRegister() uint32 {
 	return uint32(v & ENCODE_MASK)
 }
 
-func EncodeObject(register uint32) Value {
-	return TAG_OBJ | Value(register)
+func EncodeObject(handle uint32) Value {
+	return TAG_OBJ | Value(handle)
 }
 
 func EncodeNil() Value {
