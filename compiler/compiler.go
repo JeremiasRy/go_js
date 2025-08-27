@@ -148,7 +148,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, node := range current.Body {
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
-				arity := len(node.Arguments)
+				arity := len(node.Params)
 
 				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
 			}
@@ -163,6 +163,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 			symbolTable := newFunctionScope(symbolTable, LOCAL)
 			FUNCTION_SCOPES[current] = symbolTable
+
+			for _, param := range current.Params {
+				symbolTable.addVariable(param.Name, LET, nil)
+			}
+
 			for _, node := range current.BodyNode.Body {
 				prePass(node, symbolTable)
 			}
@@ -353,6 +358,22 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 	case parser.NODE_EXPRESSION_STATEMENT:
 		{
 			generateByteCode(current.Expression, symbolTable, fn)
+		}
+	case parser.NODE_IF_STATEMENT:
+		{
+			generateByteCode(current.Test, symbolTable, fn)
+		}
+	case parser.NODE_BINARY_EXPRESSION:
+		{
+			generateByteCode(current.Left, symbolTable, fn)
+			generateByteCode(current.Right, symbolTable, fn)
+			println(current.BinaryOperator)
+			switch current.BinaryOperator {
+			case parser.LESS_THAN_EQUAL:
+				{
+					fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN_EQUAL)
+				}
+			}
 		}
 	case parser.NODE_LITERAL:
 		{

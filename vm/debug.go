@@ -88,6 +88,10 @@ func printFunction(opCode []uint8) {
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 
 			}
+		case chunk.OP_LESS_THAN_EQUAL:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
