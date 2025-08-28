@@ -1,7 +1,6 @@
 package value
 
 import (
-	"fmt"
 	"go_js/chunk"
 	"math"
 )
@@ -64,7 +63,7 @@ func (v Value) IsObject() bool {
 	return v&TAG_OBJ == TAG_OBJ
 }
 
-func (v Value) isNaN() bool {
+func (v Value) IsNaN() bool {
 	return (v&STANDARD_NAN == STANDARD_NAN) &&
 		(v != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE)
 }
@@ -109,27 +108,11 @@ func (v Value) IsBoolean() bool {
 	return (TAG_TRUE&v == TAG_TRUE) || (TAG_FALSE&v == TAG_FALSE)
 }
 
-func (v Value) isType(tag Value) bool {
+func (v Value) IsType(tag Value) bool {
 	return tag&v == tag
 }
 
 // TODO extend this to handle 'falsy' values: nill, undefined, "", 0, 1, etc...
 func (v Value) AsBoolean() bool {
 	return TAG_TRUE&v == TAG_TRUE
-}
-
-func (v Value) String() string {
-	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsObject() {
-		return fmt.Sprintf("<Object %d>", v.GetRegister())
-	} else if v.isNaN() {
-		return "NaN"
-	} else if v.isType(TAG_UNDEFINED) {
-		return "undefined"
-	} else if v.isType(TAG_NIL) {
-		return "null"
-	} else {
-		return fmt.Sprintf("%f", v.AsNumber())
-	}
 }

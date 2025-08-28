@@ -88,6 +88,18 @@ func printFunction(opCode []uint8) {
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
+		case chunk.OP_LESS_THAN:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_GREATER_THAN_EQUAL:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_GREATER_THAN:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_SUBTRACT:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
@@ -165,7 +177,7 @@ func printFunction(opCode []uint8) {
 func printStack(stack []value.Value) {
 	print("[")
 	for _, val := range stack {
-		fmt.Printf("%v | ", val)
+		fmt.Printf("%s | ", String(val))
 	}
 	println("]")
 }

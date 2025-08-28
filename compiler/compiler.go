@@ -237,6 +237,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_IF_STATEMENT:
 		prePass(current.Test, symbolTable)
 		prePass(current.Consequent, symbolTable)
+		prePass(current.Alternate, symbolTable)
 	}
 }
 
@@ -371,12 +372,22 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			generateByteCode(current.Consequent, symbolTable, fn)
 
 			fn.ValueChunk().PatchJump(uint32(jumpStart))
+
+			if current.Alternate != nil {
+				generateByteCode(current.Alternate, symbolTable, fn)
+			}
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
 			generateByteCode(current.Left, symbolTable, fn)
 			generateByteCode(current.Right, symbolTable, fn)
 			switch current.BinaryOperator {
+			case parser.LESS_THAN:
+				fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN)
+			case parser.GREATER_THAN:
+				fn.ValueChunk().EmitByte(chunk.OP_GREATER_THAN)
+			case parser.GREATER_THAN_EQUAL:
+				fn.ValueChunk().EmitByte(chunk.OP_GREATER_THAN_EQUAL)
 			case parser.LESS_THAN_EQUAL:
 				fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN_EQUAL)
 			case parser.MINUS:
@@ -392,6 +403,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			case float64:
 				{
 					fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
+				}
+			case []byte:
+				{
+					handle := heap.AllocateString(object.ObjString(v))
+					fn.ValueChunk().WriteConstant(value.EncodeObject(handle))
 				}
 			}
 		}

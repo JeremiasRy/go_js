@@ -39,7 +39,7 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 type VM struct {
 	frames     []CallFrame
@@ -87,10 +87,6 @@ func (vm *VM) addGlobal(v value.Value) {
 
 func (vm *VM) getGlobal(global int) value.Value {
 	return vm.globals[global]
-}
-
-func (vm *VM) currentFramePointer() *CallFrame {
-	return &vm.frames[vm.frameCount-1]
 }
 
 func (vm *VM) string(v value.Value) string {
@@ -148,6 +144,22 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	}
 
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
+}
+
+func String(v value.Value) string {
+	if v.IsBoolean() {
+		return fmt.Sprintf("%v", v.AsBoolean())
+	} else if v.IsObject() {
+		return fmt.Sprintf(`"%s"`, heap.GetObject(v.GetRegister()).String())
+	} else if v.IsNaN() {
+		return "NaN"
+	} else if v.IsType(value.TAG_UNDEFINED) {
+		return "undefined"
+	} else if v.IsType(value.TAG_NIL) {
+		return "null"
+	} else {
+		return fmt.Sprintf("%f", v.AsNumber())
+	}
 }
 
 func (vm *VM) run() error {
@@ -422,7 +434,7 @@ func (vm *VM) run() error {
 }
 
 func (vm *VM) log(arg value.Value) {
-	fmt.Printf("%s\n", arg)
+	fmt.Printf("%s\n", String(arg))
 }
 
 func Interpret(source []byte) {
