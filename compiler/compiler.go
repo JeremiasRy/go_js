@@ -234,6 +234,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			table.varCount--
 			variable.scope = HEAP
 		}
+	case parser.NODE_IF_STATEMENT:
+		prePass(current.Test, symbolTable)
+		prePass(current.Consequent, symbolTable)
 	}
 }
 
@@ -258,6 +261,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				fn.ValueChunk().WriteConstant(value.EncodeObject(fnValue))
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 			}
+
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
@@ -269,7 +273,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 
 			fn = nextFn.fn
 
-			// hoisting...
 			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
 				if variable.type_ == FUNCTION {
@@ -295,7 +298,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
-			fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
@@ -362,17 +364,26 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 	case parser.NODE_IF_STATEMENT:
 		{
 			generateByteCode(current.Test, symbolTable, fn)
+
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+			jumpStart := len(fn.ValueChunk().Code) - 4
+
+			generateByteCode(current.Consequent, symbolTable, fn)
+
+			fn.ValueChunk().PatchJump(uint32(jumpStart))
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
 			generateByteCode(current.Left, symbolTable, fn)
 			generateByteCode(current.Right, symbolTable, fn)
-			println(current.BinaryOperator)
 			switch current.BinaryOperator {
 			case parser.LESS_THAN_EQUAL:
-				{
-					fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN_EQUAL)
-				}
+				fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN_EQUAL)
+			case parser.MINUS:
+				fn.ValueChunk().EmitByte(chunk.OP_SUBTRACT)
+			case parser.PLUS:
+				fn.ValueChunk().EmitByte(chunk.OP_ADD)
+
 			}
 		}
 	case parser.NODE_LITERAL:
@@ -383,6 +394,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 					fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
 				}
 			}
+		}
+	case parser.NODE_RETURN_STATEMENT:
+		{
+			generateByteCode(current.Argument, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_RETURN)
 		}
 	case parser.NODE_IDENTIFIER:
 		{
@@ -404,5 +420,4 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 
 		}
 	}
-
 }

@@ -38,17 +38,26 @@ func (c *ValueChunk) WriteConstant(v Value) uint8 {
 	return arg
 }
 
+func (c *ValueChunk) AddConstant(v Value) uint8 {
+	c.Constants = append(c.Constants, v)
+	return uint8(len(c.Constants) - 1)
+}
+
+func (c *ValueChunk) PatchJump(jumpStart uint32) {
+	current := uint32(len(c.Code))
+
+	c.Code[jumpStart+3] = uint8(current & math.MaxUint8)
+	c.Code[jumpStart+2] = uint8(current>>8) & math.MaxUint8
+	c.Code[jumpStart+1] = uint8(current>>16) & math.MaxUint8
+	c.Code[jumpStart] = uint8(current>>24) & math.MaxUint8
+}
+
 func (c *ValueChunk) EmitByte(b uint8) {
 	c.Code = append(c.Code, b)
 }
 
 func (c *ValueChunk) EmitBytes(b ...uint8) {
 	c.Code = append(c.Code, b...)
-}
-
-func (c *ValueChunk) AddConstant(v Value) uint8 {
-	c.Constants = append(c.Constants, v)
-	return uint8(len(c.Constants) - 1)
 }
 
 func (v Value) IsObject() bool {
@@ -121,6 +130,6 @@ func (v Value) String() string {
 	} else if v.isType(TAG_NIL) {
 		return "null"
 	} else {
-		return fmt.Sprintf("%v", v.AsNumber())
+		return fmt.Sprintf("%f", v.AsNumber())
 	}
 }

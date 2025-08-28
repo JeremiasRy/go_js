@@ -39,7 +39,7 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 type VM struct {
 	frames     []CallFrame
@@ -276,7 +276,7 @@ func (vm *VM) run() error {
 		case chunk.OP_JUMP_IF_FALSE:
 			{
 				v := vm.pop()
-				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip])<<16 | int(valueChunk.Code[ip])<<24
+				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 
 				if !v.AsBoolean() {
 					ip = jump
@@ -286,7 +286,7 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_JUMP:
 			{
-				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip])<<16 | int(valueChunk.Code[ip])<<24
+				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip = jump
 			}
 		case chunk.OP_DEFINE_GLOBAL:
@@ -422,7 +422,7 @@ func (vm *VM) run() error {
 }
 
 func (vm *VM) log(arg value.Value) {
-	fmt.Printf("%v\n", arg)
+	fmt.Printf("%s\n", arg)
 }
 
 func Interpret(source []byte) {

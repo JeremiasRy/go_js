@@ -15,8 +15,6 @@ var opNames = map[uint8]string{
 	chunk.OP_SUBTRACT:                 "OP_SUBTRACT",
 	chunk.OP_MULTIPLY:                 "OP_MULTIPLY",
 	chunk.OP_DIVIDE:                   "OP_DIVIDE",
-	chunk.OP_NILL:                     "OP_NILL",
-	chunk.OP_UNDEFINED:                "OP_UNDEFINED",
 	chunk.OP_TRUE:                     "OP_TRUE",
 	chunk.OP_FALSE:                    "OP_FALSE",
 	chunk.OP_EQUALS:                   "OP_EQUALS",
@@ -37,8 +35,6 @@ var opNames = map[uint8]string{
 	chunk.OP_CLOSURE:                  "OP_CLOSURE",
 	chunk.OP_CALL:                     "OP_CALL",
 	chunk.OP_RETURN:                   "OP_RETURN",
-	chunk.OP_END_OF_FN:                "OP_END_OF_FN",
-	chunk.OP_TEMPLATE_LITERAL:         "OP_TEMPLATE_LITERAL",
 	chunk.OP_JUMP_IF_FALSE:            "OP_JUMP_IF_FALSE",
 	chunk.OP_JUMP:                     "OP_JUMP",
 	chunk.OP_DEFINE_OBJECT_MEMBER:     "OP_DEFINE_OBJECT_MEMBER",
@@ -92,6 +88,14 @@ func printFunction(opCode []uint8) {
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
+		case chunk.OP_SUBTRACT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_ADD:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
@@ -131,6 +135,14 @@ func printFunction(opCode []uint8) {
 		case chunk.OP_CALL:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			}
+		case chunk.OP_JUMP_IF_FALSE:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+				ip += 3
+				fmt.Printf("%04d | %d\n", ip*4, jump*4)
 			}
 		case chunk.OP_PUSH_UNDEFINED:
 			{
