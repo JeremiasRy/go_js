@@ -39,7 +39,7 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 type VM struct {
 	frames     []CallFrame
@@ -172,7 +172,7 @@ func (vm *VM) run() error {
 	}
 
 	for {
-		//time.Sleep(time.Millisecond * 100)
+		// time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
 		ip++
 
@@ -190,6 +190,10 @@ func (vm *VM) run() error {
 		case chunk.OP_POP:
 			{
 				vm.pop()
+			}
+		case chunk.OP_PUSH_CURRENT:
+			{
+				vm.push(vm.peek())
 			}
 		case chunk.OP_ADD:
 			{
@@ -398,6 +402,7 @@ func (vm *VM) run() error {
 						{
 							arg := vm.pop()
 							vm.log(arg)
+							vm.push(value.EncodedUndefined())
 						}
 					case *object.Clock:
 						{

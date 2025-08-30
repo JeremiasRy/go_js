@@ -69,7 +69,7 @@ func (fs *FunctionScope) enterBlockScope(node *parser.Node) {
 	}
 }
 
-func (fs *FunctionScope) exitScope() {
+func (fs *FunctionScope) exitBlockScope() {
 	fs.block = fs.block.parent
 }
 
@@ -140,106 +140,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	return main, nil
 }
 
-func prePass(current *parser.Node, symbolTable *FunctionScope) {
-	switch current.Type {
-	case parser.NODE_PROGRAM:
-
-		// hoist function declarations
-		for _, node := range current.Body {
-			if node.Type == parser.NODE_FUNCTION_DECLARATION {
-				name := node.Identifier.Name
-				arity := len(node.Params)
-
-				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
-			}
-		}
-
-		for _, node := range current.Body {
-			prePass(node, symbolTable)
-		}
-
-	case parser.NODE_FUNCTION_DECLARATION:
-		if _, found := symbolTable.vars[current.Identifier.Name]; found {
-
-			symbolTable := newFunctionScope(symbolTable, LOCAL)
-			FUNCTION_SCOPES[current] = symbolTable
-
-			for _, param := range current.Params {
-				symbolTable.addVariable(param.Name, LET, nil)
-			}
-
-			for _, node := range current.BodyNode.Body {
-				prePass(node, symbolTable)
-			}
-		} else {
-			panic("extreme failure to hoist function declaration")
-		}
-
-	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
-		symbolTable := newFunctionScope(symbolTable, LOCAL)
-		FUNCTION_SCOPES[current] = symbolTable
-
-		// hoist function declarations
-		for _, node := range current.BodyNode.Body {
-			if node.Type == parser.NODE_FUNCTION_DECLARATION {
-				name := node.Identifier.Name
-				arity := len(node.Arguments)
-
-				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity))
-			}
-		}
-
-		for _, node := range current.BodyNode.Body {
-			prePass(node, symbolTable)
-		}
-
-	case parser.NODE_BLOCK_STATEMENT:
-		{
-			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
-			symbolTable.enterBlockScope(current)
-			for _, node := range current.Body {
-				prePass(node, symbolTable)
-			}
-			symbolTable.exitScope()
-		}
-
-	case parser.NODE_VARIABLE_DECLARATION:
-		var kind VariableType
-
-		switch current.Kind {
-		case parser.KIND_DECLARATION_CONST:
-			kind = CONST
-		case parser.KIND_DECLARATION_LET:
-			kind = LET
-		}
-
-		for _, declaration := range current.Declarations {
-			name := declaration.Identifier.Name
-			symbolTable.addVariable(name, kind, nil)
-		}
-
-	case parser.NODE_RETURN_STATEMENT:
-		prePass(current.Argument, symbolTable)
-	case parser.NODE_OBJECT_EXPRESSION:
-		for _, node := range current.Properties {
-			prePass(node, symbolTable)
-		}
-	case parser.NODE_PROPERTY:
-		prePass(current.Value.(*parser.Node), symbolTable)
-	case parser.NODE_IDENTIFIER:
-		variable, table := symbolTable.findVariable(current.Name)
-
-		// check that we found anything and if it's from a upper function scope
-		if table != nil && variable != nil && table != symbolTable && variable.scope != HEAP {
-			table.varCount--
-			variable.scope = HEAP
-		}
-	case parser.NODE_IF_STATEMENT:
-		prePass(current.Test, symbolTable)
-		prePass(current.Consequent, symbolTable)
-		prePass(current.Alternate, symbolTable)
-	}
-}
+var popStack = true
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *object.ObjFunction) {
 	switch current.Type {
@@ -299,6 +200,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+
+				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+			}
 		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
@@ -306,12 +211,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
-			symbolTable.exitScope()
+			symbolTable.exitBlockScope()
 		}
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
 			for _, declaration := range current.Declarations {
+				popStack = false
 				generateByteCode(declaration, symbolTable, fn)
+				popStack = true
 			}
 		}
 	case parser.NODE_CALL_EXPRESSION:
@@ -322,6 +229,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			generateByteCode(current.Callee, symbolTable, fn)
 
 			fn.ValueChunk().EmitByte(chunk.OP_CALL)
+
+			if popStack {
+				fn.ValueChunk().EmitByte(chunk.OP_POP)
+			}
 		}
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
@@ -371,7 +282,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 
 			generateByteCode(current.Consequent, symbolTable, fn)
 
-			fn.ValueChunk().PatchJump(uint32(jumpStart))
+			fn.ValueChunk().PatchJump(uint32(jumpStart), uint32(len(fn.ValueChunk().Code)))
 
 			if current.Alternate != nil {
 				generateByteCode(current.Alternate, symbolTable, fn)
@@ -379,8 +290,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
+			popStack = false
 			generateByteCode(current.Left, symbolTable, fn)
 			generateByteCode(current.Right, symbolTable, fn)
+			popStack = true
+
 			switch current.BinaryOperator {
 			case parser.LESS_THAN:
 				fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN)
@@ -413,14 +327,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
-			generateByteCode(current.Argument, symbolTable, fn)
+			if current.Argument == nil {
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+			} else {
+				generateByteCode(current.Argument, symbolTable, fn)
+			}
+
 			fn.ValueChunk().EmitByte(chunk.OP_RETURN)
 		}
 	case parser.NODE_IDENTIFIER:
 		{
 			variable, _ := symbolTable.findVariable(current.Name)
 			if variable == nil {
-				println("didnt find ", current.Name)
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 				return
 			}
@@ -433,7 +351,67 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			case HEAP:
 				//
 			}
+		}
+	case parser.NODE_WHILE_STATEMENT:
+		{
+			testStart := uint32(len(fn.ValueChunk().Code))
+			generateByteCode(current.Test, symbolTable, fn)
 
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
+
+			generateByteCode(current.BodyNode, symbolTable, fn)
+
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+
+			fn.ValueChunk().PatchJump(uint32(len(fn.ValueChunk().Code)-4), testStart)
+			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
+		}
+	case parser.NODE_UPDATE_EXPRESSION:
+		{
+			variable, _ := symbolTable.findVariable(current.Argument.Name)
+
+			switch variable.scope {
+			case GLOBAL:
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(variable.slot))
+			case LOCAL:
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
+			case HEAP:
+				//
+			}
+
+			if !current.Prefix {
+				if !popStack {
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+				}
+				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(1))
+				switch current.UpdateOperator {
+				case parser.DECREMENT:
+					fn.ValueChunk().EmitByte(chunk.OP_SUBTRACT)
+				case parser.INCREMENT:
+					fn.ValueChunk().EmitByte(chunk.OP_ADD)
+				}
+			} else {
+				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(1))
+				switch current.UnaryOperator {
+				case "--":
+					fn.ValueChunk().EmitByte(chunk.OP_SUBTRACT)
+				case "++":
+					fn.ValueChunk().EmitByte(chunk.OP_ADD)
+				}
+				if !popStack {
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+				}
+			}
+
+			switch variable.scope {
+			case GLOBAL:
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+			case LOCAL:
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
+			case HEAP:
+				//
+			}
 		}
 	}
 }

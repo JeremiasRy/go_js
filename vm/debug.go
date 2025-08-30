@@ -11,6 +11,7 @@ import (
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:                 "OP_CONSTANT",
 	chunk.OP_POP:                      "OP_POP",
+	chunk.OP_PUSH_CURRENT:             "OP_PUSH_CURRENT",
 	chunk.OP_ADD:                      "OP_ADD",
 	chunk.OP_SUBTRACT:                 "OP_SUBTRACT",
 	chunk.OP_MULTIPLY:                 "OP_MULTIPLY",
@@ -84,6 +85,14 @@ func printFunction(opCode []uint8) {
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 
 			}
+		case chunk.OP_PUSH_CURRENT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_POP:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_LESS_THAN_EQUAL:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
@@ -118,11 +127,23 @@ func printFunction(opCode []uint8) {
 				ip++
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			}
+		case chunk.OP_SET_GLOBAL:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
 		case chunk.OP_DEFINE_LOCAL:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
 		case chunk.OP_GET_LOCAL:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_SET_LOCAL:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 				ip++
@@ -149,6 +170,14 @@ func printFunction(opCode []uint8) {
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
 		case chunk.OP_JUMP_IF_FALSE:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+				ip += 3
+				fmt.Printf("%04d | %d\n", ip*4, jump*4)
+			}
+		case chunk.OP_JUMP:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 				ip++

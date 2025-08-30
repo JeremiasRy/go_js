@@ -3,6 +3,7 @@ package chunk
 const (
 	OP_CONSTANT uint8 = iota
 	OP_POP
+	OP_PUSH_CURRENT
 	OP_ADD
 	OP_SUBTRACT
 	OP_MULTIPLY
