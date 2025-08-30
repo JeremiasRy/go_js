@@ -5,7 +5,7 @@ function looper1() {
 }
 
 function looper2() {
-    for (let i = 15000; i >= 5; i--) {
+    for (let i = 15000; i >= 15; i--) {
         console.log(i)
     }
 }

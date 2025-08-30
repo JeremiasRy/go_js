@@ -255,6 +255,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 		{
 			name := current.Identifier.Name
 			variable, _ := symbolTable.findVariable(name)
+
 			if variable != nil {
 				generateByteCode(current.Initializer, symbolTable, fn)
 
@@ -384,6 +385,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				if !popStack {
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
 				}
+
 				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(1))
 				switch current.UpdateOperator {
 				case parser.DECREMENT:
@@ -399,6 +401,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				case "++":
 					fn.ValueChunk().EmitByte(chunk.OP_ADD)
 				}
+
 				if !popStack {
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
 				}
@@ -412,6 +415,27 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			case HEAP:
 				//
 			}
+		}
+	case parser.NODE_FOR_STATEMENT:
+		{
+			symbolTable.enterBlockScope(current.BodyNode)
+			generateByteCode(current.Initializer, symbolTable, fn)
+
+			testStart := len(fn.ValueChunk().Code)
+			generateByteCode(current.Test, symbolTable, fn)
+
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
+			symbolTable.exitBlockScope()
+
+			generateByteCode(current.BodyNode, symbolTable, fn)
+			symbolTable.enterBlockScope(current.BodyNode)
+			generateByteCode(current.Update, symbolTable, fn)
+			symbolTable.exitBlockScope()
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+			fn.ValueChunk().PatchJump(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
+
+			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
 		}
 	}
 }
