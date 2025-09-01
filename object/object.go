@@ -83,11 +83,11 @@ func NewObjectHash() *ObjHash {
 	}
 }
 
-func (ObjHash) Type() ObjType {
+func (*ObjHash) Type() ObjType {
 	return OBJ_HASH
 }
 
-func (oh ObjHash) String() string {
+func (oh *ObjHash) String() string {
 	return fmt.Sprintf("%v", oh.values)
 }
 
@@ -101,6 +101,33 @@ func (obj *ObjHash) GetMember(member string) value.Value {
 
 func (obj *ObjHash) SetMember(member string, value value.Value) {
 	obj.values[member] = value
+}
+
+type ObjArr struct {
+	ObjHash
+	items            []value.Value
+	initialized      bool
+	initializedCount int
+}
+
+func NewObjArr(length int) *ObjArr {
+	arrObj := &ObjArr{items: make([]value.Value, length), initializedCount: 0, initialized: false}
+	arrObj.values = map[string]value.Value{}
+	arrObj.values["length"] = value.ValueFromFloat64(float64(length))
+
+	return arrObj
+}
+
+func (arrObj *ObjArr) PushElement(v value.Value) {
+	if !arrObj.initialized {
+		arrObj.items[arrObj.initializedCount] = v
+		arrObj.initializedCount++
+
+		arrObj.initialized = arrObj.initializedCount >= int(arrObj.values["length"].AsNumber())-1
+		return
+	}
+	arrObj.items = append(arrObj.items, v)
+	arrObj.values["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
 }
 
 type ObjNativeFn struct {

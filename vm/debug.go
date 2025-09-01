@@ -43,6 +43,8 @@ var opNames = map[uint8]string{
 	chunk.OP_GET_LOCAL_OBJECT_MEMBER:  "OP_GET_LOCAL_OBJECT_MEMBER",
 	chunk.OP_SET_GLOBAL_OBJECT_MEMBER: "OP_SET_GLOBAL_OBJECT_MEMBER",
 	chunk.OP_GET_GLOBAL_OBJECT_MEMBER: "OP_GET_GLOBAL_OBJECT_MEMBER",
+	chunk.OP_CREATE_ARRAY:             "OP_CREATE_ARRAY",
+	chunk.OP_PUSH_ELEMENT:             "OP_PUSH_ELEMENT",
 	chunk.OP_PUSH_UNDEFINED:           "OP_PUSH_UNDEFINED",
 	chunk.OP_EOF:                      "OP_EOF",
 }
@@ -86,6 +88,18 @@ func printFunction(opCode []uint8) {
 
 			}
 		case chunk.OP_PUSH_CURRENT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_CREATE_ARRAY:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+				ip++
+				length := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+				ip += 3
+				fmt.Printf("%04d | %d\n", ip*4, length)
+			}
+		case chunk.OP_PUSH_ELEMENT:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}

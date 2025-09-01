@@ -200,8 +200,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
-			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 
+			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 			}
 		}
@@ -220,6 +220,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				generateByteCode(declaration, symbolTable, fn)
 				popStack = true
 			}
+		}
+	case parser.NODE_ARRAY_EXPRESSION:
+		{
+			popStack = false
+			fn.ValueChunk().EmitByte(chunk.OP_CREATE_ARRAY)
+			fn.ValueChunk().EmitUint32(uint32(len(current.Elements)))
+
+			for _, item := range current.Elements {
+				generateByteCode(item, symbolTable, fn)
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_ELEMENT)
+			}
+			popStack = true
+
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{

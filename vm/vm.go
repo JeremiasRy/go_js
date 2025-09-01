@@ -39,7 +39,7 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = false
+const DEBUG = true
 
 type VM struct {
 	frames     []CallFrame
@@ -411,7 +411,7 @@ func (vm *VM) run() error {
 					}
 
 				} else {
-					return fmt.Errorf("%s is not a function", callee)
+					return fmt.Errorf("%s is not a function", String(callee))
 				}
 
 			}
@@ -427,6 +427,22 @@ func (vm *VM) run() error {
 
 				frame = vm.frames[vm.frameCount-1]
 				valueChunk = *frame.fn.ValueChunk()
+			}
+		case chunk.OP_CREATE_ARRAY:
+			{
+				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
+				ip += 3
+				arr := object.NewObjArr(length)
+				arrHandle := value.EncodeObject(heap.Allocate(arr))
+				vm.push(arrHandle)
+			}
+		case chunk.OP_PUSH_ELEMENT:
+			{
+				value := vm.pop()
+				arr := vm.peek()
+
+				// very bold of me...
+				heap.GetObject(arr.GetRegister()).(*object.ObjArr).PushElement(value)
 			}
 		case chunk.OP_EOF:
 			{

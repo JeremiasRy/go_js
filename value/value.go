@@ -57,6 +57,14 @@ func (c *ValueChunk) EmitBytes(b ...uint8) {
 	c.Code = append(c.Code, b...)
 }
 
+func (c *ValueChunk) EmitUint32(u32 uint32) {
+	fourth := uint8(u32 & math.MaxUint8)
+	third := uint8(u32>>8) & math.MaxUint8
+	second := uint8(u32>>16) & math.MaxUint8
+	first := uint8(u32>>24) & math.MaxUint8
+	c.Code = append(c.Code, first, second, third, fourth)
+}
+
 func (v Value) IsObject() bool {
 	return v&TAG_OBJ == TAG_OBJ
 }
