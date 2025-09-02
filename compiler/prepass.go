@@ -125,7 +125,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
 		symbolTable.exitBlockScope()
-
 	}
 
 }

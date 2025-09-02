@@ -48,13 +48,13 @@ type VM struct {
 	stackTop   int
 
 	globals       []value.Value
-	heapVariables map[string]value.Value
+	heapVariables []value.Value
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVariables: map[string]value.Value{}}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVariables: []value.Value{}}
 }
 
 func (vm *VM) call(fn *object.ObjFunction, returnIp int) error {
@@ -89,10 +89,6 @@ func (vm *VM) getGlobal(global int) value.Value {
 	return vm.globals[global]
 }
 
-func (vm *VM) string(v value.Value) string {
-	return ""
-}
-
 func (vm *VM) concatenate(a, b value.Value) value.Value {
 	aIsObject, aRegister := object.GetObject(a)
 	bIsObject, bRegister := object.GetObject(b)
@@ -113,7 +109,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		aObj := heap.GetObject(aRegister)
 
 		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.(object.ObjString) + object.ObjString(vm.string(b))
+			res := aObj.(object.ObjString) + object.ObjString(String(b))
 
 			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		}
@@ -123,7 +119,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj := heap.GetObject(bRegister)
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := object.ObjString(vm.string(a)) + bObj.(object.ObjString)
+			res := object.ObjString(String(a)) + bObj.(object.ObjString)
 
 			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		}
@@ -350,8 +346,8 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_DEFINE_OBJECT_MEMBER:
 			{
-				member := vm.pop()
 				value := vm.pop()
+				member := vm.pop()
 				hash := vm.peek()
 
 				isObject, register := object.GetObject(hash)
@@ -361,7 +357,7 @@ func (vm *VM) run() error {
 				}
 
 				hashObject := heap.GetObject(register)
-				hashObject.(*object.ObjHash).SetMember(vm.string(member), value)
+				hashObject.(*object.ObjHash).SetMember(String(member), value)
 			}
 		case chunk.OP_GET_GLOBAL_OBJECT_MEMBER:
 			{
@@ -369,9 +365,8 @@ func (vm *VM) run() error {
 				member := valueChunk.Constants[valueChunk.Code[ip+1]]
 
 				_, obj := object.GetObject(vm.getGlobal(global))
-				_, str := object.GetObject(member)
 
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(heap.GetObject(str).String())
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(String(member))
 				vm.push(value)
 				ip += 2
 			}
@@ -382,7 +377,7 @@ func (vm *VM) run() error {
 
 				_, obj := object.GetObject(frame.getLocal(slot))
 
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(vm.string(member))
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(String(member))
 				vm.push(value)
 				ip += 2
 			}

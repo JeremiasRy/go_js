@@ -210,6 +210,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 		}
+	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
+		{
+			symbolTable = FUNCTION_SCOPES[current]
+			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params))
+			handle := heap.Allocate(newFn)
+			value := value.EncodeObject(handle)
+
+			generateByteCode(current.BodyNode, symbolTable, newFn)
+
+			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
+			}
+
+			fn.ValueChunk().WriteConstant(value)
+		}
 	case parser.NODE_BLOCK_STATEMENT:
 		{
 			symbolTable.enterBlockScope(current)
@@ -374,7 +389,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			if current.Argument == nil {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 			} else {
+				popStack = false
 				generateByteCode(current.Argument, symbolTable, fn)
+				popStack = true
 			}
 
 			fn.ValueChunk().EmitByte(chunk.OP_RETURN)
@@ -499,6 +516,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			fn.ValueChunk().EmitUint32(jumpStart - 2)
 			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
 			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
+		}
+	case parser.NODE_OBJECT_EXPRESSION:
+		{
+			objHash := object.NewObjectHash()
+			handle := heap.Allocate(objHash)
+			fn.ValueChunk().WriteConstant(value.EncodeObject(handle))
+
+			for _, property := range current.Properties {
+
+				fn.ValueChunk().WriteConstant(value.EncodeObject(heap.AllocateString(object.ObjString(property.Key.Name))))
+				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
+				fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_OBJECT_MEMBER)
+			}
 
 		}
 	}

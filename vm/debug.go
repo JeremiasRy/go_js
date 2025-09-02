@@ -56,31 +56,20 @@ var opNames = map[uint8]string{
 func PrintChunk(c value.ValueChunk) {
 	println("--DEBUG BYTECODE--\n")
 	println("<MAIN PROGRAM>")
-	printFunction(c.Code)
+	printFunction(c)
 	println()
 
-	for _, value := range c.Constants {
-		if value.IsObject() {
-			obj := heap.GetObject(value.GetRegister())
-
-			switch f := obj.(type) {
-			case *object.ObjFunction:
-				{
-					fmt.Printf("<fn %s>\n", f.Name())
-					printFunction(f.ValueChunk().Code)
-				}
-			}
-		}
-	}
 	println("--DEBUG BYTECODE--")
 }
 
-func printFunction(opCode []uint8) {
+func printFunction(c value.ValueChunk) {
 	ip := 0
+	opCode := c.Code
+
 	for {
 		if ip >= int(len(opCode)) {
 			println()
-			return
+			break
 		}
 		code := opCode[ip]
 		switch code {
@@ -234,10 +223,24 @@ func printFunction(opCode []uint8) {
 		case chunk.OP_EOF:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				return
+				break
 			}
 		}
 		ip++
+	}
+
+	for _, value := range c.Constants {
+		if value.IsObject() {
+			obj := heap.GetObject(value.GetRegister())
+
+			switch f := obj.(type) {
+			case *object.ObjFunction:
+				{
+					fmt.Printf("<fn %s>\n", f.Name())
+					printFunction(*f.ValueChunk())
+				}
+			}
+		}
 	}
 }
 

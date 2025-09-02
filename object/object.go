@@ -35,16 +35,18 @@ type Object interface {
 }
 
 type ObjFunction struct {
-	name  string
-	chunk *value.ValueChunk
-	Arity int
+	name       string
+	chunk      *value.ValueChunk
+	Arity      int
+	heapValues []value.Value
 }
 
 func NewFunction(name string, arity int) *ObjFunction {
 	return &ObjFunction{
-		name:  name,
-		chunk: value.NewChunk(),
-		Arity: arity,
+		name:       name,
+		chunk:      value.NewChunk(),
+		Arity:      arity,
+		heapValues: []value.Value{},
 	}
 }
 
@@ -72,6 +74,22 @@ func (ObjString) Type() ObjType {
 
 func (str ObjString) String() string {
 	return string(str)
+}
+
+type ObjHeapValue struct {
+	value *value.Value
+}
+
+func NewHeapValue(value value.Value) *ObjHeapValue {
+	return &ObjHeapValue{value: &value}
+}
+
+func (ohv *ObjHeapValue) String() string {
+	return "Heap Values"
+}
+
+func (ohv *ObjHeapValue) Type() ObjType {
+	return OBJ_HEAP_VALUE
 }
 
 type ObjHash struct {
