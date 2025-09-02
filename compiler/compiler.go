@@ -17,6 +17,7 @@ const (
 	CONST VariableType = iota
 	LET
 	FUNCTION
+	FOR_OF
 )
 
 type VariableScope uint8
@@ -31,6 +32,7 @@ type Variable struct {
 	scope VariableScope
 	type_ VariableType
 	slot  int // for locals and globals
+	init  bool
 	fn    *object.ObjFunction
 }
 
@@ -38,9 +40,9 @@ type Variables map[string]*Variable
 type BlockScope struct {
 	parent *BlockScope
 	vars   Variables
+	forOf  bool
 }
 
-// NEXT TASK: we need next table for code generation
 type FunctionScope struct {
 	parent     *FunctionScope
 	tableScope VariableScope
@@ -53,8 +55,8 @@ type FunctionScope struct {
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
 var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
 
-func newBlockScope(parent *BlockScope) *BlockScope {
-	return &BlockScope{vars: Variables{}, parent: parent}
+func newBlockScope(parent *BlockScope, forOf bool) *BlockScope {
+	return &BlockScope{vars: Variables{}, parent: parent, forOf: forOf}
 }
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
@@ -77,6 +79,9 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, fn *object
 	var mapToAddTo Variables
 
 	if fs.block != nil {
+		if fs.block.forOf {
+			type_ = FOR_OF
+		}
 		mapToAddTo = fs.block.vars
 	} else {
 		mapToAddTo = fs.vars
@@ -202,7 +207,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			}
 
 			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
-				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+				fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 		}
 	case parser.NODE_BLOCK_STATEMENT:
@@ -270,7 +275,32 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			variable, _ := symbolTable.findVariable(name)
 
 			if variable != nil {
-				generateByteCode(current.Initializer, symbolTable, fn)
+				if current.Initializer != nil {
+					generateByteCode(current.Initializer, symbolTable, fn)
+				}
+
+				if variable.type_ == FOR_OF {
+					var op uint8
+					if variable.init {
+						switch variable.scope {
+						case GLOBAL:
+							op = chunk.OP_SET_GLOBAL
+						case LOCAL:
+							op = chunk.OP_SET_LOCAL
+						}
+						fn.ValueChunk().EmitBytes(op, uint8(variable.slot))
+					} else {
+						switch variable.scope {
+						case GLOBAL:
+							op = chunk.OP_DEFINE_GLOBAL
+						case LOCAL:
+							op = chunk.OP_DEFINE_LOCAL
+						}
+						variable.init = true
+						fn.ValueChunk().EmitByte(op)
+					}
+					return
+				}
 
 				switch variable.scope {
 				case GLOBAL:
@@ -449,6 +479,27 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			fn.ValueChunk().PatchJump(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
 
 			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
+		}
+	case parser.NODE_FOR_OF_STATEMENT:
+		{
+			symbolTable.enterBlockScope(current.BodyNode)
+			fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+			generateByteCode(current.Left, symbolTable, fn)
+			generateByteCode(current.Right, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_GET_ITERATOR)
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
+			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT)
+			generateByteCode(current.Left, symbolTable, fn)
+
+			for _, node := range current.BodyNode.Body {
+				generateByteCode(node, symbolTable, fn)
+			}
+			fn.ValueChunk().EmitByte(chunk.OP_JUMP)
+			fn.ValueChunk().EmitUint32(jumpStart - 2)
+			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
+
 		}
 	}
 }

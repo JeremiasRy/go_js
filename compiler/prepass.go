@@ -5,6 +5,8 @@ import (
 	"go_js/parser"
 )
 
+var forOfScope = false
+
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	switch current.Type {
 	case parser.NODE_PROGRAM:
@@ -60,7 +62,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
+			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block, forOfScope)
 			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				prePass(node, symbolTable)
@@ -115,6 +117,15 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Test, symbolTable)
 		prePass(current.Update, symbolTable)
 		symbolTable.exitBlockScope()
+	case parser.NODE_FOR_OF_STATEMENT:
+		forOfScope = true
+		prePass(current.BodyNode, symbolTable)
+		forOfScope = false
+		symbolTable.enterBlockScope(current.BodyNode)
+		prePass(current.Left, symbolTable)
+		prePass(current.Right, symbolTable)
+		symbolTable.exitBlockScope()
+
 	}
 
 }

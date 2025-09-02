@@ -300,6 +300,17 @@ func (vm *VM) run() error {
 					ip += 4
 				}
 			}
+		case chunk.OP_JUMP_IF_TRUE:
+			{
+				v := vm.pop()
+				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
+
+				if v.AsBoolean() {
+					ip = jump
+				} else {
+					ip += 4
+				}
+			}
 		case chunk.OP_JUMP:
 			{
 				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
@@ -431,7 +442,7 @@ func (vm *VM) run() error {
 		case chunk.OP_CREATE_ARRAY:
 			{
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
-				ip += 3
+				ip += 4
 				arr := object.NewObjArr(length)
 				arrHandle := value.EncodeObject(heap.Allocate(arr))
 				vm.push(arrHandle)
@@ -442,7 +453,51 @@ func (vm *VM) run() error {
 				arr := vm.peek()
 
 				// very bold of me...
-				heap.GetObject(arr.GetRegister()).(*object.ObjArr).PushElement(value)
+				arrOBj, ok := heap.GetObject(arr.GetRegister()).(*object.ObjArr)
+
+				if !ok {
+					panic("push called on an object that is not an array")
+				}
+
+				arrOBj.PushElement(value)
+			}
+		case chunk.OP_GET_ITERATOR:
+			{
+				iteratee := vm.pop()
+				iteratorObj, ok := heap.GetObject(iteratee.GetRegister()).(object.Iterable)
+
+				if !ok {
+					panic("object is not iterable")
+				}
+
+				vm.push(value.EncodeObject(heap.Allocate(object.NewIterator(iteratorObj))))
+			}
+		case chunk.OP_ITERATOR_NEXT:
+			{
+				iterator := vm.peek()
+				iteratorObj, ok := heap.GetObject(iterator.GetRegister()).(*object.Iterator)
+
+				if !ok {
+					panic("object is not iterable")
+				}
+
+				done := iteratorObj.Next()
+
+				if done {
+					vm.push(value.EncodeTrue())
+				} else {
+					vm.push(value.EncodeFalse())
+				}
+			}
+		case chunk.OP_ITERATOR_CURRENT:
+			{
+				iterator := vm.peek()
+				iteratorObj, ok := heap.GetObject(iterator.GetRegister()).(*object.Iterator)
+				if !ok {
+					panic("object is not iterable")
+				}
+
+				vm.push(iteratorObj.Current())
 			}
 		case chunk.OP_EOF:
 			{

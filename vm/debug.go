@@ -37,6 +37,7 @@ var opNames = map[uint8]string{
 	chunk.OP_CALL:                     "OP_CALL",
 	chunk.OP_RETURN:                   "OP_RETURN",
 	chunk.OP_JUMP_IF_FALSE:            "OP_JUMP_IF_FALSE",
+	chunk.OP_JUMP_IF_TRUE:             "OP_JUMP_IF_TRUE",
 	chunk.OP_JUMP:                     "OP_JUMP",
 	chunk.OP_DEFINE_OBJECT_MEMBER:     "OP_DEFINE_OBJECT_MEMBER",
 	chunk.OP_SET_LOCAL_OBJECT_MEMBER:  "OP_SET_LOCAL_OBJECT_MEMBER",
@@ -46,6 +47,9 @@ var opNames = map[uint8]string{
 	chunk.OP_CREATE_ARRAY:             "OP_CREATE_ARRAY",
 	chunk.OP_PUSH_ELEMENT:             "OP_PUSH_ELEMENT",
 	chunk.OP_PUSH_UNDEFINED:           "OP_PUSH_UNDEFINED",
+	chunk.OP_GET_ITERATOR:             "OP_GET_ITERATOR",
+	chunk.OP_ITERATOR_NEXT:            "OP_ITERATOR_NEXT",
+	chunk.OP_ITERATOR_CURRENT:         "OP_ITERATOR_CURRENT",
 	chunk.OP_EOF:                      "OP_EOF",
 }
 
@@ -91,6 +95,14 @@ func printFunction(opCode []uint8) {
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
+		case chunk.OP_ITERATOR_NEXT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_ITERATOR_CURRENT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_CREATE_ARRAY:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
@@ -98,6 +110,10 @@ func printFunction(opCode []uint8) {
 				length := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
 				ip += 3
 				fmt.Printf("%04d | %d\n", ip*4, length)
+			}
+		case chunk.OP_GET_ITERATOR:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
 		case chunk.OP_PUSH_ELEMENT:
 			{
@@ -184,6 +200,14 @@ func printFunction(opCode []uint8) {
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
 		case chunk.OP_JUMP_IF_FALSE:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+				ip += 3
+				fmt.Printf("%04d | %d\n", ip*4, jump*4)
+			}
+		case chunk.OP_JUMP_IF_TRUE:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 				ip++

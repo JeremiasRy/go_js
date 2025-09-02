@@ -17,6 +17,7 @@ const (
 	OBJ_HASH
 	OBJ_HEAP_VALUE
 	OBJ_NATIVE_FN
+	OBJ_ITERATOR
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -123,11 +124,15 @@ func (arrObj *ObjArr) PushElement(v value.Value) {
 		arrObj.items[arrObj.initializedCount] = v
 		arrObj.initializedCount++
 
-		arrObj.initialized = arrObj.initializedCount >= int(arrObj.values["length"].AsNumber())-1
+		arrObj.initialized = arrObj.initializedCount >= int(arrObj.values["length"].AsNumber())
 		return
 	}
 	arrObj.items = append(arrObj.items, v)
 	arrObj.values["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
+}
+
+func (arrObj *ObjArr) Values() []value.Value {
+	return arrObj.items
 }
 
 type ObjNativeFn struct {
@@ -164,4 +169,37 @@ func NewClock() *Clock {
 
 func (*Clock) Clock() value.Value {
 	return value.Value(math.Float64bits(float64(time.Now().UnixMilli())))
+}
+
+type Iterable interface {
+	Values() []value.Value
+}
+
+type Iterator struct {
+	current int
+	values  []value.Value
+}
+
+func NewIterator(obj Iterable) *Iterator {
+	return &Iterator{values: obj.Values(), current: -1}
+}
+
+func (i *Iterator) Next() bool {
+	if i.current >= len(i.values)-1 {
+		return true
+	}
+	i.current++
+	return false
+}
+
+func (i *Iterator) Current() value.Value {
+	return i.values[i.current]
+}
+
+func (i *Iterator) String() string {
+	return "Iterator object"
+}
+
+func (i *Iterator) Type() ObjType {
+	return OBJ_ITERATOR
 }
