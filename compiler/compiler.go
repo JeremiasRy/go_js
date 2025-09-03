@@ -134,7 +134,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
-	main := object.NewFunction(object.MAIN_FN_NAME, 0)
+	main := object.NewFunction(object.MAIN_FN_NAME, 0, 0)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 	defineConsole(main, symbolTable)
 	prePass(ast, symbolTable)
@@ -209,11 +209,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
+
+			fn.LocalVariableCount = symbolTable.varCount
 		}
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		{
 			symbolTable = FUNCTION_SCOPES[current]
-			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params))
+			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0)
 			handle := heap.Allocate(newFn)
 			value := value.EncodeObject(handle)
 
@@ -223,6 +225,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
+			newFn.LocalVariableCount = symbolTable.varCount
 			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
@@ -256,9 +259,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
+			prevPopStack := popStack
+			popStack = false
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
+			popStack = prevPopStack
 			generateByteCode(current.Callee, symbolTable, fn)
 
 			fn.ValueChunk().EmitByte(chunk.OP_CALL)

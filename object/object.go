@@ -35,18 +35,20 @@ type Object interface {
 }
 
 type ObjFunction struct {
-	name       string
-	chunk      *value.ValueChunk
-	Arity      int
-	heapValues []value.Value
+	name               string
+	chunk              *value.ValueChunk
+	Arity              int
+	LocalVariableCount int
+	heapValues         []value.Value
 }
 
-func NewFunction(name string, arity int) *ObjFunction {
+func NewFunction(name string, arity int, localVariableCount int) *ObjFunction {
 	return &ObjFunction{
-		name:       name,
-		chunk:      value.NewChunk(),
-		Arity:      arity,
-		heapValues: []value.Value{},
+		name:               name,
+		chunk:              value.NewChunk(),
+		Arity:              arity,
+		LocalVariableCount: localVariableCount,
+		heapValues:         []value.Value{},
 	}
 }
 

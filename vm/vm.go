@@ -13,9 +13,10 @@ import (
 )
 
 type CallFrame struct {
-	fn       *object.ObjFunction
-	locals   []value.Value
-	returnIp int
+	fn        *object.ObjFunction
+	locals    []value.Value
+	nextLocal int
+	returnIp  int
 }
 
 func NewCallFrame(fn *object.ObjFunction, locals []value.Value) *CallFrame {
@@ -26,11 +27,12 @@ func (cf *CallFrame) initCallFrame(fn *object.ObjFunction, locals []value.Value,
 	cf.fn = fn
 	cf.locals = locals
 	cf.returnIp = returnIp
+	cf.nextLocal = fn.Arity
 }
 
-func (cf *CallFrame) addLocal(v value.Value) int {
-	cf.locals = append(cf.locals, v)
-	return len(cf.locals) - 1
+func (cf *CallFrame) addLocal(v value.Value) {
+	cf.locals[cf.nextLocal] = v
+	cf.nextLocal++
 }
 
 func (cf *CallFrame) getLocal(index int) value.Value {
@@ -39,7 +41,7 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = true
+const DEBUG = false
 
 type VM struct {
 	frames     []CallFrame
@@ -146,7 +148,7 @@ func String(v value.Value) string {
 	if v.IsBoolean() {
 		return fmt.Sprintf("%v", v.AsBoolean())
 	} else if v.IsObject() {
-		return fmt.Sprintf(`"%s"`, heap.GetObject(v.GetRegister()).String())
+		return heap.GetObject(v.GetRegister()).String()
 	} else if v.IsNaN() {
 		return "NaN"
 	} else if v.IsType(value.TAG_UNDEFINED) {
@@ -168,7 +170,7 @@ func (vm *VM) run() error {
 	}
 
 	for {
-		// time.Sleep(time.Millisecond * 100)
+		//time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
 		ip++
 
@@ -331,7 +333,7 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_DEFINE_LOCAL:
 			{
-				variable := vm.peek()
+				variable := vm.pop()
 				frame.addLocal(variable)
 			}
 		case chunk.OP_GET_LOCAL:
@@ -364,9 +366,7 @@ func (vm *VM) run() error {
 				global := int(valueChunk.Code[ip])
 				member := valueChunk.Constants[valueChunk.Code[ip+1]]
 
-				_, obj := object.GetObject(vm.getGlobal(global))
-
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(String(member))
+				value := heap.GetObject(vm.getGlobal(global).GetRegister()).(*object.ObjHash).GetMember(String(member))
 				vm.push(value)
 				ip += 2
 			}
@@ -397,8 +397,9 @@ func (vm *VM) run() error {
 						{
 							vm.frames[vm.frameCount-1].locals = frame.locals
 
-							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity:vm.stackTop], ip)
+							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity:vm.stackTop+fn.LocalVariableCount], ip)
 							vm.frameCount++
+							vm.stackTop += fn.LocalVariableCount
 
 							frame = vm.frames[vm.frameCount-1]
 							valueChunk = *frame.fn.ValueChunk()
@@ -415,7 +416,6 @@ func (vm *VM) run() error {
 							vm.push(fn.Clock())
 						}
 					}
-
 				} else {
 					return fmt.Errorf("%s is not a function", String(callee))
 				}
@@ -425,9 +425,7 @@ func (vm *VM) run() error {
 			{
 				ip = frame.returnIp
 				value := vm.pop()
-
-				vm.stackTop -= max(len(frame.locals), frame.fn.Arity)
-
+				vm.stackTop -= len(frame.locals)
 				vm.push(value)
 				vm.frameCount--
 
@@ -447,7 +445,6 @@ func (vm *VM) run() error {
 				value := vm.pop()
 				arr := vm.peek()
 
-				// very bold of me...
 				arrOBj, ok := heap.GetObject(arr.GetRegister()).(*object.ObjArr)
 
 				if !ok {
