@@ -34,21 +34,28 @@ type Object interface {
 	String() string
 }
 
+type Callable interface {
+	ValueChunk() *value.ValueChunk
+	Arity() int
+	LocalCount() int
+	SetLocalCount(count int)
+}
+
 type ObjFunction struct {
-	name               string
-	chunk              *value.ValueChunk
-	Arity              int
-	LocalVariableCount int
-	heapValues         []value.Value
+	name       string
+	chunk      *value.ValueChunk
+	arity      int
+	localCount int
+	heapValues []value.Value
 }
 
 func NewFunction(name string, arity int, localVariableCount int) *ObjFunction {
 	return &ObjFunction{
-		name:               name,
-		chunk:              value.NewChunk(),
-		Arity:              arity,
-		LocalVariableCount: localVariableCount,
-		heapValues:         []value.Value{},
+		name:       name,
+		chunk:      value.NewChunk(),
+		arity:      arity,
+		localCount: localVariableCount,
+		heapValues: []value.Value{},
 	}
 }
 
@@ -66,6 +73,16 @@ func (fn *ObjFunction) Name() string {
 
 func (fn *ObjFunction) ValueChunk() *value.ValueChunk {
 	return fn.chunk
+}
+func (fn *ObjFunction) Arity() int {
+	return fn.arity
+}
+func (fn *ObjFunction) LocalCount() int {
+	return fn.localCount
+}
+
+func (fn *ObjFunction) SetLocalCount(count int) {
+	fn.localCount = count
 }
 
 type ObjString string

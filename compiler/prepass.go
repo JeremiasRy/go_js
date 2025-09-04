@@ -55,10 +55,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity, 0))
 			}
 		}
-
-		for _, node := range current.BodyNode.Body {
-			prePass(node, symbolTable)
-		}
+		prePass(current.BodyNode, symbolTable)
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
@@ -98,14 +95,12 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		// check that we found anything and if it's from a upper function scope
 		if table != nil && variable != nil && table != symbolTable && variable.scope != HEAP {
-			table.varCount--
 			variable.scope = HEAP
 		}
 	case parser.NODE_IF_STATEMENT:
 		prePass(current.Test, symbolTable)
 		prePass(current.Consequent, symbolTable)
 		if current.Alternate != nil {
-
 			prePass(current.Alternate, symbolTable)
 		}
 	case parser.NODE_WHILE_STATEMENT:

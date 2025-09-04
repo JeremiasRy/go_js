@@ -71,7 +71,7 @@ func (v Value) IsObject() bool {
 
 func (v Value) IsNaN() bool {
 	return (v&STANDARD_NAN == STANDARD_NAN) &&
-		(v != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE)
+		(v&TAG_OBJ != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE)
 }
 
 func (v Value) AsNumber() float64 {

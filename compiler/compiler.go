@@ -147,7 +147,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 
 var popStack = true
 
-func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *object.ObjFunction) {
+func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
@@ -210,7 +210,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			fn.LocalVariableCount = symbolTable.varCount
+			fn.SetLocalCount(symbolTable.varCount + 1)
 		}
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		{
@@ -221,11 +221,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 
 			generateByteCode(current.BodyNode, symbolTable, newFn)
 
+			fmt.Printf("after this: %v\n", newFn.ValueChunk())
+
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			newFn.LocalVariableCount = symbolTable.varCount
+			newFn.SetLocalCount(symbolTable.varCount)
 			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
@@ -300,6 +302,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 					generateByteCode(current.Initializer, symbolTable, fn)
 				}
 
+				// for of loop i.e for (const item of arr) {}
 				if variable.type_ == FOR_OF {
 					var op uint8
 					if variable.init {
@@ -329,7 +332,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 				case LOCAL:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 				case HEAP:
-					//
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_HEAP_VAR)
 				}
 
 			}
@@ -416,7 +419,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			case LOCAL:
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
 			case HEAP:
-				//
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
 			}
 		}
 	case parser.NODE_WHILE_STATEMENT:
@@ -444,7 +447,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			case LOCAL:
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
 			case HEAP:
-				//
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
 			}
 
 			if !current.Prefix {
@@ -479,7 +482,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn *obje
 			case LOCAL:
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
 			case HEAP:
-				//
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
 			}
 		}
 	case parser.NODE_FOR_STATEMENT:

@@ -8,6 +8,8 @@ import (
 	"go_js/value"
 )
 
+const DEBUG = false
+
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:                 "OP_CONSTANT",
 	chunk.OP_POP:                      "OP_POP",
@@ -30,9 +32,9 @@ var opNames = map[uint8]string{
 	chunk.OP_DEFINE_GLOBAL:            "OP_DEFINE_GLOBAL",
 	chunk.OP_GET_GLOBAL:               "OP_GET_GLOBAL",
 	chunk.OP_SET_GLOBAL:               "OP_SET_GLOBAL",
-	chunk.OP_CLOSE_UPVALUES:           "OP_CLOSE_UPVALUES",
-	chunk.OP_SET_UPVALUE:              "OP_SET_UPVALUE",
-	chunk.OP_GET_UPVALUE:              "OP_GET_UPVALUE",
+	chunk.OP_DEFINE_HEAP_VAR:          "OP_DEFINE_HEAP_VAR",
+	chunk.OP_GET_HEAP_VAR:             "OP_GET_HEAP_VAR",
+	chunk.OP_SET_HEAP_VAR:             "OP_SET_HEAP_VAR",
 	chunk.OP_CLOSURE:                  "OP_CLOSURE",
 	chunk.OP_CALL:                     "OP_CALL",
 	chunk.OP_RETURN:                   "OP_RETURN",
@@ -78,7 +80,16 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 				ip++
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-
+			}
+		case chunk.OP_GET_HEAP_VAR:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_DEFINE_HEAP_VAR:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
 		case chunk.OP_PUSH_CURRENT:
 			{

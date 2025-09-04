@@ -10,24 +10,25 @@ import (
 	"go_js/value"
 	"log"
 	"math"
+	"time"
 )
 
 type CallFrame struct {
-	fn        *object.ObjFunction
+	fn        object.Callable
 	locals    []value.Value
 	nextLocal int
 	returnIp  int
 }
 
-func NewCallFrame(fn *object.ObjFunction, locals []value.Value) *CallFrame {
+func NewCallFrame(fn object.Callable, locals []value.Value) *CallFrame {
 	return &CallFrame{fn: fn, locals: locals, returnIp: 0}
 }
 
-func (cf *CallFrame) initCallFrame(fn *object.ObjFunction, locals []value.Value, returnIp int) {
+func (cf *CallFrame) initCallFrame(fn object.Callable, locals []value.Value, returnIp int) {
 	cf.fn = fn
 	cf.locals = locals
 	cf.returnIp = returnIp
-	cf.nextLocal = fn.Arity
+	cf.nextLocal = fn.Arity()
 }
 
 func (cf *CallFrame) addLocal(v value.Value) {
@@ -41,7 +42,6 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const DEBUG = false
 
 type VM struct {
 	frames     []CallFrame
@@ -49,22 +49,23 @@ type VM struct {
 	stack      []value.Value
 	stackTop   int
 
-	globals       []value.Value
-	heapVariables []value.Value
+	globals         []value.Value
+	heapVars        map[int][]value.Value
+	heapScopesCount int
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVariables: []value.Value{}}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVars: map[int][]value.Value{}, heapScopesCount: 0}
 }
 
-func (vm *VM) call(fn *object.ObjFunction, returnIp int) error {
+func (vm *VM) call(fn object.Callable, returnIp int) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity:vm.stackTop], returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity():vm.stackTop], returnIp)
 	vm.frameCount++
 	return nil
 }
@@ -161,6 +162,7 @@ func String(v value.Value) string {
 }
 
 func (vm *VM) run() error {
+	start := time.Now()
 	frame := vm.frames[vm.frameCount-1]
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
@@ -395,11 +397,14 @@ func (vm *VM) run() error {
 					switch fn := obj.(type) {
 					case *object.ObjFunction:
 						{
-							vm.frames[vm.frameCount-1].locals = frame.locals
+							// vm.frames[vm.frameCount-1].locals = frame.locals
 
-							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity:vm.stackTop+fn.LocalVariableCount], ip)
+							bottom := vm.stackTop - fn.Arity()
+							top := vm.stackTop + max(fn.LocalCount(), 0)
+
+							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[bottom:top], ip)
 							vm.frameCount++
-							vm.stackTop += fn.LocalVariableCount
+							vm.stackTop += fn.LocalCount()
 
 							frame = vm.frames[vm.frameCount-1]
 							valueChunk = *frame.fn.ValueChunk()
@@ -493,7 +498,7 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_EOF:
 			{
-				fmt.Printf("Thanks!\n")
+				fmt.Printf("Thanks! %s\n", time.Since(start))
 				return nil
 			}
 		}
@@ -506,7 +511,9 @@ func (vm *VM) log(arg value.Value) {
 }
 
 func Interpret(source []byte) {
+	startAstParse := time.Now()
 	ast, err := parser.GetAst(source, nil, 0)
+	fmt.Printf("AST parsed in %s\n", time.Since(startAstParse))
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
@@ -518,7 +525,9 @@ func Interpret(source []byte) {
 		println()
 	}
 
+	startCompile := time.Now()
 	main, err := compiler.Compile(ast)
+	fmt.Printf("AST Compiled in %s", time.Since(startCompile))
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
