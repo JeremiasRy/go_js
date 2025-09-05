@@ -17,7 +17,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Params)
 
-				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity, 0))
+				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity, 0, nil))
 			}
 		}
 
@@ -52,7 +52,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Arguments)
 
-				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity, 0))
+				symbolTable.addVariable(name, FUNCTION, object.NewFunction(name, arity, 0, nil))
 			}
 		}
 		prePass(current.BodyNode, symbolTable)

@@ -15,11 +15,11 @@ type Heap struct {
 
 var heap *Heap = NewHeap()
 
-func Allocate(object object.Object) uint32 {
+func Allocate(o object.Object) uint32 {
 	if len(heap.freeList) > 0 {
 		ptr := heap.freeList[len(heap.freeList)-1]
 		heap.freeList = heap.freeList[:len(heap.freeList)-1]
-		heap.objects[ptr] = object
+		heap.objects[ptr] = o
 
 		handle := heap.handleCount
 		heap.handleCount++
@@ -28,7 +28,7 @@ func Allocate(object object.Object) uint32 {
 		return handle
 	}
 
-	heap.objects = append(heap.objects, object)
+	heap.objects = append(heap.objects, o)
 	// add safeguards here for len(heap.objects) >= uint32.MAX
 	ptr := uint32(len(heap.objects) - 1)
 	handle := heap.handleCount

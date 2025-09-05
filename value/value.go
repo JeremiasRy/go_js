@@ -78,7 +78,7 @@ func (v Value) AsNumber() float64 {
 	return math.Float64frombits(uint64(v))
 }
 
-func (v Value) GetRegister() uint32 {
+func (v Value) GetHandle() uint32 {
 	return uint32(v & ENCODE_MASK)
 }
 

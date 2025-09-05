@@ -134,7 +134,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
-	main := object.NewFunction(object.MAIN_FN_NAME, 0, 0)
+	main := object.NewFunction(object.MAIN_FN_NAME, 0, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 	defineConsole(main, symbolTable)
 	prePass(ast, symbolTable)
@@ -179,11 +179,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable = FUNCTION_SCOPES[current]
 
 			fn = nextFn.fn
+			hasHeapValues := false
 
 			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
 				if variable.type_ == FUNCTION {
 					functions = append(functions, variable)
+				}
+				if !hasHeapValues && variable.scope == HEAP {
+					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
 			}
 
@@ -215,13 +219,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		{
 			symbolTable = FUNCTION_SCOPES[current]
-			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0)
+			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
 			handle := heap.Allocate(newFn)
 			value := value.EncodeObject(handle)
 
 			generateByteCode(current.BodyNode, symbolTable, newFn)
-
-			fmt.Printf("after this: %v\n", newFn.ValueChunk())
 
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
@@ -277,20 +279,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
-			variable, _ := symbolTable.findVariable(current.Object.Name)
+			generateByteCode(current.Object, symbolTable, fn)
 			member := heap.AllocateString(object.ObjString(current.Property.Name))
 			memberSlot := fn.ValueChunk().AddConstant(value.EncodeObject(member))
 
-			var op uint8
-
-			switch variable.scope {
-			case LOCAL:
-				op = chunk.OP_GET_LOCAL_OBJECT_MEMBER
-			case GLOBAL:
-				op = chunk.OP_GET_GLOBAL_OBJECT_MEMBER
-			}
-
-			fn.ValueChunk().EmitBytes(op, uint8(variable.slot), memberSlot)
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, memberSlot)
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
@@ -482,7 +475,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			case LOCAL:
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
 			case HEAP:
-				fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_HEAP_VAR, uint8(variable.slot))
 			}
 		}
 	case parser.NODE_FOR_STATEMENT:
@@ -528,15 +521,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
-			objHash := object.NewObjectHash()
-			handle := heap.Allocate(objHash)
-			fn.ValueChunk().WriteConstant(value.EncodeObject(handle))
+			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
 			for _, property := range current.Properties {
 
 				fn.ValueChunk().WriteConstant(value.EncodeObject(heap.AllocateString(object.ObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
-				fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_OBJECT_MEMBER)
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
 
 		}

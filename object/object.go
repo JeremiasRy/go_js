@@ -24,7 +24,7 @@ const MAIN_FN_NAME = "PROGRAM_MAIN"
 
 func GetObject(v value.Value) (bool, uint32) {
 	if v&value.TAG_OBJ == value.TAG_OBJ {
-		return true, v.GetRegister()
+		return true, v.GetHandle()
 	}
 	return false, 0
 }
@@ -39,6 +39,9 @@ type Callable interface {
 	Arity() int
 	LocalCount() int
 	SetLocalCount(count int)
+	HeapScope() int
+	SetHeapScope(scope int)
+	Name() string
 }
 
 type ObjFunction struct {
@@ -46,19 +49,26 @@ type ObjFunction struct {
 	chunk      *value.ValueChunk
 	arity      int
 	localCount int
-	heapValues []value.Value
+	heapScope  int
 }
 
-func NewFunction(name string, arity int, localVariableCount int) *ObjFunction {
+func NewFunction(name string, arity int, localVariableCount int, chunk *value.ValueChunk) *ObjFunction {
+	if chunk == nil {
+		chunk = value.NewChunk()
+	}
 	return &ObjFunction{
 		name:       name,
-		chunk:      value.NewChunk(),
+		chunk:      chunk,
 		arity:      arity,
 		localCount: localVariableCount,
-		heapValues: []value.Value{},
+		heapScope:  -1,
 	}
 }
 
+func (fn *ObjFunction) Clone() *ObjFunction {
+	clone := *fn
+	return &clone
+}
 func (*ObjFunction) Type() ObjType {
 	return OBJ_FUNCTION
 }
@@ -80,6 +90,13 @@ func (fn *ObjFunction) Arity() int {
 func (fn *ObjFunction) LocalCount() int {
 	return fn.localCount
 }
+func (fn *ObjFunction) SetHeapScope(scope int) {
+	fn.heapScope = scope
+}
+
+func (fn *ObjFunction) HeapScope() int {
+	return fn.heapScope
+}
 
 func (fn *ObjFunction) SetLocalCount(count int) {
 	fn.localCount = count
@@ -95,29 +112,13 @@ func (str ObjString) String() string {
 	return string(str)
 }
 
-type ObjHeapValue struct {
-	value *value.Value
-}
-
-func NewHeapValue(value value.Value) *ObjHeapValue {
-	return &ObjHeapValue{value: &value}
-}
-
-func (ohv *ObjHeapValue) String() string {
-	return "Heap Values"
-}
-
-func (ohv *ObjHeapValue) Type() ObjType {
-	return OBJ_HEAP_VALUE
-}
-
 type ObjHash struct {
-	values map[string]value.Value
+	Hash map[string]value.Value
 }
 
 func NewObjectHash() *ObjHash {
 	return &ObjHash{
-		values: map[string]value.Value{},
+		Hash: map[string]value.Value{},
 	}
 }
 
@@ -126,11 +127,11 @@ func (*ObjHash) Type() ObjType {
 }
 
 func (oh *ObjHash) String() string {
-	return fmt.Sprintf("%v", oh.values)
+	return fmt.Sprintf("%v", oh.Hash)
 }
 
 func (obj *ObjHash) GetMember(member string) value.Value {
-	if value, found := obj.values[member]; found {
+	if value, found := obj.Hash[member]; found {
 		return value
 	}
 
@@ -138,7 +139,7 @@ func (obj *ObjHash) GetMember(member string) value.Value {
 }
 
 func (obj *ObjHash) SetMember(member string, value value.Value) {
-	obj.values[member] = value
+	obj.Hash[member] = value
 }
 
 type ObjArr struct {
@@ -150,8 +151,8 @@ type ObjArr struct {
 
 func NewObjArr(length int) *ObjArr {
 	arrObj := &ObjArr{items: make([]value.Value, length), initializedCount: 0, initialized: false}
-	arrObj.values = map[string]value.Value{}
-	arrObj.values["length"] = value.ValueFromFloat64(float64(length))
+	arrObj.Hash = map[string]value.Value{}
+	arrObj.Hash["length"] = value.ValueFromFloat64(float64(length))
 
 	return arrObj
 }
@@ -161,11 +162,11 @@ func (arrObj *ObjArr) PushElement(v value.Value) {
 		arrObj.items[arrObj.initializedCount] = v
 		arrObj.initializedCount++
 
-		arrObj.initialized = arrObj.initializedCount >= int(arrObj.values["length"].AsNumber())
+		arrObj.initialized = arrObj.initializedCount >= int(arrObj.Hash["length"].AsNumber())
 		return
 	}
 	arrObj.items = append(arrObj.items, v)
-	arrObj.values["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
+	arrObj.Hash["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
 }
 
 func (arrObj *ObjArr) Values() []value.Value {

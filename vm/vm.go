@@ -7,6 +7,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
+	"go_js/stringer"
 	"go_js/value"
 	"log"
 	"math"
@@ -57,7 +58,7 @@ type VM struct {
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVars: map[int][]value.Value{}, heapScopesCount: 0}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVars: map[int][]value.Value{}, heapScopesCount: -1}
 }
 
 func (vm *VM) call(fn object.Callable, returnIp int) error {
@@ -112,7 +113,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		aObj := heap.GetObject(aRegister)
 
 		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.(object.ObjString) + object.ObjString(String(b))
+			res := aObj.(object.ObjString) + object.ObjString(stringer.String(b))
 
 			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		}
@@ -122,7 +123,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj := heap.GetObject(bRegister)
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := object.ObjString(String(a)) + bObj.(object.ObjString)
+			res := object.ObjString(stringer.String(a)) + bObj.(object.ObjString)
 
 			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
 		}
@@ -143,22 +144,6 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	}
 
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
-}
-
-func String(v value.Value) string {
-	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsObject() {
-		return heap.GetObject(v.GetRegister()).String()
-	} else if v.IsNaN() {
-		return "NaN"
-	} else if v.IsType(value.TAG_UNDEFINED) {
-		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
-		return "null"
-	} else {
-		return fmt.Sprintf("%f", v.AsNumber())
-	}
 }
 
 func (vm *VM) run() error {
@@ -316,6 +301,28 @@ func (vm *VM) run() error {
 				jump := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip = jump
 			}
+		case chunk.OP_DEFINE_HEAP_VAR:
+			{
+				variable := vm.pop()
+				if scope, found := vm.heapVars[frame.fn.HeapScope()]; found {
+					scope = append(scope, variable)
+					vm.heapVars[frame.fn.HeapScope()] = scope
+				} else {
+					panic("no heap scope generated for function")
+				}
+			}
+		case chunk.OP_GET_HEAP_VAR:
+			{
+				heapVar := valueChunk.Code[ip]
+				ip++
+				vm.push(vm.heapVars[frame.fn.HeapScope()][heapVar])
+			}
+		case chunk.OP_SET_HEAP_VAR:
+			{
+				heapVar := valueChunk.Code[ip]
+				ip++
+				vm.heapVars[frame.fn.HeapScope()][heapVar] = vm.pop()
+			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
 				variable := vm.pop()
@@ -348,29 +355,50 @@ func (vm *VM) run() error {
 				frame.locals[valueChunk.Code[ip]] = vm.pop()
 				ip++
 			}
-		case chunk.OP_DEFINE_OBJECT_MEMBER:
+		case chunk.OP_CREATE_OBJECT:
 			{
-				value := vm.pop()
+				objHash := object.NewObjectHash()
+				handle := heap.Allocate(objHash)
+
+				vm.push(value.EncodeObject(handle))
+			}
+		case chunk.OP_SET_OBJECT_MEMBER:
+			{
+				v := vm.pop()
 				member := vm.pop()
 				hash := vm.peek()
 
-				isObject, register := object.GetObject(hash)
+				isObject, handle := object.GetObject(hash)
 
 				if !isObject {
 					return fmt.Errorf("%v is not an object", hash)
 				}
 
-				hashObject := heap.GetObject(register)
-				hashObject.(*object.ObjHash).SetMember(String(member), value)
-			}
-		case chunk.OP_GET_GLOBAL_OBJECT_MEMBER:
-			{
-				global := int(valueChunk.Code[ip])
-				member := valueChunk.Constants[valueChunk.Code[ip+1]]
+				if v.IsObject() {
+					obj := heap.GetObject(v.GetHandle())
 
-				value := heap.GetObject(vm.getGlobal(global).GetRegister()).(*object.ObjHash).GetMember(String(member))
-				vm.push(value)
-				ip += 2
+					// check if we have a closure in hand
+					if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope() != -1 {
+						v = value.EncodeObject(heap.Allocate(fn.Clone()))
+					}
+				}
+
+				hashObject := heap.GetObject(handle)
+				hashObject.(*object.ObjHash).SetMember(stringer.String(member), v)
+			}
+		case chunk.OP_GET_OBJECT_MEMBER:
+			{
+				hash := vm.pop()
+				member := valueChunk.Constants[valueChunk.Code[ip]]
+
+				if objHash, ok := heap.GetObject(hash.GetHandle()).(*object.ObjHash); ok {
+					value := objHash.GetMember(stringer.String(member))
+					vm.push(value)
+					ip++
+				} else {
+					panic("our global was not an object")
+				}
+
 			}
 		case chunk.OP_GET_LOCAL_OBJECT_MEMBER:
 			{
@@ -379,7 +407,7 @@ func (vm *VM) run() error {
 
 				_, obj := object.GetObject(frame.getLocal(slot))
 
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(String(member))
+				value := heap.GetObject(obj).(*object.ObjHash).GetMember(stringer.String(member))
 				vm.push(value)
 				ip += 2
 			}
@@ -395,16 +423,15 @@ func (vm *VM) run() error {
 				if isObject {
 					obj := heap.GetObject(register)
 					switch fn := obj.(type) {
-					case *object.ObjFunction:
+					case object.Callable:
 						{
-							// vm.frames[vm.frameCount-1].locals = frame.locals
-
 							bottom := vm.stackTop - fn.Arity()
-							top := vm.stackTop + max(fn.LocalCount(), 0)
+							localCount := max(fn.LocalCount(), 0)
+							top := vm.stackTop + localCount
 
 							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[bottom:top], ip)
 							vm.frameCount++
-							vm.stackTop += fn.LocalCount()
+							vm.stackTop += localCount
 
 							frame = vm.frames[vm.frameCount-1]
 							valueChunk = *frame.fn.ValueChunk()
@@ -422,7 +449,7 @@ func (vm *VM) run() error {
 						}
 					}
 				} else {
-					return fmt.Errorf("%s is not a function", String(callee))
+					return fmt.Errorf("%s is not a function", stringer.String(callee))
 				}
 
 			}
@@ -450,7 +477,7 @@ func (vm *VM) run() error {
 				value := vm.pop()
 				arr := vm.peek()
 
-				arrOBj, ok := heap.GetObject(arr.GetRegister()).(*object.ObjArr)
+				arrOBj, ok := heap.GetObject(arr.GetHandle()).(*object.ObjArr)
 
 				if !ok {
 					panic("push called on an object that is not an array")
@@ -461,7 +488,7 @@ func (vm *VM) run() error {
 		case chunk.OP_GET_ITERATOR:
 			{
 				iteratee := vm.pop()
-				iteratorObj, ok := heap.GetObject(iteratee.GetRegister()).(object.Iterable)
+				iteratorObj, ok := heap.GetObject(iteratee.GetHandle()).(object.Iterable)
 
 				if !ok {
 					panic("object is not iterable")
@@ -472,7 +499,7 @@ func (vm *VM) run() error {
 		case chunk.OP_ITERATOR_NEXT:
 			{
 				iterator := vm.peek()
-				iteratorObj, ok := heap.GetObject(iterator.GetRegister()).(*object.Iterator)
+				iteratorObj, ok := heap.GetObject(iterator.GetHandle()).(*object.Iterator)
 
 				if !ok {
 					panic("object is not iterable")
@@ -489,12 +516,25 @@ func (vm *VM) run() error {
 		case chunk.OP_ITERATOR_CURRENT:
 			{
 				iterator := vm.peek()
-				iteratorObj, ok := heap.GetObject(iterator.GetRegister()).(*object.Iterator)
+				iteratorObj, ok := heap.GetObject(iterator.GetHandle()).(*object.Iterator)
 				if !ok {
 					panic("object is not iterable")
 				}
 
 				vm.push(iteratorObj.Current())
+			}
+		case chunk.OP_CREATE_HEAP_SCOPE:
+			{
+				vm.heapScopesCount++
+				vm.heapVars[vm.heapScopesCount] = []value.Value{}
+				frame.fn.SetHeapScope(vm.heapScopesCount)
+				for _, v := range frame.fn.ValueChunk().Constants {
+					if v.IsObject() {
+						if obj, ok := heap.GetObject(v.GetHandle()).(*object.ObjFunction); ok {
+							obj.SetHeapScope(vm.heapScopesCount)
+						}
+					}
+				}
 			}
 		case chunk.OP_EOF:
 			{
@@ -507,7 +547,7 @@ func (vm *VM) run() error {
 }
 
 func (vm *VM) log(arg value.Value) {
-	fmt.Printf("%s\n", String(arg))
+	fmt.Printf("%s\n", stringer.String(arg))
 }
 
 func Interpret(source []byte) {
@@ -527,7 +567,7 @@ func Interpret(source []byte) {
 
 	startCompile := time.Now()
 	main, err := compiler.Compile(ast)
-	fmt.Printf("AST Compiled in %s", time.Since(startCompile))
+	fmt.Printf("AST Compiled in %s\n", time.Since(startCompile))
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
