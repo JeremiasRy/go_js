@@ -26,20 +26,24 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 	case parser.NODE_FUNCTION_DECLARATION:
-		if _, found := symbolTable.vars[current.Identifier.Name]; found {
+		symbolTable := newFunctionScope(symbolTable, LOCAL)
+		FUNCTION_SCOPES[current] = symbolTable
 
-			symbolTable := newFunctionScope(symbolTable, LOCAL)
-			FUNCTION_SCOPES[current] = symbolTable
+		for _, node := range current.BodyNode.Body {
+			if node.Type == parser.NODE_FUNCTION_DECLARATION {
+				name := node.Identifier.Name
+				arity := len(node.Params)
 
-			for _, param := range current.Params {
-				symbolTable.addVariable(param.Name, LET, false, nil)
+				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
 			}
+		}
 
-			for _, node := range current.BodyNode.Body {
-				prePass(node, symbolTable)
-			}
-		} else {
-			panic("extreme failure to hoist function declaration")
+		for _, param := range current.Params {
+			symbolTable.addVariable(param.Name, LET, false, nil)
+		}
+
+		for _, node := range current.BodyNode.Body {
+			prePass(node, symbolTable)
 		}
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
@@ -132,7 +136,19 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		// check that we found anything and if it's from a upper function scope
 		if table != nil && variable != nil && table != symbolTable && variable.scope != HEAP {
+			heapCount := 0
+
+			for _, v := range table.vars {
+				if v.scope == HEAP {
+					heapCount++
+				} else if v.slot > variable.slot {
+					v.slot--
+				}
+			}
+
 			variable.scope = HEAP
+			variable.slot = max(heapCount-1, 0)
+
 		}
 	case parser.NODE_IF_STATEMENT:
 		prePass(current.Test, symbolTable)
@@ -169,6 +185,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
+	case parser.NODE_CALL_EXPRESSION:
+		for _, node := range current.Arguments {
+			prePass(node, symbolTable)
+		}
 
 	}
 

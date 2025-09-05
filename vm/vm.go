@@ -516,14 +516,8 @@ func (vm *VM) run() error {
 			{
 				vm.heapScopesCount++
 				vm.heapVars[vm.heapScopesCount] = []value.Value{}
+				setHeapScopes(frame.fn.ValueChunk().Constants, vm.heapScopesCount)
 				frame.fn.SetHeapScope(vm.heapScopesCount)
-				for _, v := range frame.fn.ValueChunk().Constants {
-					if v.IsObject() {
-						if obj, ok := heap.GetObject(v.GetHandle()).(*object.ObjFunction); ok {
-							obj.SetHeapScope(vm.heapScopesCount)
-						}
-					}
-				}
 			}
 		case chunk.OP_EOF:
 			{
@@ -532,9 +526,18 @@ func (vm *VM) run() error {
 			}
 		}
 	}
-
 }
 
+func setHeapScopes(constants []value.Value, heapScope int) {
+	for _, v := range constants {
+		if v.IsObject() {
+			if obj, ok := heap.GetObject(v.GetHandle()).(*object.ObjFunction); ok && obj.HeapScope() == -1 {
+				obj.SetHeapScope(heapScope)
+				setHeapScopes(obj.ValueChunk().Constants, heapScope)
+			}
+		}
+	}
+}
 func (vm *VM) log(arg value.Value) {
 	fmt.Printf("%s\n", stringer.String(arg))
 }

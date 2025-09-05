@@ -1,5 +1,11 @@
 function outer() {
+    const jau = "jau"
+    const number = 123
     const x = "value";
+    const y = "neljätoista"
+    console.log(y)
+    console.log(number)
+    console.log(jau)
     function middle() {
         function inner() {
             console.log(x)
