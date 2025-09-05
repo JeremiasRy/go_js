@@ -400,17 +400,6 @@ func (vm *VM) run() error {
 				}
 
 			}
-		case chunk.OP_GET_LOCAL_OBJECT_MEMBER:
-			{
-				slot := int(valueChunk.Code[ip])
-				member := valueChunk.Constants[valueChunk.Code[ip+1]]
-
-				_, obj := object.GetObject(frame.getLocal(slot))
-
-				value := heap.GetObject(obj).(*object.ObjHash).GetMember(stringer.String(member))
-				vm.push(value)
-				ip += 2
-			}
 		case chunk.OP_PUSH_UNDEFINED:
 			{
 				vm.push(value.EncodedUndefined())

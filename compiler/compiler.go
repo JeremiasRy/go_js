@@ -29,11 +29,12 @@ const (
 )
 
 type Variable struct {
-	scope VariableScope
-	type_ VariableType
-	slot  int // for locals and globals
-	init  bool
-	fn    *object.ObjFunction
+	scope      VariableScope
+	type_      VariableType
+	slot       int  // for locals and globals
+	init       bool // used in for of loops
+	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
+	fn         *object.ObjFunction
 }
 
 type Variables map[string]*Variable
@@ -75,7 +76,7 @@ func (fs *FunctionScope) exitBlockScope() {
 	fs.block = fs.block.parent
 }
 
-func (fs *FunctionScope) addVariable(name string, type_ VariableType, fn *object.ObjFunction) {
+func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn *object.ObjFunction) {
 	var mapToAddTo Variables
 
 	if fs.block != nil {
@@ -91,7 +92,7 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, fn *object
 		fmt.Printf("WARN: Already found variable %s from scope\n", name)
 		return
 	}
-	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn}
+	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn, undeclared: undeclared}
 
 	fs.varCount++
 	variable.slot = fs.varCount
@@ -127,7 +128,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	global := heap.Allocate(console)
 	log := heap.Allocate(object.NewLog())
 	console.SetMember("log", value.EncodeObject(log))
-	symbolTable.addVariable("console", CONST, nil)
+	symbolTable.addVariable("console", CONST, false, nil)
 
 	main.ValueChunk().WriteConstant(value.EncodeObject(global))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
@@ -173,6 +174,41 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(node, symbolTable, fn)
 			}
 		}
+	case parser.NODE_ASSIGNMENT_EXPRESSION:
+		{
+			variable, _ := symbolTable.findVariable(current.Left.Name)
+			println(current.Left.Name)
+			println(variable.undeclared)
+			generateByteCode(current.Right, symbolTable, fn)
+			var defineOp uint8
+			var setOp uint8
+
+			switch variable.scope {
+			case LOCAL:
+				{
+					defineOp = chunk.OP_DEFINE_LOCAL
+					setOp = chunk.OP_SET_LOCAL
+				}
+			case GLOBAL:
+				{
+					defineOp = chunk.OP_DEFINE_GLOBAL
+					setOp = chunk.OP_SET_GLOBAL
+				}
+			case HEAP:
+				{
+					defineOp = chunk.OP_DEFINE_HEAP_VAR
+					setOp = chunk.OP_SET_HEAP_VAR
+				}
+			}
+
+			if variable.undeclared {
+				println("should be true?")
+				fn.ValueChunk().EmitByte(defineOp)
+				variable.undeclared = false
+			} else {
+				fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+			}
+		}
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
 			nextFn, _ := symbolTable.findVariable(current.Identifier.Name)
@@ -211,7 +247,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 
 			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
-				fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
+				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 			}
 
 			fn.SetLocalCount(symbolTable.varCount + 1)
