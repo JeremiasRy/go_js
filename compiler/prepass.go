@@ -55,7 +55,43 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
 			}
 		}
-		prePass(current.BodyNode, symbolTable)
+		for _, param := range current.Params {
+			symbolTable.addVariable(param.Name, LET, false, nil)
+		}
+		if current.IsExpression {
+			prePass(current.BodyNode, symbolTable)
+		} else {
+			for _, node := range current.BodyNode.Body {
+				prePass(node, symbolTable)
+			}
+		}
+
+	case parser.NODE_FUNCTION_EXPRESSION:
+		{
+			symbolTable := newFunctionScope(symbolTable, LOCAL)
+			FUNCTION_SCOPES[current] = symbolTable
+
+			// hoist function declarations
+			for _, node := range current.BodyNode.Body {
+				if node.Type == parser.NODE_FUNCTION_DECLARATION {
+					name := node.Identifier.Name
+					arity := len(node.Arguments)
+
+					symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
+				}
+			}
+			for _, param := range current.Params {
+				symbolTable.addVariable(param.Name, LET, false, nil)
+			}
+
+			if current.IsExpression {
+				prePass(current.BodyNode, symbolTable)
+			} else {
+				for _, node := range current.BodyNode.Body {
+					prePass(node, symbolTable)
+				}
+			}
+		}
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
@@ -80,6 +116,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, declaration := range current.Declarations {
 			name := declaration.Identifier.Name
 			symbolTable.addVariable(name, kind, false, nil)
+			prePass(declaration.Initializer, symbolTable)
 		}
 
 	case parser.NODE_RETURN_STATEMENT:

@@ -202,7 +202,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 
 			if variable.undeclared {
-				println("should be true?")
 				fn.ValueChunk().EmitByte(defineOp)
 				variable.undeclared = false
 			} else {
@@ -259,7 +258,35 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			handle := heap.Allocate(newFn)
 			value := value.EncodeObject(handle)
 
-			generateByteCode(current.BodyNode, symbolTable, newFn)
+			if current.IsExpression {
+				generateByteCode(current.BodyNode, symbolTable, newFn)
+			} else {
+				for _, node := range current.BodyNode.Body {
+					generateByteCode(node, symbolTable, newFn)
+				}
+			}
+
+			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
+			}
+
+			newFn.SetLocalCount(symbolTable.varCount)
+			fn.ValueChunk().WriteConstant(value)
+		}
+	case parser.NODE_FUNCTION_EXPRESSION:
+		{
+			symbolTable = FUNCTION_SCOPES[current]
+			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
+			handle := heap.Allocate(newFn)
+			value := value.EncodeObject(handle)
+
+			if current.IsExpression {
+				generateByteCode(current.BodyNode, symbolTable, newFn)
+			} else {
+				for _, node := range current.BodyNode.Body {
+					generateByteCode(node, symbolTable, newFn)
+				}
+			}
 
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
