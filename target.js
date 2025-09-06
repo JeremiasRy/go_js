@@ -2,7 +2,7 @@ let num = 42;
 const str = "Hello, JS!";
 let bool = true;
 let arr = [1, 2, 3];
-let obj = { name: "Grok", age: 3 };
+let obj = { name: "Jeremias", age: 31 };
 let undef;
 let nul = null;
 
@@ -31,7 +31,7 @@ while (count < 3) {
 arr.push(4);
 arr.forEach(item => console.log(`Array item: ${item}`));
 
-obj.job = "AI Assistant";
+obj.job = "Trying my hardest to be a smart developer";
 console.log(obj.name);
 
 console.log(str.toUpperCase());

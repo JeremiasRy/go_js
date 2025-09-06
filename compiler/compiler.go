@@ -371,6 +371,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if variable != nil {
 				if current.Initializer != nil {
 					generateByteCode(current.Initializer, symbolTable, fn)
+				} else if current.Initializer == nil && variable.type_ != FOR_OF {
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 				}
 
 				// for of loop i.e for (const item of arr) {}
@@ -461,6 +463,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				{
 					handle := heap.AllocateString(object.ObjString(v))
 					fn.ValueChunk().WriteConstant(value.EncodeObject(handle))
+				}
+			case bool:
+				{
+					if v {
+						fn.ValueChunk().WriteConstant(value.EncodeTrue())
+					} else {
+						fn.ValueChunk().WriteConstant(value.EncodeFalse())
+
+					}
+				}
+			case nil:
+				{
+					if current.Raw == "null" {
+						fn.ValueChunk().WriteConstant(value.EncodeNil())
+					}
 				}
 			}
 		}

@@ -141,7 +141,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		variable, table := symbolTable.findVariable(current.Name)
 
 		// check that we found anything and if it's from a upper function scope
-		if table != nil && variable != nil && table != symbolTable && variable.scope != HEAP {
+		if table != nil && variable != nil && table != symbolTable && variable.scope == LOCAL {
 			heapScopeVarCount := 0
 			current := symbolTable
 
