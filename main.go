@@ -7,10 +7,10 @@ import (
 	"runtime/pprof"
 )
 
-const DEBUG = false
+const PROFILE = true
 
 func main() {
-	if DEBUG {
+	if PROFILE {
 		f, err := os.Create("cpu.prof")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Could not create CPU profile: %v\n", err)

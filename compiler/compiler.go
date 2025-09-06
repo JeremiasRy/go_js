@@ -64,6 +64,20 @@ func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *Function
 	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, varCount: -1, block: nil}
 }
 
+func (fs *FunctionScope) isInHeapScope() bool {
+	current := fs.parent
+
+	for current != nil {
+		for _, v := range current.vars {
+			if v.scope == HEAP {
+				return true
+			}
+		}
+		current = current.parent
+	}
+	return false
+}
+
 func (fs *FunctionScope) enterBlockScope(node *parser.Node) {
 	if b, found := BLOCK_SCOPES[node]; found {
 		fs.block = b
@@ -214,15 +228,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable = FUNCTION_SCOPES[current]
 
 			fn = nextFn.fn
-			hasHeapValues := false
+			isInHeapScopeAlready := symbolTable.isInHeapScope()
 
 			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
 				if variable.type_ == FUNCTION {
 					functions = append(functions, variable)
 				}
-				if !hasHeapValues && variable.scope == HEAP {
+
+				// if not in heap scope we'll create a new one
+				if !isInHeapScopeAlready && variable.scope == HEAP {
 					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+					isInHeapScopeAlready = true
 				}
 			}
 
@@ -565,7 +582,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_FOR_OF_STATEMENT:
 		{
 			symbolTable.enterBlockScope(current.BodyNode)
-			fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+			fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED) // init iterator value as undefined, will get assigned later
 			generateByteCode(current.Left, symbolTable, fn)
 			generateByteCode(current.Right, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_GET_ITERATOR)

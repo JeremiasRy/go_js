@@ -136,18 +136,22 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		// check that we found anything and if it's from a upper function scope
 		if table != nil && variable != nil && table != symbolTable && variable.scope != HEAP {
-			heapCount := 0
+			heapScopeVarCount := 0
+			current := symbolTable
 
-			for _, v := range table.vars {
-				if v.scope == HEAP {
-					heapCount++
-				} else if v.slot > variable.slot {
-					v.slot--
+			for current != nil {
+				for _, v := range current.vars {
+					if v.scope == HEAP {
+						heapScopeVarCount++
+					} else if current == table && v.slot > variable.slot {
+						v.slot--
+					}
 				}
+				current = current.parent
 			}
 
 			variable.scope = HEAP
-			variable.slot = max(heapCount-1, 0)
+			variable.slot = heapScopeVarCount
 
 		}
 	case parser.NODE_IF_STATEMENT:
@@ -180,7 +184,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Expression, symbolTable)
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		if variable, _ := symbolTable.findVariable(current.Left.Name); variable == nil {
-			println(current.Left.Name)
 			symbolTable.addVariable(current.Left.Name, LET, true, nil)
 		}
 		prePass(current.Left, symbolTable)
