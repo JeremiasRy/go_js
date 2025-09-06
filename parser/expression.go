@@ -490,10 +490,14 @@ func (p *Parser) parseMaybeUnary(refDestructuringErrors *DestructuringErrors, sa
 		sawUnary = true
 	} else if p.Type.prefix {
 		node, update := p.startNode(), p.Type.identifier == TOKEN_INCDEC
-		if uop, ok := p.Value.([]byte); ok {
+
+		switch uop := p.Value.(type) {
+		case []byte:
 			node.UnaryOperator = UnaryOperator(uop)
-		} else {
-			panic("p.Value was not []byte as expected")
+		case string:
+			node.UnaryOperator = UnaryOperator(uop)
+		default:
+			return nil, fmt.Errorf("%v was not string/[]byte as we expected", p.Value)
 		}
 
 		node.Prefix = true

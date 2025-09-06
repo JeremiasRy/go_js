@@ -9,7 +9,7 @@ import (
 	"go_js/value"
 )
 
-const DEBUG = true
+const DEBUG = false
 
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:           "OP_CONSTANT",

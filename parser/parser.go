@@ -77,6 +77,7 @@ func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 			WordsRegexp(syntaxKeywords["5"])
 		}
 	}
+
 	reserved := ""
 	if options.AllowReserved != ALLOW_RESERVED_TRUE {
 		if p.getEcmaVersion() >= 6 {

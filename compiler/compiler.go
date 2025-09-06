@@ -191,8 +191,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
 			variable, _ := symbolTable.findVariable(current.Left.Name)
-			println(current.Left.Name)
-			println(variable.undeclared)
 			generateByteCode(current.Right, symbolTable, fn)
 			var defineOp uint8
 			var setOp uint8
