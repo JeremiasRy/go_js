@@ -5,7 +5,8 @@ function outer() {
         let c = 3;
         let d = 4;
         function inner() {
-            console.log(a + b + c + d);
+            let e = 5
+            console.log(a + b + c + d + e);
         }
         return inner
     }

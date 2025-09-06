@@ -24,6 +24,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, node := range current.Body {
 			prePass(node, symbolTable)
 		}
+	case parser.NODE_BINARY_EXPRESSION:
+		prePass(current.Left, symbolTable)
+		prePass(current.Right, symbolTable)
 
 	case parser.NODE_FUNCTION_DECLARATION:
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
