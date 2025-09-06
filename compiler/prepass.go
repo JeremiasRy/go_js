@@ -8,6 +8,9 @@ import (
 var forOfScope = false
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
+	if current == nil {
+		return
+	}
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 

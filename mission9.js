@@ -1,6 +1,7 @@
 const a = 1
 
 function hello() {
+    hallo()
     const b = 1
     {
         const c = 2
