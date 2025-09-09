@@ -146,6 +146,11 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
 }
 
+func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
+	str := object.ObjString(o.CreateString())
+	return value.EncodeObject(heap.AllocateString(str))
+}
+
 func (vm *VM) run() error {
 	start := time.Now()
 	frame := vm.frames[vm.frameCount-1]
@@ -518,6 +523,32 @@ func (vm *VM) run() error {
 				vm.heapVars[vm.heapScopesCount] = []value.Value{}
 				setHeapScopes(frame.fn.ValueChunk(), vm.heapScopesCount)
 				frame.fn.SetHeapScope(vm.heapScopesCount)
+			}
+		case chunk.OP_TEMPLATE_LITERAL_START:
+			{
+				builder := value.EncodeObject(heap.Allocate(object.NewObjTemplateLiteral()))
+				vm.push(builder)
+			}
+		case chunk.OP_TEMPLATE_PUSH_STRING:
+			{
+				v := vm.pop()
+				builder := vm.peek()
+
+				if b, ok := heap.GetObject(builder.GetHandle()).(*object.ObjTemplateLiteral); ok {
+					b.PushString(stringer.String(v))
+				}
+
+			}
+		case chunk.OP_TEMPLATE_LITERAL_END:
+			{
+				builder := vm.pop()
+
+				if b, ok := heap.GetObject(builder.GetHandle()).(*object.ObjTemplateLiteral); ok {
+					str := b.CreateString()
+					handle := heap.AllocateString(object.ObjString(str))
+					vm.push(value.EncodeObject(handle))
+				}
+
 			}
 		case chunk.OP_EOF:
 			{

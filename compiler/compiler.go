@@ -337,7 +337,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_ELEMENT)
 			}
 			popStack = true
-
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
@@ -619,10 +618,40 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
 			for _, property := range current.Properties {
-
 				fn.ValueChunk().WriteConstant(value.EncodeObject(heap.AllocateString(object.ObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
+			}
+		}
+	case parser.NODE_TEMPLATE_LITERAL:
+		{
+			fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_LITERAL_START)
+			for i := range len(current.Quasis) {
+				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
+				tail := current.Quasis[i].Tail
+				var expr *parser.Node
+				if i < len(current.Expressions) {
+					expr = current.Expressions[i]
+				}
+				if len(quasi.Raw) > 0 {
+
+					fn.ValueChunk().WriteConstant(value.EncodeObject(heap.AllocateString(object.ObjString(quasi.Raw))))
+					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
+				}
+
+				if tail {
+					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_LITERAL_END)
+					break
+				}
+
+				if expr != nil {
+					generateByteCode(expr, symbolTable, fn)
+					if expr.IsExpression {
+						fn.ValueChunk().EmitByte(chunk.OP_CALL)
+					}
+					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
+				}
+
 			}
 
 		}

@@ -198,7 +198,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, node := range current.Arguments {
 			prePass(node, symbolTable)
 		}
-
+	case parser.NODE_TEMPLATE_LITERAL: 
+		for _,node := range  current.Expressions {
+			prePass(node, symbolTable)
+		}
 	}
 
 }
