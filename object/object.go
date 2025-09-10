@@ -24,6 +24,14 @@ const (
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
 
+var ARR_METHOD_HANDLES map[string]uint32
+
+func InitArrMethodMap() {
+	if ARR_METHOD_HANDLES == nil {
+		ARR_METHOD_HANDLES = make(map[string]uint32, 21)
+	}
+}
+
 func GetObject(v value.Value) (bool, uint32) {
 	if v&value.TAG_OBJ == value.TAG_OBJ {
 		return true, v.GetHandle()
@@ -155,6 +163,7 @@ func NewObjArr(length int) *ObjArr {
 	arrObj := &ObjArr{items: make([]value.Value, length), initializedCount: 0, initialized: false}
 	arrObj.Hash = map[string]value.Value{}
 	arrObj.Hash["length"] = value.ValueFromFloat64(float64(length))
+	arrObj.Hash["push"] = value.EncodeHandle(ARR_METHOD_HANDLES["push"])
 
 	return arrObj
 }
@@ -169,6 +178,21 @@ func (arrObj *ObjArr) PushElement(v value.Value) {
 	}
 	arrObj.items = append(arrObj.items, v)
 	arrObj.Hash["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
+}
+
+type Push struct {
+	ObjNativeFn
+}
+
+func NewPush() *Push {
+	p := &Push{}
+	p.name = "push"
+	return &Push{}
+}
+
+func (*Push) Push(arrObj *ObjArr, v value.Value) value.Value {
+	arrObj.PushElement(v)
+	return arrObj.Hash["length"]
 }
 
 func (arrObj *ObjArr) Values() []value.Value {

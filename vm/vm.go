@@ -103,7 +103,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + bObj.(object.ObjString)
-			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(heap.Allocate(object.ObjString(string(res))))
 		} else {
 			// runtime error?
 		}
@@ -115,7 +115,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		if aObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + object.ObjString(stringer.String(b))
 
-			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(heap.Allocate(object.ObjString(string(res))))
 		}
 	}
 
@@ -125,7 +125,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		if bObj.Type() == object.OBJ_STRING {
 			res := object.ObjString(stringer.String(a)) + bObj.(object.ObjString)
 
-			return value.EncodeObject(heap.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(heap.Allocate(object.ObjString(string(res))))
 		}
 	}
 
@@ -148,7 +148,7 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 
 func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	str := object.ObjString(o.CreateString())
-	return value.EncodeObject(heap.AllocateString(str))
+	return value.EncodeHandle(heap.AllocateString(str))
 }
 
 func (vm *VM) run() error {
@@ -365,7 +365,7 @@ func (vm *VM) run() error {
 				objHash := object.NewObjectHash()
 				handle := heap.Allocate(objHash)
 
-				vm.push(value.EncodeObject(handle))
+				vm.push(value.EncodeHandle(handle))
 			}
 		case chunk.OP_SET_OBJECT_MEMBER:
 			{
@@ -384,7 +384,7 @@ func (vm *VM) run() error {
 
 					// check if we have a closure in hand
 					if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope() != -1 {
-						v = value.EncodeObject(heap.Allocate(fn.Clone()))
+						v = value.EncodeHandle(heap.Allocate(fn.Clone()))
 					}
 				}
 
@@ -396,12 +396,24 @@ func (vm *VM) run() error {
 				hash := vm.pop()
 				member := valueChunk.Constants[valueChunk.Code[ip]]
 
-				if objHash, ok := heap.GetObject(hash.GetHandle()).(*object.ObjHash); ok {
-					value := objHash.GetMember(stringer.String(member))
-					vm.push(value)
-					ip++
-				} else {
-					panic("our global was not an object")
+				switch obj := heap.GetObject(hash.GetHandle()).(type) {
+				// should interface this...
+				case *object.ObjArr:
+					{
+						value := obj.GetMember(stringer.String(member))
+						vm.push(value)
+						ip++
+					}
+				case *object.ObjHash:
+					{
+						value := obj.GetMember(stringer.String(member))
+						vm.push(value)
+						ip++
+					}
+				default:
+					{
+						return fmt.Errorf("runtime error: cant get property: %s from: %v", stringer.String(member), hash)
+					}
 				}
 
 			}
@@ -463,7 +475,7 @@ func (vm *VM) run() error {
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
 				arr := object.NewObjArr(length)
-				arrHandle := value.EncodeObject(heap.Allocate(arr))
+				arrHandle := value.EncodeHandle(heap.Allocate(arr))
 				vm.push(arrHandle)
 			}
 		case chunk.OP_PUSH_ELEMENT:
@@ -488,7 +500,7 @@ func (vm *VM) run() error {
 					panic("object is not iterable")
 				}
 
-				vm.push(value.EncodeObject(heap.Allocate(object.NewIterator(iteratorObj))))
+				vm.push(value.EncodeHandle(heap.Allocate(object.NewIterator(iteratorObj))))
 			}
 		case chunk.OP_ITERATOR_NEXT:
 			{
@@ -526,7 +538,7 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_TEMPLATE_LITERAL_START:
 			{
-				builder := value.EncodeObject(heap.Allocate(object.NewObjTemplateLiteral()))
+				builder := value.EncodeHandle(heap.Allocate(object.NewObjTemplateLiteral()))
 				vm.push(builder)
 			}
 		case chunk.OP_TEMPLATE_PUSH_STRING:
@@ -546,7 +558,7 @@ func (vm *VM) run() error {
 				if b, ok := heap.GetObject(builder.GetHandle()).(*object.ObjTemplateLiteral); ok {
 					str := b.CreateString()
 					handle := heap.AllocateString(object.ObjString(str))
-					vm.push(value.EncodeObject(handle))
+					vm.push(value.EncodeHandle(handle))
 				}
 
 			}
@@ -573,6 +585,13 @@ func (vm *VM) log(arg value.Value) {
 	fmt.Printf("%s\n", stringer.String(arg))
 }
 
+func InitMethodHandles() {
+	object.ARR_METHOD_HANDLES = make(map[string]uint32, 21)
+
+	// push
+	object.ARR_METHOD_HANDLES["push"] = heap.Allocate(object.NewPush())
+}
+
 func Interpret(source []byte) {
 	startAstParse := time.Now()
 	ast, err := parser.GetAst(source, nil, 0)
@@ -595,6 +614,8 @@ func Interpret(source []byte) {
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
+
+	InitMethodHandles()
 
 	vm := NewVM()
 	vm.call(main, 0)

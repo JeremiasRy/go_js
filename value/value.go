@@ -82,7 +82,7 @@ func (v Value) GetHandle() uint32 {
 	return uint32(v & ENCODE_MASK)
 }
 
-func EncodeObject(handle uint32) Value {
+func EncodeHandle(handle uint32) Value {
 	return TAG_OBJ | Value(handle)
 }
 

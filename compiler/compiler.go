@@ -141,10 +141,10 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := object.NewObjectHash()
 	global := heap.Allocate(console)
 	log := heap.Allocate(object.NewLog())
-	console.SetMember("log", value.EncodeObject(log))
+	console.SetMember("log", value.EncodeHandle(log))
 	symbolTable.addVariable("console", CONST, false, nil)
 
-	main.ValueChunk().WriteConstant(value.EncodeObject(global))
+	main.ValueChunk().WriteConstant(value.EncodeHandle(global))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
@@ -180,7 +180,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, variable := range functions {
 				fnValue := heap.Allocate(variable.fn)
 
-				fn.ValueChunk().WriteConstant(value.EncodeObject(fnValue))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 			}
 
@@ -247,7 +247,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			for _, variable := range functions {
 				fnValue := heap.Allocate(variable.fn)
-				slot := fn.ValueChunk().WriteConstant(value.EncodeObject(fnValue))
+				slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 
 				if uint8(variable.slot) != slot {
 					panic("things went south")
@@ -271,7 +271,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
 			handle := heap.Allocate(newFn)
-			value := value.EncodeObject(handle)
+			value := value.EncodeHandle(handle)
 
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -293,7 +293,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
 			handle := heap.Allocate(newFn)
-			value := value.EncodeObject(handle)
+			value := value.EncodeHandle(handle)
 
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -358,7 +358,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			generateByteCode(current.Object, symbolTable, fn)
 			member := heap.AllocateString(object.ObjString(current.Property.Name))
-			memberSlot := fn.ValueChunk().AddConstant(value.EncodeObject(member))
+			memberSlot := fn.ValueChunk().AddConstant(value.EncodeHandle(member))
 
 			fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, memberSlot)
 		}
@@ -421,11 +421,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			jumpStart := len(fn.ValueChunk().Code) - 4
 
 			generateByteCode(current.Consequent, symbolTable, fn)
-
+			altJump := 0
+			if current.Alternate != nil {
+				fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+				altJump = len(fn.ValueChunk().Code) - 4
+			}
 			fn.ValueChunk().PatchJump(uint32(jumpStart), uint32(len(fn.ValueChunk().Code)))
 
 			if current.Alternate != nil {
 				generateByteCode(current.Alternate, symbolTable, fn)
+				fn.ValueChunk().PatchJump(uint32(altJump), uint32(len(fn.ValueChunk().Code)))
 			}
 		}
 	case parser.NODE_BINARY_EXPRESSION:
@@ -461,7 +466,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			case []byte:
 				{
 					handle := heap.AllocateString(object.ObjString(v))
-					fn.ValueChunk().WriteConstant(value.EncodeObject(handle))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case bool:
 				{
@@ -618,7 +623,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
 			for _, property := range current.Properties {
-				fn.ValueChunk().WriteConstant(value.EncodeObject(heap.AllocateString(object.ObjString(property.Key.Name))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.AllocateString(object.ObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
@@ -630,12 +635,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
 				tail := current.Quasis[i].Tail
 				var expr *parser.Node
+
 				if i < len(current.Expressions) {
 					expr = current.Expressions[i]
 				}
-				if len(quasi.Raw) > 0 {
 
-					fn.ValueChunk().WriteConstant(value.EncodeObject(heap.AllocateString(object.ObjString(quasi.Raw))))
+				if len(quasi.Raw) > 0 {
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.AllocateString(object.ObjString(quasi.Raw))))
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
 
