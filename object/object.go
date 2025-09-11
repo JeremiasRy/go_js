@@ -179,6 +179,17 @@ func (arrObj *ObjArr) PushElement(v value.Value) {
 	arrObj.Hash["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
 }
 
+type ArrayForEach struct {
+	ObjNativeFn
+	Owner *ObjArr
+}
+
+func NewArrayForEach(owner *ObjArr) *ArrayForEach {
+	f := &ArrayForEach{Owner: owner}
+	f.name = "forEach"
+	return f
+}
+
 type ArrayPush struct {
 	ObjNativeFn
 	owner *ObjArr

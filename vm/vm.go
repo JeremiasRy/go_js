@@ -44,13 +44,14 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
 
+var globals []value.Value
+
 type VM struct {
 	frames     []CallFrame
 	frameCount int
 	stack      []value.Value
 	stackTop   int
 
-	globals         []value.Value
 	heapVars        map[int][]value.Value
 	heapScopesCount int
 }
@@ -58,7 +59,7 @@ type VM struct {
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, globals: []value.Value{}, heapVars: map[int][]value.Value{}, heapScopesCount: -1}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, heapVars: map[int][]value.Value{}, heapScopesCount: -1}
 }
 
 func (vm *VM) call(fn object.Callable, returnIp int) error {
@@ -86,11 +87,11 @@ func (vm *VM) pop() value.Value {
 }
 
 func (vm *VM) addGlobal(v value.Value) {
-	vm.globals = append(vm.globals, v)
+	globals = append(globals, v)
 }
 
 func (vm *VM) getGlobal(global int) value.Value {
-	return vm.globals[global]
+	return globals[global]
 }
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
@@ -158,10 +159,20 @@ func (vm *VM) run() error {
 	ip := 0
 
 	if DEBUG {
+		println()
+		println("-- NEW RUNNER SPAWNED --")
+		println()
+		fmt.Printf("<fn %s>\n", frame.fn.Name())
 		PrintChunk(valueChunk)
 	}
 
 	for {
+		if ip > len(valueChunk.Code)-1 {
+			if DEBUG {
+
+			}
+			return nil
+		}
 		//time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
 		ip++
@@ -345,7 +356,7 @@ func (vm *VM) run() error {
 		case chunk.OP_SET_GLOBAL:
 			{
 				global := valueChunk.Code[ip]
-				vm.globals[global] = vm.pop()
+				globals[global] = vm.pop()
 				ip++
 			}
 		case chunk.OP_DEFINE_LOCAL:
@@ -477,11 +488,34 @@ func (vm *VM) run() error {
 							arg := vm.pop()
 							vm.push(fn.Push(arg))
 						}
+					case *object.ArrayForEach:
+						{
+							callback := vm.pop()
+							iterator := object.NewIterator(fn.Owner)
+							done := iterator.Next()
+
+							obj, err := allocator.GetObject(callback.GetHandle())
+
+							if err != nil {
+								return err
+							}
+
+							if fn, ok := obj.(*object.ObjFunction); ok {
+								for !done {
+									runner := NewVM()
+									item := iterator.Current()
+									runner.push(item)
+									runner.call(fn, 0)
+									runner.run()
+									done = iterator.Next()
+								}
+							}
+							vm.push(value.EncodedUndefined())
+						}
 					}
 				} else {
 					return fmt.Errorf("%s is not a function", stringer.String(callee))
 				}
-
 			}
 		case chunk.OP_RETURN:
 			{
@@ -490,6 +524,15 @@ func (vm *VM) run() error {
 				vm.stackTop -= len(frame.locals)
 				vm.push(value)
 				vm.frameCount--
+
+				if vm.frameCount <= 0 {
+					if DEBUG {
+						println()
+						println("-- RUNNER EXITING --")
+						println()
+					}
+					return nil
+				}
 
 				frame = vm.frames[vm.frameCount-1]
 				valueChunk = *frame.fn.ValueChunk()
@@ -500,6 +543,7 @@ func (vm *VM) run() error {
 				ip += 4
 				arr := object.NewObjArr(length)
 				arr.Hash["push"] = value.EncodeHandle(allocator.Allocate(object.NewArrayPush(arr)))
+				arr.Hash["forEach"] = value.EncodeHandle(allocator.Allocate(object.NewArrayForEach(arr)))
 				handle := allocator.Allocate(arr)
 				vm.push(value.EncodeHandle(handle))
 			}
@@ -577,7 +621,7 @@ func (vm *VM) run() error {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return fmt.Errorf("%s is not an object", stringer.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())

@@ -9,7 +9,7 @@ import (
 	"go_js/value"
 )
 
-const DEBUG = true
+const DEBUG = false
 
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:               "OP_CONSTANT",
@@ -58,12 +58,8 @@ var opNames = map[uint8]string{
 }
 
 func PrintChunk(c value.ValueChunk) {
-	println("--DEBUG BYTECODE--\n")
-	println("<MAIN PROGRAM>")
 	printFunction(c)
 	println()
-
-	println("--DEBUG BYTECODE--")
 }
 
 func printFunction(c value.ValueChunk) {
