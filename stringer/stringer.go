@@ -2,7 +2,7 @@ package stringer
 
 import (
 	"fmt"
-	"go_js/heap"
+	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
 	"strings"
@@ -13,7 +13,7 @@ func DebugString(v value.Value) string {
 		return fmt.Sprintf("%v", v.AsBoolean())
 	} else if v.IsObject() {
 		handle := v.GetHandle()
-		obj := heap.GetObject(handle)
+		obj, _ := allocator.GetObject(handle)
 
 		if obj, ok := obj.(*object.ObjHash); ok {
 			lines := []string{}
@@ -39,7 +39,8 @@ func String(v value.Value) string {
 	if v.IsBoolean() {
 		return fmt.Sprintf("%v", v.AsBoolean())
 	} else if v.IsObject() {
-		return heap.GetObject(v.GetHandle()).String()
+		obj, _ := allocator.GetObject(v.GetHandle())
+		return obj.String()
 	} else if v.IsNaN() {
 		return "NaN"
 	} else if v.IsType(value.TAG_UNDEFINED) {

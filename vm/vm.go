@@ -2,9 +2,9 @@ package vm
 
 import (
 	"fmt"
+	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"
-	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
 	"go_js/stringer"
@@ -94,38 +94,38 @@ func (vm *VM) getGlobal(global int) value.Value {
 }
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
-	aIsObject, aRegister := object.GetObject(a)
-	bIsObject, bRegister := object.GetObject(b)
+	aIsObject, aHandle := object.IsValueObject(a)
+	bIsObject, bHandle := object.IsValueObject(b)
 
 	if aIsObject && bIsObject {
-		aObj := heap.GetObject(aRegister)
-		bObj := heap.GetObject(bRegister)
+		aObj, _ := allocator.GetObject(aHandle)
+		bObj, _ := allocator.GetObject(bHandle)
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + bObj.(object.ObjString)
-			return value.EncodeHandle(heap.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(allocator.Allocate(object.ObjString(res)))
 		} else {
 			// runtime error?
 		}
 	}
 
 	if aIsObject && !bIsObject {
-		aObj := heap.GetObject(aRegister)
+		aObj, _ := allocator.GetObject(aHandle)
 
 		if aObj.Type() == object.OBJ_STRING {
 			res := aObj.(object.ObjString) + object.ObjString(stringer.String(b))
 
-			return value.EncodeHandle(heap.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(allocator.Allocate(object.ObjString(string(res))))
 		}
 	}
 
 	if !aIsObject && bIsObject {
-		bObj := heap.GetObject(bRegister)
+		bObj, _ := allocator.GetObject(bHandle)
 
 		if bObj.Type() == object.OBJ_STRING {
 			res := object.ObjString(stringer.String(a)) + bObj.(object.ObjString)
 
-			return value.EncodeHandle(heap.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(allocator.Allocate(object.ObjString(string(res))))
 		}
 	}
 
@@ -133,8 +133,8 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 }
 
 func (vm *VM) subtract(a, b value.Value) value.Value {
-	aIsObject, _ := object.GetObject(a)
-	bIsObject, _ := object.GetObject(b)
+	aIsObject, _ := object.IsValueObject(a)
+	bIsObject, _ := object.IsValueObject(b)
 	if aIsObject || bIsObject {
 		if aIsObject && bIsObject {
 			// todo
@@ -148,7 +148,7 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 
 func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	str := object.ObjString(o.CreateString())
-	return value.EncodeHandle(heap.AllocateString(str))
+	return value.EncodeHandle(allocator.Allocate(str))
 }
 
 func (vm *VM) run() error {
@@ -262,11 +262,14 @@ func (vm *VM) run() error {
 				b := vm.pop()
 				a := vm.pop()
 
-				bIsObject, bObjRegister := object.GetObject(b)
-				aIsObject, aObjRegister := object.GetObject(a)
+				bIsObject, bHandle := object.IsValueObject(b)
+				aIsObject, aHandle := object.IsValueObject(a)
 
 				if bIsObject && aIsObject {
-					if heap.GetObject(bObjRegister).Type() == heap.GetObject(aObjRegister).Type() {
+					bObj, _ := allocator.GetObject(bHandle)
+					aObj, _ := allocator.GetObject(aHandle)
+
+					if bObj.Type() == aObj.Type() {
 
 					} else {
 						vm.push(value.EncodeFalse())
@@ -363,7 +366,7 @@ func (vm *VM) run() error {
 		case chunk.OP_CREATE_OBJECT:
 			{
 				objHash := object.NewObjectHash()
-				handle := heap.Allocate(objHash)
+				handle := allocator.Allocate(objHash)
 
 				vm.push(value.EncodeHandle(handle))
 			}
@@ -373,30 +376,41 @@ func (vm *VM) run() error {
 				member := vm.pop()
 				hash := vm.peek()
 
-				isObject, handle := object.GetObject(hash)
+				isObject, handle := object.IsValueObject(hash)
 
 				if !isObject {
 					return fmt.Errorf("%v is not an object", hash)
 				}
 
 				if v.IsObject() {
-					obj := heap.GetObject(v.GetHandle())
+					obj, _ := allocator.GetObject(v.GetHandle())
 
 					// check if we have a closure in hand
 					if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope() != -1 {
-						v = value.EncodeHandle(heap.Allocate(fn.Clone()))
+						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
 					}
 				}
 
-				hashObject := heap.GetObject(handle)
-				hashObject.(*object.ObjHash).SetMember(stringer.String(member), v)
+				obj, _ := allocator.GetObject(handle)
+
+				// this needs to be extended in case value is number or whatever
+				if obj, ok := obj.(*object.ObjHash); ok {
+					obj.SetMember(stringer.String(member), v)
+				} else {
+					return fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(v))
+				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
 			{
 				hash := vm.pop()
 				member := valueChunk.Constants[valueChunk.Code[ip]]
+				obj, err := allocator.GetObject(hash.GetHandle())
 
-				switch obj := heap.GetObject(hash.GetHandle()).(type) {
+				if err != nil {
+					return err
+				}
+
+				switch obj := obj.(type) {
 				// should interface this...
 				case *object.ObjArr:
 					{
@@ -424,10 +438,15 @@ func (vm *VM) run() error {
 		case chunk.OP_CALL:
 			{
 				callee := vm.pop()
-				isObject, register := object.GetObject(callee)
+				isObject, handle := object.IsValueObject(callee)
 
 				if isObject {
-					obj := heap.GetObject(register)
+					obj, err := allocator.GetObject(handle)
+
+					if err != nil {
+						return err
+					}
+
 					switch fn := obj.(type) {
 					case object.Callable:
 						{
@@ -475,18 +494,24 @@ func (vm *VM) run() error {
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
 				arr := object.NewObjArr(length)
-				arrHandle := value.EncodeHandle(heap.Allocate(arr))
-				vm.push(arrHandle)
+				handle := allocator.Allocate(arr)
+				vm.push(value.EncodeHandle(handle))
 			}
 		case chunk.OP_PUSH_ELEMENT:
 			{
 				value := vm.pop()
 				arr := vm.peek()
 
-				arrOBj, ok := heap.GetObject(arr.GetHandle()).(*object.ObjArr)
+				obj, err := allocator.GetObject(arr.GetHandle())
+
+				if err != nil {
+					return err
+				}
+
+				arrOBj, ok := obj.(*object.ObjArr)
 
 				if !ok {
-					panic("push called on an object that is not an array")
+					return fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
 				}
 
 				arrOBj.PushElement(value)
@@ -494,21 +519,43 @@ func (vm *VM) run() error {
 		case chunk.OP_GET_ITERATOR:
 			{
 				iteratee := vm.pop()
-				iteratorObj, ok := heap.GetObject(iteratee.GetHandle()).(object.Iterable)
 
-				if !ok {
-					panic("object is not iterable")
+				if !iteratee.IsObject() {
+					return fmt.Errorf("%s is not an object", stringer.String(iteratee))
 				}
 
-				vm.push(value.EncodeHandle(heap.Allocate(object.NewIterator(iteratorObj))))
+				obj, err := allocator.GetObject(iteratee.GetHandle())
+
+				if err != nil {
+					return err
+				}
+
+				iteratorObj, ok := obj.(object.Iterable)
+
+				if !ok {
+					return fmt.Errorf("%s is not iterable", stringer.String(iteratee))
+				}
+
+				vm.push(value.EncodeHandle(allocator.Allocate(object.NewIterator(iteratorObj))))
 			}
 		case chunk.OP_ITERATOR_NEXT:
 			{
 				iterator := vm.peek()
-				iteratorObj, ok := heap.GetObject(iterator.GetHandle()).(*object.Iterator)
+
+				if !iterator.IsObject() {
+					fmt.Errorf("%s is not an object", stringer.String(iterator))
+				}
+
+				obj, err := allocator.GetObject(iterator.GetHandle())
+
+				if err != nil {
+					return err
+				}
+
+				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					panic("object is not iterable")
+					return fmt.Errorf("%s is not iterable", stringer.String(iterator))
 				}
 
 				done := iteratorObj.Next()
@@ -522,9 +569,21 @@ func (vm *VM) run() error {
 		case chunk.OP_ITERATOR_CURRENT:
 			{
 				iterator := vm.peek()
-				iteratorObj, ok := heap.GetObject(iterator.GetHandle()).(*object.Iterator)
+
+				if !iterator.IsObject() {
+					fmt.Errorf("%s is not an object", stringer.String(iterator))
+				}
+
+				obj, err := allocator.GetObject(iterator.GetHandle())
+
+				if err != nil {
+					return err
+				}
+
+				iteratorObj, ok := obj.(*object.Iterator)
+
 				if !ok {
-					panic("object is not iterable")
+					return fmt.Errorf("%s is not iterable", stringer.String(iterator))
 				}
 
 				vm.push(iteratorObj.Current())
@@ -538,7 +597,7 @@ func (vm *VM) run() error {
 			}
 		case chunk.OP_TEMPLATE_LITERAL_START:
 			{
-				builder := value.EncodeHandle(heap.Allocate(object.NewObjTemplateLiteral()))
+				builder := value.EncodeHandle(allocator.Allocate(object.NewObjTemplateLiteral()))
 				vm.push(builder)
 			}
 		case chunk.OP_TEMPLATE_PUSH_STRING:
@@ -546,8 +605,16 @@ func (vm *VM) run() error {
 				v := vm.pop()
 				builder := vm.peek()
 
-				if b, ok := heap.GetObject(builder.GetHandle()).(*object.ObjTemplateLiteral); ok {
+				obj, err := allocator.GetObject(builder.GetHandle())
+
+				if err != nil {
+					return err
+				}
+
+				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
 					b.PushString(stringer.String(v))
+				} else {
+					return fmt.Errorf("%s is not an template literal", stringer.String(builder))
 				}
 
 			}
@@ -555,10 +622,18 @@ func (vm *VM) run() error {
 			{
 				builder := vm.pop()
 
-				if b, ok := heap.GetObject(builder.GetHandle()).(*object.ObjTemplateLiteral); ok {
+				obj, err := allocator.GetObject(builder.GetHandle())
+
+				if err != nil {
+					return err
+				}
+
+				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
 					str := b.CreateString()
-					handle := heap.AllocateString(object.ObjString(str))
+					handle := allocator.Allocate(object.ObjString(str))
 					vm.push(value.EncodeHandle(handle))
+				} else {
+					return fmt.Errorf("%s is not an template literal", stringer.String(builder))
 				}
 
 			}
@@ -571,16 +646,24 @@ func (vm *VM) run() error {
 	}
 }
 
-func setHeapScopes(c *value.ValueChunk, heapScope int) {
+func setHeapScopes(c *value.ValueChunk, heapScope int) error {
 	for _, v := range c.Constants {
 		if v.IsObject() {
-			if obj, ok := heap.GetObject(v.GetHandle()).(*object.ObjFunction); ok && obj.HeapScope() <= heapScope {
+			obj, err := allocator.GetObject(v.GetHandle())
+
+			if err != nil {
+				return err
+			}
+
+			if obj, ok := obj.(*object.ObjFunction); ok && obj.HeapScope() <= heapScope {
 				obj.SetHeapScope(heapScope)
 				setHeapScopes(obj.ValueChunk(), heapScope)
 			}
 		}
 	}
+	return nil
 }
+
 func (vm *VM) log(arg value.Value) {
 	fmt.Printf("%s\n", stringer.String(arg))
 }
@@ -589,7 +672,7 @@ func InitMethodHandles() {
 	object.ARR_METHOD_HANDLES = make(map[string]uint32, 21)
 
 	// push
-	object.ARR_METHOD_HANDLES["push"] = heap.Allocate(object.NewPush())
+	object.ARR_METHOD_HANDLES["push"] = allocator.Allocate(object.NewPush())
 }
 
 func Interpret(source []byte) {

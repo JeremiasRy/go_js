@@ -2,8 +2,8 @@ package vm
 
 import (
 	"fmt"
+	"go_js/allocator"
 	"go_js/chunk"
-	"go_js/heap"
 	"go_js/object"
 	"go_js/stringer"
 	"go_js/value"
@@ -258,7 +258,7 @@ func printFunction(c value.ValueChunk) {
 
 	for _, value := range c.Constants {
 		if value.IsObject() {
-			obj := heap.GetObject(value.GetHandle())
+			obj, _ := allocator.GetObject(value.GetHandle())
 
 			switch f := obj.(type) {
 			case *object.ObjFunction:

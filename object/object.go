@@ -32,7 +32,7 @@ func InitArrMethodMap() {
 	}
 }
 
-func GetObject(v value.Value) (bool, uint32) {
+func IsValueObject(v value.Value) (bool, uint32) {
 	if v&value.TAG_OBJ == value.TAG_OBJ {
 		return true, v.GetHandle()
 	}
@@ -163,7 +163,6 @@ func NewObjArr(length int) *ObjArr {
 	arrObj := &ObjArr{items: make([]value.Value, length), initializedCount: 0, initialized: false}
 	arrObj.Hash = map[string]value.Value{}
 	arrObj.Hash["length"] = value.ValueFromFloat64(float64(length))
-	arrObj.Hash["push"] = value.EncodeHandle(ARR_METHOD_HANDLES["push"])
 
 	return arrObj
 }

@@ -3,8 +3,8 @@ package compiler
 import (
 	"cmp"
 	"fmt"
+	"go_js/allocator"
 	"go_js/chunk"
-	"go_js/heap"
 	"go_js/object"
 	"go_js/parser"
 	"go_js/value"
@@ -139,8 +139,8 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := object.NewObjectHash()
-	global := heap.Allocate(console)
-	log := heap.Allocate(object.NewLog())
+	global := allocator.Allocate(console)
+	log := allocator.Allocate(object.NewLog())
 	console.SetMember("log", value.EncodeHandle(log))
 	symbolTable.addVariable("console", CONST, false, nil)
 
@@ -178,7 +178,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			})
 
 			for _, variable := range functions {
-				fnValue := heap.Allocate(variable.fn)
+				fnValue := allocator.Allocate(variable.fn)
 
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
@@ -246,7 +246,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			})
 
 			for _, variable := range functions {
-				fnValue := heap.Allocate(variable.fn)
+				fnValue := allocator.Allocate(variable.fn)
 				slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 
 				if uint8(variable.slot) != slot {
@@ -270,7 +270,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
-			handle := heap.Allocate(newFn)
+			handle := allocator.Allocate(newFn)
 			value := value.EncodeHandle(handle)
 
 			if current.IsExpression {
@@ -292,7 +292,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
-			handle := heap.Allocate(newFn)
+			handle := allocator.Allocate(newFn)
 			value := value.EncodeHandle(handle)
 
 			if current.IsExpression {
@@ -357,8 +357,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			generateByteCode(current.Object, symbolTable, fn)
-			member := heap.AllocateString(object.ObjString(current.Property.Name))
-			memberSlot := fn.ValueChunk().AddConstant(value.EncodeHandle(member))
+			handle := allocator.Allocate(object.ObjString(current.Property.Name))
+			memberSlot := fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
 
 			fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, memberSlot)
 		}
@@ -465,7 +465,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					handle := heap.AllocateString(object.ObjString(v))
+					handle := allocator.Allocate(object.ObjString(v))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case bool:
@@ -623,7 +623,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
 			for _, property := range current.Properties {
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.AllocateString(object.ObjString(property.Key.Name))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.ObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
@@ -641,7 +641,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if len(quasi.Raw) > 0 {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.AllocateString(object.ObjString(quasi.Raw))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.ObjString(quasi.Raw))))
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
 
