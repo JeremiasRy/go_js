@@ -1,8 +1,6 @@
 package heap
 
-import (
-	"go_js/object"
-)
+import "go_js/object"
 
 type Heap struct {
 	objects  []object.Object

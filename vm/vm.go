@@ -472,6 +472,11 @@ func (vm *VM) run() error {
 						{
 							vm.push(fn.Clock())
 						}
+					case *object.ArrayPush:
+						{
+							arg := vm.pop()
+							vm.push(fn.Push(arg))
+						}
 					}
 				} else {
 					return fmt.Errorf("%s is not a function", stringer.String(callee))
@@ -494,6 +499,7 @@ func (vm *VM) run() error {
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
 				arr := object.NewObjArr(length)
+				arr.Hash["push"] = value.EncodeHandle(allocator.Allocate(object.NewArrayPush(arr)))
 				handle := allocator.Allocate(arr)
 				vm.push(value.EncodeHandle(handle))
 			}
@@ -543,7 +549,7 @@ func (vm *VM) run() error {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return fmt.Errorf("%s is not an object", stringer.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
@@ -668,13 +674,6 @@ func (vm *VM) log(arg value.Value) {
 	fmt.Printf("%s\n", stringer.String(arg))
 }
 
-func InitMethodHandles() {
-	object.ARR_METHOD_HANDLES = make(map[string]uint32, 21)
-
-	// push
-	object.ARR_METHOD_HANDLES["push"] = allocator.Allocate(object.NewPush())
-}
-
 func Interpret(source []byte) {
 	startAstParse := time.Now()
 	ast, err := parser.GetAst(source, nil, 0)
@@ -697,8 +696,6 @@ func Interpret(source []byte) {
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
-
-	InitMethodHandles()
 
 	vm := NewVM()
 	vm.call(main, 0)

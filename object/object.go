@@ -179,19 +179,20 @@ func (arrObj *ObjArr) PushElement(v value.Value) {
 	arrObj.Hash["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))
 }
 
-type Push struct {
+type ArrayPush struct {
 	ObjNativeFn
+	owner *ObjArr
 }
 
-func NewPush() *Push {
-	p := &Push{}
+func NewArrayPush(owner *ObjArr) *ArrayPush {
+	p := &ArrayPush{owner: owner}
 	p.name = "push"
-	return &Push{}
+	return p
 }
 
-func (*Push) Push(arrObj *ObjArr, v value.Value) value.Value {
-	arrObj.PushElement(v)
-	return arrObj.Hash["length"]
+func (p *ArrayPush) Push(v value.Value) value.Value {
+	p.owner.PushElement(v)
+	return p.owner.Hash["length"]
 }
 
 func (arrObj *ObjArr) Values() []value.Value {
