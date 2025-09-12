@@ -195,12 +195,20 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
 	case parser.NODE_CALL_EXPRESSION:
+		prePass(current.Callee, symbolTable)
 		for _, node := range current.Arguments {
 			prePass(node, symbolTable)
 		}
-	case parser.NODE_TEMPLATE_LITERAL: 
-		for _,node := range  current.Expressions {
+	case parser.NODE_TEMPLATE_LITERAL:
+		for _, node := range current.Expressions {
 			prePass(node, symbolTable)
+		}
+	case parser.NODE_MEMBER_EXPRESSION:
+		{
+			prePass(current.Object, symbolTable)
+			for _, node := range current.Arguments {
+				prePass(node, symbolTable)
+			}
 		}
 	}
 

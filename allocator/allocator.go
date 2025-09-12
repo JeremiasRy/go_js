@@ -7,13 +7,13 @@ import (
 )
 
 var allocator = make(map[uint32]uint32)
-var strings = make(map[object.ObjString]uint32)
+var strings = make(map[string]uint32)
 var handleCount uint32 = 0
 var h = heap.NewHeap()
 
 func Allocate(obj object.Object) uint32 {
-	if obj, ok := obj.(object.ObjString); ok {
-		if ptr, found := strings[obj]; found {
+	if obj, ok := obj.(*object.ObjString); ok {
+		if ptr, found := strings[obj.Value]; found {
 			handle := handleCount
 			allocator[handle] = ptr
 
@@ -21,7 +21,7 @@ func Allocate(obj object.Object) uint32 {
 			return handle
 		} else {
 			ptr := h.Allocate(obj)
-			strings[obj] = ptr
+			strings[obj.Value] = ptr
 			return Allocate(obj)
 		}
 	}

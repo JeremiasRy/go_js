@@ -345,8 +345,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
-			popStack = prevPopStack
 			generateByteCode(current.Callee, symbolTable, fn)
+			popStack = prevPopStack
 
 			fn.ValueChunk().EmitByte(chunk.OP_CALL)
 
@@ -357,7 +357,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			generateByteCode(current.Object, symbolTable, fn)
-			handle := allocator.Allocate(object.ObjString(current.Property.Name))
+			handle := allocator.Allocate(object.NewObjString(current.Property.Name))
 			memberSlot := fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
 
 			fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, memberSlot)
@@ -465,7 +465,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					handle := allocator.Allocate(object.ObjString(v))
+					objStr := object.NewObjString(string(v))
+					// boxer would be useful here also
+					objStr.Hash["toUpperCase"] = value.EncodeHandle(allocator.Allocate(object.NewStringToUpperCase(objStr)))
+					objStr.Hash["includes"] = value.EncodeHandle(allocator.Allocate(object.NewStringIncludes(objStr)))
+					handle := allocator.Allocate(objStr)
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case bool:
@@ -623,7 +627,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
 			for _, property := range current.Properties {
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.ObjString(property.Key.Name))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.NewObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
@@ -641,7 +645,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if len(quasi.Raw) > 0 {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.ObjString(quasi.Raw))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.NewObjString(quasi.Raw))))
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
 
@@ -657,9 +661,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					}
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
-
 			}
-
 		}
 	}
 }

@@ -15,7 +15,7 @@ func DebugString(v value.Value) string {
 		handle := v.GetHandle()
 		obj, _ := allocator.GetObject(handle)
 
-		if obj, ok := obj.(*object.ObjHash); ok {
+		if obj, ok := obj.(*object.ObjObject); ok {
 			lines := []string{}
 			for k, v := range obj.Hash {
 				lines = append(lines, fmt.Sprintf("%s: %s", k, DebugString(v)))

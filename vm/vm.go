@@ -14,6 +14,13 @@ import (
 	"time"
 )
 
+const STACK_MAX = math.MaxUint8
+const FRAMES_MAX = 64
+
+var globals []value.Value
+var heapVars = make(map[int][]value.Value)
+var heapScopesCount int
+
 type CallFrame struct {
 	fn        object.Callable
 	locals    []value.Value
@@ -41,25 +48,17 @@ func (cf *CallFrame) getLocal(index int) value.Value {
 	return cf.locals[index]
 }
 
-const STACK_MAX = math.MaxUint8
-const FRAMES_MAX = 64
-
-var globals []value.Value
-
 type VM struct {
 	frames     []CallFrame
 	frameCount int
 	stack      []value.Value
 	stackTop   int
-
-	heapVars        map[int][]value.Value
-	heapScopesCount int
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, heapVars: map[int][]value.Value{}, heapScopesCount: -1}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0}
 }
 
 func (vm *VM) call(fn object.Callable, returnIp int) error {
@@ -103,8 +102,8 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(bHandle)
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			res := aObj.(object.ObjString) + bObj.(object.ObjString)
-			return value.EncodeHandle(allocator.Allocate(object.ObjString(res)))
+			res := aObj.(*object.ObjString).Value + bObj.(*object.ObjString).Value
+			return value.EncodeHandle(allocator.Allocate(object.NewObjString(res)))
 		} else {
 			// runtime error?
 		}
@@ -114,9 +113,9 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		aObj, _ := allocator.GetObject(aHandle)
 
 		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.(object.ObjString) + object.ObjString(stringer.String(b))
+			res := aObj.(*object.ObjString).Value + stringer.String(b)
 
-			return value.EncodeHandle(allocator.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(allocator.Allocate(object.NewObjString(res)))
 		}
 	}
 
@@ -124,9 +123,9 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(bHandle)
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := object.ObjString(stringer.String(a)) + bObj.(object.ObjString)
+			res := object.NewObjString(stringer.String(a) + bObj.(*object.ObjString).Value)
 
-			return value.EncodeHandle(allocator.Allocate(object.ObjString(string(res))))
+			return value.EncodeHandle(allocator.Allocate(res))
 		}
 	}
 
@@ -148,11 +147,11 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 }
 
 func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
-	str := object.ObjString(o.CreateString())
-	return value.EncodeHandle(allocator.Allocate(str))
+	objStr := object.NewObjString(o.CreateString())
+	return value.EncodeHandle(allocator.Allocate(objStr))
 }
 
-func (vm *VM) run() error {
+func (vm *VM) run() (value.Value, error) {
 	start := time.Now()
 	frame := vm.frames[vm.frameCount-1]
 	valueChunk := *frame.fn.ValueChunk()
@@ -167,12 +166,6 @@ func (vm *VM) run() error {
 	}
 
 	for {
-		if ip > len(valueChunk.Code)-1 {
-			if DEBUG {
-
-			}
-			return nil
-		}
 		//time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
 		ip++
@@ -323,9 +316,9 @@ func (vm *VM) run() error {
 		case chunk.OP_DEFINE_HEAP_VAR:
 			{
 				variable := vm.pop()
-				if scope, found := vm.heapVars[frame.fn.HeapScope()]; found {
+				if scope, found := heapVars[frame.fn.HeapScope()]; found {
 					scope = append(scope, variable)
-					vm.heapVars[frame.fn.HeapScope()] = scope
+					heapVars[frame.fn.HeapScope()] = scope
 				} else {
 					panic("no heap scope generated for function")
 				}
@@ -334,13 +327,13 @@ func (vm *VM) run() error {
 			{
 				heapVar := valueChunk.Code[ip]
 				ip++
-				vm.push(vm.heapVars[frame.fn.HeapScope()][heapVar])
+				vm.push(heapVars[frame.fn.HeapScope()][heapVar])
 			}
 		case chunk.OP_SET_HEAP_VAR:
 			{
 				heapVar := valueChunk.Code[ip]
 				ip++
-				vm.heapVars[frame.fn.HeapScope()][heapVar] = vm.pop()
+				heapVars[frame.fn.HeapScope()][heapVar] = vm.pop()
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
@@ -390,7 +383,7 @@ func (vm *VM) run() error {
 				isObject, handle := object.IsValueObject(hash)
 
 				if !isObject {
-					return fmt.Errorf("%v is not an object", hash)
+					return value.EncodedUndefined(), fmt.Errorf("%v is not an object", hash)
 				}
 
 				if v.IsObject() {
@@ -405,10 +398,10 @@ func (vm *VM) run() error {
 				obj, _ := allocator.GetObject(handle)
 
 				// this needs to be extended in case value is number or whatever
-				if obj, ok := obj.(*object.ObjHash); ok {
+				if obj, ok := obj.(*object.ObjObject); ok {
 					obj.SetMember(stringer.String(member), v)
 				} else {
-					return fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(v))
+					return value.EncodedUndefined(), fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(v))
 				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
@@ -418,7 +411,7 @@ func (vm *VM) run() error {
 				obj, err := allocator.GetObject(hash.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				switch obj := obj.(type) {
@@ -429,7 +422,13 @@ func (vm *VM) run() error {
 						vm.push(value)
 						ip++
 					}
-				case *object.ObjHash:
+				case *object.ObjObject:
+					{
+						value := obj.GetMember(stringer.String(member))
+						vm.push(value)
+						ip++
+					}
+				case *object.ObjString:
 					{
 						value := obj.GetMember(stringer.String(member))
 						vm.push(value)
@@ -437,7 +436,7 @@ func (vm *VM) run() error {
 					}
 				default:
 					{
-						return fmt.Errorf("runtime error: cant get property: %s from: %v", stringer.String(member), hash)
+						return value.EncodedUndefined(), fmt.Errorf("runtime error: cant get property: %s from: %v", stringer.String(member), hash)
 					}
 				}
 
@@ -455,7 +454,7 @@ func (vm *VM) run() error {
 					obj, err := allocator.GetObject(handle)
 
 					if err != nil {
-						return err
+						return value.EncodedUndefined(), err
 					}
 
 					switch fn := obj.(type) {
@@ -497,7 +496,7 @@ func (vm *VM) run() error {
 							obj, err := allocator.GetObject(callback.GetHandle())
 
 							if err != nil {
-								return err
+								return value.EncodedUndefined(), err
 							}
 
 							if fn, ok := obj.(*object.ObjFunction); ok {
@@ -510,11 +509,67 @@ func (vm *VM) run() error {
 									done = iterator.Next()
 								}
 							}
+
 							vm.push(value.EncodedUndefined())
+						}
+					case *object.ArrayFilter:
+						{
+							callback := vm.pop()
+							iterator := object.NewIterator(fn.Owner)
+							done := iterator.Next()
+
+							obj, err := allocator.GetObject(callback.GetHandle())
+
+							if err != nil {
+								return value.EncodedUndefined(), err
+							}
+
+							arr := []value.Value{}
+
+							if fn, ok := obj.(*object.ObjFunction); ok {
+								for !done {
+									runner := NewVM()
+									item := iterator.Current()
+									runner.push(item)
+									runner.call(fn, 0)
+									result, err := runner.run()
+
+									if err != nil {
+										return value.EncodedUndefined(), err
+									}
+
+									if result.AsBoolean() {
+										arr = append(arr, item)
+									}
+
+									done = iterator.Next()
+								}
+							}
+
+							objArr := object.NewObjArr(len(arr))
+							objArr.Hash["push"] = value.EncodeHandle(allocator.Allocate(object.NewArrayPush(objArr)))
+							objArr.Hash["forEach"] = value.EncodeHandle(allocator.Allocate(object.NewArrayForEach(objArr)))
+							objArr.Hash["filter"] = value.EncodeHandle(allocator.Allocate(object.NewArrayFilter(objArr)))
+
+							for _, item := range arr {
+								objArr.PushElement(item)
+							}
+
+							v := value.EncodeHandle(allocator.Allocate(objArr))
+							vm.push(v)
+						}
+					case *object.StringToUpperCase:
+						{
+							vm.push(value.EncodeHandle(allocator.Allocate(fn.ToUpperCase())))
+						}
+					case *object.StringIncludes:
+						{
+							arg := vm.pop()
+							vm.push(fn.Includes(stringer.String(arg)))
 						}
 					}
 				} else {
-					return fmt.Errorf("%s is not a function", stringer.String(callee))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(callee))
 				}
 			}
 		case chunk.OP_RETURN:
@@ -525,13 +580,14 @@ func (vm *VM) run() error {
 				vm.push(value)
 				vm.frameCount--
 
+				// Main program ends at EOF, if we run out of CallFrames it means we spawned a new VM to run some arbitrary code
 				if vm.frameCount <= 0 {
 					if DEBUG {
 						println()
 						println("-- RUNNER EXITING --")
 						println()
 					}
-					return nil
+					return value, nil
 				}
 
 				frame = vm.frames[vm.frameCount-1]
@@ -542,48 +598,52 @@ func (vm *VM) run() error {
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
 				arr := object.NewObjArr(length)
+
+				// maybe a new package? boxer? To clean up run()
 				arr.Hash["push"] = value.EncodeHandle(allocator.Allocate(object.NewArrayPush(arr)))
 				arr.Hash["forEach"] = value.EncodeHandle(allocator.Allocate(object.NewArrayForEach(arr)))
+				arr.Hash["filter"] = value.EncodeHandle(allocator.Allocate(object.NewArrayFilter(arr)))
+
 				handle := allocator.Allocate(arr)
 				vm.push(value.EncodeHandle(handle))
 			}
 		case chunk.OP_PUSH_ELEMENT:
 			{
-				value := vm.pop()
+				v := vm.pop()
 				arr := vm.peek()
 
 				obj, err := allocator.GetObject(arr.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				arrOBj, ok := obj.(*object.ObjArr)
 
 				if !ok {
-					return fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
+					return value.EncodedUndefined(), fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
 				}
 
-				arrOBj.PushElement(value)
+				arrOBj.PushElement(v)
 			}
 		case chunk.OP_GET_ITERATOR:
 			{
 				iteratee := vm.pop()
 
 				if !iteratee.IsObject() {
-					return fmt.Errorf("%s is not an object", stringer.String(iteratee))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not an object", stringer.String(iteratee))
 				}
 
 				obj, err := allocator.GetObject(iteratee.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				iteratorObj, ok := obj.(object.Iterable)
 
 				if !ok {
-					return fmt.Errorf("%s is not iterable", stringer.String(iteratee))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not iterable", stringer.String(iteratee))
 				}
 
 				vm.push(value.EncodeHandle(allocator.Allocate(object.NewIterator(iteratorObj))))
@@ -593,19 +653,19 @@ func (vm *VM) run() error {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					return fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not an object", stringer.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					return fmt.Errorf("%s is not iterable", stringer.String(iterator))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not iterable", stringer.String(iterator))
 				}
 
 				done := iteratorObj.Next()
@@ -621,29 +681,29 @@ func (vm *VM) run() error {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					return fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not an object", stringer.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					return fmt.Errorf("%s is not iterable", stringer.String(iterator))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not iterable", stringer.String(iterator))
 				}
 
 				vm.push(iteratorObj.Current())
 			}
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
-				vm.heapScopesCount++
-				vm.heapVars[vm.heapScopesCount] = []value.Value{}
-				setHeapScopes(frame.fn.ValueChunk(), vm.heapScopesCount)
-				frame.fn.SetHeapScope(vm.heapScopesCount)
+				heapScopesCount++
+				heapVars[heapScopesCount] = []value.Value{}
+				setHeapScopes(frame.fn.ValueChunk(), heapScopesCount)
+				frame.fn.SetHeapScope(heapScopesCount)
 			}
 		case chunk.OP_TEMPLATE_LITERAL_START:
 			{
@@ -658,13 +718,13 @@ func (vm *VM) run() error {
 				obj, err := allocator.GetObject(builder.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
 					b.PushString(stringer.String(v))
 				} else {
-					return fmt.Errorf("%s is not an template literal", stringer.String(builder))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
 				}
 
 			}
@@ -675,22 +735,22 @@ func (vm *VM) run() error {
 				obj, err := allocator.GetObject(builder.GetHandle())
 
 				if err != nil {
-					return err
+					return value.EncodedUndefined(), err
 				}
 
 				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
 					str := b.CreateString()
-					handle := allocator.Allocate(object.ObjString(str))
+					handle := allocator.Allocate(object.NewObjString(str))
 					vm.push(value.EncodeHandle(handle))
 				} else {
-					return fmt.Errorf("%s is not an template literal", stringer.String(builder))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
 				}
 
 			}
 		case chunk.OP_EOF:
 			{
 				fmt.Printf("Thanks! %s\n", time.Since(start))
-				return nil
+				return value.EncodedUndefined(), nil
 			}
 		}
 	}
@@ -743,7 +803,7 @@ func Interpret(source []byte) {
 
 	vm := NewVM()
 	vm.call(main, 0)
-	err = vm.run()
+	_, err = vm.run()
 
 	if err != nil {
 		log.Fatalf("runtime error: %s", err.Error())

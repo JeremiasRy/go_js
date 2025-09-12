@@ -4,7 +4,6 @@ import "go_js/object"
 
 type Heap struct {
 	objects  []object.Object
-	strings  map[string]uint32
 	freeList []uint32
 }
 
@@ -29,5 +28,5 @@ func (heap *Heap) GetObject(ptr uint32) object.Object {
 }
 
 func NewHeap() *Heap {
-	return &Heap{objects: []object.Object{}, freeList: []uint32{}, strings: map[string]uint32{}}
+	return &Heap{objects: []object.Object{}, freeList: []uint32{}}
 }
