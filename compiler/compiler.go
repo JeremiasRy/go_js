@@ -139,12 +139,21 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := object.NewObjectHash()
-	global := allocator.Allocate(console)
-	log := allocator.Allocate(object.NewLog())
-	console.SetMember("log", value.EncodeHandle(log))
+	consoleHandle := allocator.Allocate(console)
+	logHandle := allocator.Allocate(object.NewLog())
+	console.SetMember("log", value.EncodeHandle(logHandle))
 	symbolTable.addVariable("console", CONST, false, nil)
 
-	main.ValueChunk().WriteConstant(value.EncodeHandle(global))
+	main.ValueChunk().WriteConstant(value.EncodeHandle(consoleHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineError(main *object.ObjFunction, symbolTable *FunctionScope) {
+	ctor := &object.ErrorConstructor{}
+	ctorHandle := allocator.Allocate(ctor)
+
+	symbolTable.addVariable("Error", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
@@ -152,8 +161,9 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 	defineConsole(main, symbolTable)
-	prePass(ast, symbolTable)
+	defineError(main, symbolTable)
 
+	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
 
 	main.ValueChunk().EmitByte(chunk.OP_EOF)
@@ -426,11 +436,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 				altJump = len(fn.ValueChunk().Code) - 4
 			}
-			fn.ValueChunk().PatchJump(uint32(jumpStart), uint32(len(fn.ValueChunk().Code)))
+			fn.ValueChunk().PatchUint32(uint32(jumpStart), uint32(len(fn.ValueChunk().Code)))
 
 			if current.Alternate != nil {
 				generateByteCode(current.Alternate, symbolTable, fn)
-				fn.ValueChunk().PatchJump(uint32(altJump), uint32(len(fn.ValueChunk().Code)))
+				fn.ValueChunk().PatchUint32(uint32(altJump), uint32(len(fn.ValueChunk().Code)))
 			}
 		}
 	case parser.NODE_BINARY_EXPRESSION:
@@ -509,6 +519,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				return
 			}
 
+			if variable.undeclared {
+				switch variable.scope {
+				case GLOBAL:
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+				case LOCAL:
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+				case HEAP:
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_HEAP_VAR)
+				}
+			}
+
 			switch variable.scope {
 			case GLOBAL:
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(variable.slot))
@@ -530,8 +551,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 
-			fn.ValueChunk().PatchJump(uint32(len(fn.ValueChunk().Code)-4), testStart)
-			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), testStart)
+			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 		}
 	case parser.NODE_UPDATE_EXPRESSION:
 		{
@@ -598,9 +619,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Update, symbolTable, fn)
 			symbolTable.exitBlockScope()
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
-			fn.ValueChunk().PatchJump(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
+			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
 
-			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 		}
 	case parser.NODE_FOR_OF_STATEMENT:
 		{
@@ -619,7 +640,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 			fn.ValueChunk().EmitByte(chunk.OP_JUMP)
 			fn.ValueChunk().EmitUint32(jumpStart - 2)
-			fn.ValueChunk().PatchJump(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
@@ -662,6 +683,37 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
 			}
+		}
+	case parser.NODE_TRY_STATEMENT:
+		{
+			fn.ValueChunk().EmitBytes(chunk.OP_TRY_BLOCK, 0, 0, 0, 0)
+			tryStart := uint32(len(fn.ValueChunk().Code) - 4)
+
+			generateByteCode(current.Block, symbolTable, fn)
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+			fn.ValueChunk().PatchUint32(tryStart, uint32(len(fn.ValueChunk().Code)))
+
+			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
+			generateByteCode(current.Handler, symbolTable, fn)
+			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
+		}
+	case parser.NODE_CATCH_CLAUSE:
+		{
+
+			generateByteCode(current.BodyNode, symbolTable, fn)
+		}
+	case parser.NODE_THROW_STATEMENT:
+		{
+			generateByteCode(current.Argument, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_THROW)
+		}
+	case parser.NODE_NEW_EXPRESSION:
+		{
+			for _, node := range current.Arguments {
+				generateByteCode(node, symbolTable, fn)
+			}
+			generateByteCode(current.Callee, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_NEW)
 		}
 	}
 }

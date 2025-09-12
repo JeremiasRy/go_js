@@ -140,6 +140,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_IDENTIFIER:
 		variable, table := symbolTable.findVariable(current.Name)
 
+		if variable == nil {
+			symbolTable.addVariable(current.Name, LET, true, nil)
+		}
+
 		// check that we found anything and if it's from a upper function scope
 		if table != nil && variable != nil && table != symbolTable && variable.scope == LOCAL {
 			heapScopeVarCount := 0
@@ -206,6 +210,29 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			prePass(current.Object, symbolTable)
+			for _, node := range current.Arguments {
+				prePass(node, symbolTable)
+			}
+		}
+	case parser.NODE_TRY_STATEMENT:
+		{
+			prePass(current.Block, symbolTable)
+			prePass(current.Handler, symbolTable)
+		}
+	case parser.NODE_CATCH_CLAUSE:
+		{
+			prePass(current.BodyNode, symbolTable)
+			symbolTable.enterBlockScope(current.BodyNode)
+			prePass(current.Param, symbolTable)
+			symbolTable.exitBlockScope()
+		}
+	case parser.NODE_THROW_STATEMENT:
+		{
+			prePass(current.Argument, symbolTable)
+		}
+	case parser.NODE_NEW_EXPRESSION:
+		{
+			prePass(current.Callee, symbolTable)
 			for _, node := range current.Arguments {
 				prePass(node, symbolTable)
 			}

@@ -53,12 +53,14 @@ type VM struct {
 	frameCount int
 	stack      []value.Value
 	stackTop   int
+
+	exceptionStack []int
 }
 
 func NewVM() *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}}
 }
 
 func (vm *VM) call(fn object.Callable, returnIp int) error {
@@ -745,7 +747,47 @@ func (vm *VM) run() (value.Value, error) {
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
 				}
+			}
+		case chunk.OP_TRY_BLOCK:
+			{
+				catchStart := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
+				ip += 4
+				vm.exceptionStack = append(vm.exceptionStack, catchStart)
+			}
+		case chunk.OP_NEW:
+			{
+				callee := vm.pop()
+				obj, err := allocator.GetObject(callee.GetHandle())
 
+				if err != nil {
+					return value.EncodedUndefined(), err
+				}
+
+				switch ctor := obj.(type) {
+				case *object.ErrorConstructor:
+					{
+						arg := vm.pop()
+						obj, err := allocator.GetObject(arg.GetHandle())
+
+						if err != nil {
+							return value.EncodedUndefined(), err
+						}
+
+						if str, ok := obj.(*object.ObjString); ok {
+							newError := ctor.New(str.Value)
+							v := value.EncodeHandle(allocator.Allocate(newError))
+							vm.push(v)
+						}
+
+					}
+				}
+			}
+		case chunk.OP_THROW:
+			{
+				to := vm.exceptionStack[len(vm.exceptionStack)-1]
+				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+
+				ip = to
 			}
 		case chunk.OP_EOF:
 			{

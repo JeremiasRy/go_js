@@ -42,11 +42,11 @@ func (c *ValueChunk) AddConstant(v Value) uint8 {
 	return uint8(len(c.Constants) - 1)
 }
 
-func (c *ValueChunk) PatchJump(jumpStart uint32, to uint32) {
-	c.Code[jumpStart+3] = uint8(to & math.MaxUint8)
-	c.Code[jumpStart+2] = uint8(to>>8) & math.MaxUint8
-	c.Code[jumpStart+1] = uint8(to>>16) & math.MaxUint8
-	c.Code[jumpStart] = uint8(to>>24) & math.MaxUint8
+func (c *ValueChunk) PatchUint32(from uint32, u32 uint32) {
+	c.Code[from+3] = uint8(u32 & math.MaxUint8)
+	c.Code[from+2] = uint8(u32>>8) & math.MaxUint8
+	c.Code[from+1] = uint8(u32>>16) & math.MaxUint8
+	c.Code[from] = uint8(u32>>24) & math.MaxUint8
 }
 
 func (c *ValueChunk) EmitByte(b uint8) {

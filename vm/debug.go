@@ -9,7 +9,7 @@ import (
 	"go_js/value"
 )
 
-const DEBUG = false
+const DEBUG = true
 
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:               "OP_CONSTANT",
@@ -54,6 +54,9 @@ var opNames = map[uint8]string{
 	chunk.OP_TEMPLATE_LITERAL_START: "OP_TEMPLATE_LITERAL_START",
 	chunk.OP_TEMPLATE_PUSH_STRING:   "OP_TEMPLATE_PUSH_STRING",
 	chunk.OP_TEMPLATE_LITERAL_END:   "OP_TEMPLATE_LITERAL_END",
+	chunk.OP_TRY_BLOCK:              "OP_TRY_BLOCK",
+	chunk.OP_THROW:                  "OP_THROW",
+	chunk.OP_NEW:                    "OP_NEW",
 	chunk.OP_EOF:                    "OP_EOF",
 }
 
@@ -86,6 +89,14 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			}
 		case chunk.OP_DEFINE_HEAP_VAR:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_THROW:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_NEW:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
@@ -212,6 +223,14 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
 		case chunk.OP_JUMP_IF_FALSE:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+				ip += 3
+				fmt.Printf("%04d | %d\n", ip*4, jump*4)
+			}
+		case chunk.OP_TRY_BLOCK:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 				ip++
