@@ -68,7 +68,8 @@ func (vm *VM) call(fn object.Callable, returnIp int) error {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop-fn.Arity():vm.stackTop], returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop:vm.stackTop+fn.LocalCount()], returnIp)
+	vm.stackTop += fn.LocalCount()
 	vm.frameCount++
 	return nil
 }
@@ -353,6 +354,10 @@ func (vm *VM) run() (value.Value, error) {
 				global := valueChunk.Code[ip]
 				globals[global] = vm.pop()
 				ip++
+			}
+		case chunk.OP_DELETE_LOCAL:
+			{
+				frame.nextLocal--
 			}
 		case chunk.OP_DEFINE_LOCAL:
 			{

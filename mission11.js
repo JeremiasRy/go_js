@@ -14,11 +14,12 @@ for (const item of arr) {
 for (const item of arr) {
     console.log(item)
 }
+for (const item of arr) {
+    console.log(item)
+}
 
 function locallyDefinedIterator() {
     for (const item of arr) {
         console.log(item)
     }
 }
-
-locallyDefinedIterator()

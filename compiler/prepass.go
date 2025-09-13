@@ -5,7 +5,8 @@ import (
 	"go_js/parser"
 )
 
-var forOfScope = false
+var forScope = false
+var catchScope = false
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	if current == nil {
@@ -105,7 +106,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block, forOfScope)
+			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block, forScope)
 			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				prePass(node, symbolTable)
@@ -142,10 +143,15 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		if variable == nil {
 			symbolTable.addVariable(current.Name, LET, true, nil)
+			return
+		}
+
+		if catchScope && variable.undeclared {
+			variable.type_ = CATCH_PARAM
 		}
 
 		// check that we found anything and if it's from a upper function scope
-		if table != nil && variable != nil && table != symbolTable && variable.scope == LOCAL {
+		if table != nil && table != symbolTable && variable.scope == LOCAL {
 			heapScopeVarCount := 0
 			current := symbolTable
 
@@ -176,16 +182,18 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Test, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_STATEMENT:
+		forScope = true
 		prePass(current.BodyNode, symbolTable)
+		forScope = false
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Initializer, symbolTable)
 		prePass(current.Test, symbolTable)
 		prePass(current.Update, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_OF_STATEMENT:
-		forOfScope = true
+		forScope = true
 		prePass(current.BodyNode, symbolTable)
-		forOfScope = false
+		forScope = false
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
@@ -223,7 +231,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		{
 			prePass(current.BodyNode, symbolTable)
 			symbolTable.enterBlockScope(current.BodyNode)
+			catchScope = true
 			prePass(current.Param, symbolTable)
+			catchScope = false
 			symbolTable.exitBlockScope()
 		}
 	case parser.NODE_THROW_STATEMENT:

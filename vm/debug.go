@@ -30,6 +30,7 @@ var opNames = map[uint8]string{
 	chunk.OP_DEFINE_LOCAL:           "OP_DEFINE_LOCAL",
 	chunk.OP_GET_LOCAL:              "OP_GET_LOCAL",
 	chunk.OP_SET_LOCAL:              "OP_SET_LOCAL",
+	chunk.OP_DELETE_LOCAL:           "OP_DELETE_LOCAL",
 	chunk.OP_DEFINE_GLOBAL:          "OP_DEFINE_GLOBAL",
 	chunk.OP_GET_GLOBAL:             "OP_GET_GLOBAL",
 	chunk.OP_SET_GLOBAL:             "OP_SET_GLOBAL",
@@ -89,6 +90,10 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			}
 		case chunk.OP_DEFINE_HEAP_VAR:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_DELETE_LOCAL:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}

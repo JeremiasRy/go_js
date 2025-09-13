@@ -17,7 +17,8 @@ const (
 	CONST VariableType = iota
 	LET
 	FUNCTION
-	FOR_OF
+	FOR
+	CATCH_PARAM
 )
 
 type VariableScope uint8
@@ -45,12 +46,13 @@ type BlockScope struct {
 }
 
 type FunctionScope struct {
-	parent     *FunctionScope
-	tableScope VariableScope
-	vars       Variables
-	varCount   int
+	parent             *FunctionScope
+	previousTableScope VariableScope
+	tableScope         VariableScope
+	vars               Variables
 
-	block *BlockScope
+	totalLocalCount int
+	block           *BlockScope
 }
 
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
@@ -61,7 +63,7 @@ func newBlockScope(parent *BlockScope, forOf bool) *BlockScope {
 }
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
-	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, varCount: -1, block: nil}
+	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, block: nil}
 }
 
 func (fs *FunctionScope) isInHeapScope() bool {
@@ -81,13 +83,45 @@ func (fs *FunctionScope) isInHeapScope() bool {
 func (fs *FunctionScope) enterBlockScope(node *parser.Node) {
 	if b, found := BLOCK_SCOPES[node]; found {
 		fs.block = b
+		fs.previousTableScope = fs.tableScope
+		fs.tableScope = LOCAL
 	} else {
 		panic("no block scope found for ast node")
 	}
 }
 
 func (fs *FunctionScope) exitBlockScope() {
+	if fs.block == nil {
+		return
+	}
 	fs.block = fs.block.parent
+	if fs.block == nil {
+		fs.tableScope = fs.previousTableScope
+	}
+}
+
+func (fs *FunctionScope) getCurrentSlot() int {
+	if fs.tableScope == GLOBAL {
+		return len(fs.vars) - 1
+	}
+
+	count := 0
+	if fs.block != nil {
+		current := fs.block
+
+		for current != nil {
+			count += len(current.vars)
+			current = current.parent
+		}
+	}
+
+	// global function scope that is in a block currently
+	if fs.previousTableScope == GLOBAL {
+		return count - 1
+	}
+
+	// local function scope in a block
+	return (len(fs.vars) + count) - 1
 }
 
 func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn *object.ObjFunction) {
@@ -95,7 +129,7 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 
 	if fs.block != nil {
 		if fs.block.forOf {
-			type_ = FOR_OF
+			type_ = FOR
 		}
 		mapToAddTo = fs.block.vars
 	} else {
@@ -106,11 +140,15 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 		fmt.Printf("WARN: Already found variable %s from scope\n", name)
 		return
 	}
-	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn, undeclared: undeclared}
 
-	fs.varCount++
-	variable.slot = fs.varCount
+	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn, undeclared: undeclared}
 	mapToAddTo[name] = variable
+
+	variable.slot = fs.getCurrentSlot()
+
+	if fs.tableScope == LOCAL {
+		fs.totalLocalCount = max(fs.totalLocalCount, fs.getCurrentSlot()+1)
+	}
 }
 
 func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
@@ -197,6 +235,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+
+			fn.SetLocalCount(symbolTable.totalLocalCount)
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
@@ -274,7 +314,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 			}
 
-			fn.SetLocalCount(symbolTable.varCount + 1)
+			fn.SetLocalCount(symbolTable.totalLocalCount)
 		}
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		{
@@ -295,7 +335,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			newFn.SetLocalCount(symbolTable.varCount)
+			newFn.SetLocalCount(symbolTable.totalLocalCount)
 			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_FUNCTION_EXPRESSION:
@@ -317,7 +357,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			newFn.SetLocalCount(symbolTable.varCount)
+			newFn.SetLocalCount(symbolTable.totalLocalCount)
 			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
@@ -325,6 +365,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
+			}
+
+			if symbolTable.block != nil {
+				for range len(symbolTable.block.vars) {
+					fn.ValueChunk().EmitByte(chunk.OP_DELETE_LOCAL)
+				}
 			}
 			symbolTable.exitBlockScope()
 		}
@@ -380,12 +426,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if variable != nil {
 				if current.Initializer != nil {
 					generateByteCode(current.Initializer, symbolTable, fn)
-				} else if current.Initializer == nil && variable.type_ != FOR_OF {
+					symbolTable.exitBlockScope()
+				} else if current.Initializer == nil && variable.type_ != FOR {
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 				}
 
 				// for of loop i.e for (const item of arr) {}
-				if variable.type_ == FOR_OF {
+				if variable.type_ == FOR {
 					var op uint8
 					if variable.init {
 						switch variable.scope {
@@ -514,12 +561,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_IDENTIFIER:
 		{
 			variable, _ := symbolTable.findVariable(current.Name)
+
 			if variable == nil {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 				return
 			}
 
-			if variable.undeclared {
+			if variable.type_ == CATCH_PARAM && !variable.init {
+				variable.init = true
 				switch variable.scope {
 				case GLOBAL:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
@@ -528,6 +577,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case HEAP:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_HEAP_VAR)
 				}
+				return
 			}
 
 			switch variable.scope {
@@ -642,6 +692,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitUint32(jumpStart - 2)
 			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
+			for range len(symbolTable.block.vars) {
+				fn.ValueChunk().EmitByte(chunk.OP_DELETE_LOCAL)
+			}
+			symbolTable.exitBlockScope()
 		}
 	case parser.NODE_OBJECT_EXPRESSION:
 		{
@@ -699,7 +753,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_CATCH_CLAUSE:
 		{
-
+			symbolTable.enterBlockScope(current.BodyNode)
+			generateByteCode(current.Param, symbolTable, fn)
+			symbolTable.exitBlockScope()
 			generateByteCode(current.BodyNode, symbolTable, fn)
 		}
 	case parser.NODE_THROW_STATEMENT:
