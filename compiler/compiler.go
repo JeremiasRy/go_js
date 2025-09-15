@@ -83,7 +83,9 @@ func (fs *FunctionScope) isInHeapScope() bool {
 func (fs *FunctionScope) enterBlockScope(node *parser.Node) {
 	if b, found := BLOCK_SCOPES[node]; found {
 		fs.block = b
-		fs.previousTableScope = fs.tableScope
+		if fs.tableScope == GLOBAL {
+			fs.previousTableScope = fs.tableScope
+		}
 		fs.tableScope = LOCAL
 	} else {
 		panic("no block scope found for ast node")
@@ -121,6 +123,9 @@ func (fs *FunctionScope) getCurrentSlot() int {
 	}
 
 	// local function scope in a block
+	println(len(fs.vars))
+	println(count)
+	println("----------------")
 	return (len(fs.vars) + count) - 1
 }
 
@@ -171,7 +176,6 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 
 		current = current.parent
 	}
-
 	return nil, nil
 }
 
@@ -426,7 +430,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if variable != nil {
 				if current.Initializer != nil {
 					generateByteCode(current.Initializer, symbolTable, fn)
-					symbolTable.exitBlockScope()
 				} else if current.Initializer == nil && variable.type_ != FOR {
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 				}
@@ -740,23 +743,33 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_TRY_STATEMENT:
 		{
-			fn.ValueChunk().EmitBytes(chunk.OP_TRY_BLOCK, 0, 0, 0, 0)
+			fn.ValueChunk().EmitBytes(chunk.OP_TRY_BLOCK_START, 0, 0, 0, 0)
 			tryStart := uint32(len(fn.ValueChunk().Code) - 4)
 
+			tryBlock := BLOCK_SCOPES[current.Block]
+
 			generateByteCode(current.Block, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_TRY_BLOCK_END)
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			fn.ValueChunk().PatchUint32(tryStart, uint32(len(fn.ValueChunk().Code)))
 
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
-			generateByteCode(current.Handler, symbolTable, fn)
-			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
-		}
-	case parser.NODE_CATCH_CLAUSE:
-		{
-			symbolTable.enterBlockScope(current.BodyNode)
-			generateByteCode(current.Param, symbolTable, fn)
-			symbolTable.exitBlockScope()
+
+			// parser.NODE_CATCH_CLAUSE
+			current = current.Handler
+			for range len(tryBlock.vars) {
+				fn.ValueChunk().EmitByte(chunk.OP_DELETE_LOCAL)
+			}
+
+			if current.Param != nil {
+				symbolTable.enterBlockScope(current.BodyNode)
+				generateByteCode(current.Param, symbolTable, fn)
+				symbolTable.exitBlockScope()
+			} else {
+				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop thrown error value
+			}
 			generateByteCode(current.BodyNode, symbolTable, fn)
+			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 		}
 	case parser.NODE_THROW_STATEMENT:
 		{

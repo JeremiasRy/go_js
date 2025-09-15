@@ -753,11 +753,15 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
 				}
 			}
-		case chunk.OP_TRY_BLOCK:
+		case chunk.OP_TRY_BLOCK_START:
 			{
 				catchStart := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
 				vm.exceptionStack = append(vm.exceptionStack, catchStart)
+			}
+		case chunk.OP_TRY_BLOCK_END:
+			{
+				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
 			}
 		case chunk.OP_NEW:
 			{

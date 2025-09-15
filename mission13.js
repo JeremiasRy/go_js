@@ -1,14 +1,14 @@
-
-function err() {
-    const a = "hello"
+try {
+    const b = "jau"
     try {
-        const b = "jau"
-        throw new Error("jausers")
-    } catch (error) {
-        console.log(a)
         console.log(b)
-        console.log(error)
+        throw "hello"
+    } catch {
+        const innerCatchA = 12
+        const innerCatchB = 12
+        console.log(innerCatchA + innerCatchB)
     }
+    throw new Error("jausers")
+} catch (error) {
+    console.log(error)
 }
-
-err()
