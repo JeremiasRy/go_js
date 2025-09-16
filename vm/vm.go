@@ -5,6 +5,7 @@ import (
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"
+	"go_js/constructor"
 	"go_js/object"
 	"go_js/parser"
 	"go_js/stringer"
@@ -357,7 +358,9 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_DELETE_LOCAL:
 			{
-				frame.nextLocal--
+				if frame.nextLocal > 0 {
+					frame.nextLocal--
+				}
 			}
 		case chunk.OP_DEFINE_LOCAL:
 			{
@@ -441,9 +444,15 @@ func (vm *VM) run() (value.Value, error) {
 						vm.push(value)
 						ip++
 					}
+				case *object.ObjError:
+					{
+						value := obj.GetMember(stringer.String(member))
+						vm.push(value)
+						ip++
+					}
 				default:
 					{
-						return value.EncodedUndefined(), fmt.Errorf("runtime error: cant get property: %s from: %v", stringer.String(member), hash)
+						return value.EncodedUndefined(), fmt.Errorf("cant get property: %s from: %v", stringer.String(member), hash)
 					}
 				}
 
@@ -773,7 +782,7 @@ func (vm *VM) run() (value.Value, error) {
 				}
 
 				switch ctor := obj.(type) {
-				case *object.ErrorConstructor:
+				case *constructor.ErrorConstructor:
 					{
 						arg := vm.pop()
 						obj, err := allocator.GetObject(arg.GetHandle())
@@ -783,11 +792,8 @@ func (vm *VM) run() (value.Value, error) {
 						}
 
 						if str, ok := obj.(*object.ObjString); ok {
-							newError := ctor.New(str.Value)
-							v := value.EncodeHandle(allocator.Allocate(newError))
-							vm.push(v)
+							vm.push(ctor.New(str.Value))
 						}
-
 					}
 				}
 			}

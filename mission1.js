@@ -14,5 +14,3 @@ function looper2() {
 
 looper1()
 looper2()
-
-console.log(res)

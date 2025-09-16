@@ -9,7 +9,7 @@ import (
 	"go_js/value"
 )
 
-const DEBUG = false
+const DEBUG = true
 
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:               "OP_CONSTANT",
@@ -286,6 +286,12 @@ func printFunction(c value.ValueChunk) {
 			obj, _ := allocator.GetObject(value.GetHandle())
 
 			switch f := obj.(type) {
+			case nil:
+				continue
+			case *object.SetTimeout:
+				{
+					fmt.Printf("%s\n", f)
+				}
 			case *object.ObjFunction:
 				{
 					fmt.Printf("<fn %s>\n", f.Name())

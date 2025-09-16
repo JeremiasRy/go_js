@@ -1,33 +1,19 @@
 package object
 
-import "fmt"
-
-type ErrorConstructor struct{}
-
-func (oe *ErrorConstructor) String() string {
-	return "Error constructor"
-}
-
-func (oe *ErrorConstructor) Type() ObjType {
-	return OBJ_ERROR
-}
-
-func (oe *ErrorConstructor) New(message string) *ObjError {
-	return NewError(message)
-}
+import "go_js/value"
 
 type ObjError struct {
-	message string
+	ObjObject
 }
 
-func NewError(message string) *ObjError {
-	return &ObjError{
-		message: message,
-	}
+func NewError() *ObjError {
+	objError := &ObjError{}
+	objError.Hash = map[string]value.Value{}
+	return objError
 }
 
 func (oe *ObjError) String() string {
-	return fmt.Sprintf("Error { message: %s }", oe.message)
+	return "Error"
 }
 
 func (oe *ObjError) Type() ObjType {

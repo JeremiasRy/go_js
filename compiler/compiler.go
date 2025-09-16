@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
+	"go_js/constructor"
 	"go_js/object"
 	"go_js/parser"
 	"go_js/value"
@@ -123,9 +124,6 @@ func (fs *FunctionScope) getCurrentSlot() int {
 	}
 
 	// local function scope in a block
-	println(len(fs.vars))
-	println(count)
-	println("----------------")
 	return (len(fs.vars) + count) - 1
 }
 
@@ -191,7 +189,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 func defineError(main *object.ObjFunction, symbolTable *FunctionScope) {
-	ctor := &object.ErrorConstructor{}
+	ctor := &constructor.ErrorConstructor{}
 	ctorHandle := allocator.Allocate(ctor)
 
 	symbolTable.addVariable("Error", CONST, false, nil)
@@ -199,11 +197,22 @@ func defineError(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
+	setTimeout := object.NewSetTimeout()
+	setTimeouthandle := allocator.Allocate(setTimeout)
+
+	symbolTable.addVariable("setTimeout", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(setTimeouthandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
+
 	defineConsole(main, symbolTable)
 	defineError(main, symbolTable)
+	defineSetTimeout(main, symbolTable)
 
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)

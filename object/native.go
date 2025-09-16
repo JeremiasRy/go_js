@@ -42,3 +42,14 @@ func NewClock() *Clock {
 func (*Clock) Clock() value.Value {
 	return value.Value(math.Float64bits(float64(time.Now().UnixMilli())))
 }
+
+type SetTimeout struct {
+	ObjNativeFn
+}
+
+func NewSetTimeout() *SetTimeout {
+	setTimeout := &SetTimeout{}
+	setTimeout.name = "setTimeout"
+
+	return setTimeout
+}
