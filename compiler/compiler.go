@@ -133,7 +133,6 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	if fs.block != nil {
 		variable.scope = LOCAL
 	}
-	fmt.Printf("%s goin to slot %d\n", name, fs.getCurrentSlot())
 	variable.slot = fs.getCurrentSlot()
 }
 
