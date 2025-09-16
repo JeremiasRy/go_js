@@ -5,7 +5,6 @@ import (
 	"go_js/parser"
 )
 
-var forScope = false
 var catchScope = false
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
@@ -21,7 +20,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Params)
 
-				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
+				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
 			}
 		}
 
@@ -41,7 +40,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Params)
 
-				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
+				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
 			}
 		}
 
@@ -63,7 +62,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Arguments)
 
-				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
+				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
 			}
 		}
 		for _, param := range current.Params {
@@ -88,7 +87,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					name := node.Identifier.Name
 					arity := len(node.Arguments)
 
-					symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, 0, nil))
+					symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
 				}
 			}
 			for _, param := range current.Params {
@@ -106,7 +105,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block, forScope)
+			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
 			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				prePass(node, symbolTable)
@@ -182,18 +181,14 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Test, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_STATEMENT:
-		forScope = true
 		prePass(current.BodyNode, symbolTable)
-		forScope = false
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Initializer, symbolTable)
 		prePass(current.Test, symbolTable)
 		prePass(current.Update, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_OF_STATEMENT:
-		forScope = true
 		prePass(current.BodyNode, symbolTable)
-		forScope = false
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)

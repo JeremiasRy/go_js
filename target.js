@@ -30,7 +30,8 @@ while (count < 3) {
 
 arr.push(4);
 arr.forEach(item => console.log(`Array item: ${item}`));
-arr.filter(item => item > 2).forEach(item => console.log(`Array item: ${item}`));
+console.log("-- filtered --")
+arr.filter(item => item > 2).forEach(item => console.log(`Filtered array item: ${item}`));
 
 obj.job = "Trying my hardest to be a smart developer";
 console.log(obj.name);

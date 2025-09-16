@@ -15,6 +15,8 @@ const (
 	OBJ_OBJECT
 	OBJ_NATIVE_FN
 	OBJ_ITERATOR
+	OBJ_ARRAY
+	OBJ_ARRAY_CONSTRUCTOR
 	OBJ_ERROR
 	OBJ_ERROR_CONSTRUCTOR
 )
@@ -36,8 +38,6 @@ type Object interface {
 type Callable interface {
 	ValueChunk() *value.ValueChunk
 	Arity() int
-	LocalCount() int
-	SetLocalCount(count int)
 	HeapScope() int
 	SetHeapScope(scope int)
 	Name() string

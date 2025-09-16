@@ -47,20 +47,17 @@ type BlockScope struct {
 }
 
 type FunctionScope struct {
-	parent             *FunctionScope
-	previousTableScope VariableScope
-	tableScope         VariableScope
-	vars               Variables
-
-	totalLocalCount int
-	block           *BlockScope
+	parent     *FunctionScope
+	tableScope VariableScope
+	vars       Variables
+	block      *BlockScope
 }
 
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
 var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
 
-func newBlockScope(parent *BlockScope, forOf bool) *BlockScope {
-	return &BlockScope{vars: Variables{}, parent: parent, forOf: forOf}
+func newBlockScope(parent *BlockScope) *BlockScope {
+	return &BlockScope{vars: Variables{}, parent: parent}
 }
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
@@ -84,31 +81,21 @@ func (fs *FunctionScope) isInHeapScope() bool {
 func (fs *FunctionScope) enterBlockScope(node *parser.Node) {
 	if b, found := BLOCK_SCOPES[node]; found {
 		fs.block = b
-		if fs.tableScope == GLOBAL {
-			fs.previousTableScope = fs.tableScope
-		}
-		fs.tableScope = LOCAL
 	} else {
 		panic("no block scope found for ast node")
 	}
 }
 
 func (fs *FunctionScope) exitBlockScope() {
-	if fs.block == nil {
-		return
-	}
 	fs.block = fs.block.parent
-	if fs.block == nil {
-		fs.tableScope = fs.previousTableScope
-	}
 }
 
 func (fs *FunctionScope) getCurrentSlot() int {
-	if fs.tableScope == GLOBAL {
+	if fs.tableScope == GLOBAL && fs.block == nil {
 		return len(fs.vars) - 1
 	}
 
-	count := 0
+	count := -1
 	if fs.block != nil {
 		current := fs.block
 
@@ -118,22 +105,18 @@ func (fs *FunctionScope) getCurrentSlot() int {
 		}
 	}
 
-	// global function scope that is in a block currently
-	if fs.previousTableScope == GLOBAL {
-		return count - 1
+	if fs.tableScope == GLOBAL {
+		return count
 	}
 
-	// local function scope in a block
-	return (len(fs.vars) + count) - 1
+	count += len(fs.vars)
+	return count
 }
 
 func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn *object.ObjFunction) {
 	var mapToAddTo Variables
 
 	if fs.block != nil {
-		if fs.block.forOf {
-			type_ = FOR
-		}
 		mapToAddTo = fs.block.vars
 	} else {
 		mapToAddTo = fs.vars
@@ -147,11 +130,11 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn, undeclared: undeclared}
 	mapToAddTo[name] = variable
 
-	variable.slot = fs.getCurrentSlot()
-
-	if fs.tableScope == LOCAL {
-		fs.totalLocalCount = max(fs.totalLocalCount, fs.getCurrentSlot()+1)
+	if fs.block != nil {
+		variable.scope = LOCAL
 	}
+	fmt.Printf("%s goin to slot %d\n", name, fs.getCurrentSlot())
+	variable.slot = fs.getCurrentSlot()
 }
 
 func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
@@ -175,6 +158,15 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 		current = current.parent
 	}
 	return nil, nil
+}
+
+func (fs *FunctionScope) currentBlockVarCount() (int, bool) {
+	count := -1
+	if fs.block != nil {
+		count = len(fs.block.vars)
+		return count, true
+	}
+	return count, false
 }
 
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -207,7 +199,7 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
-	main := object.NewFunction(object.MAIN_FN_NAME, 0, 0, nil)
+	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 	defineConsole(main, symbolTable)
@@ -248,8 +240,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, node := range current.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
-
-			fn.SetLocalCount(symbolTable.totalLocalCount)
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
@@ -327,12 +317,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 			}
 
-			fn.SetLocalCount(symbolTable.totalLocalCount)
 		}
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		{
 			symbolTable = FUNCTION_SCOPES[current]
-			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
+			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 			handle := allocator.Allocate(newFn)
 			value := value.EncodeHandle(handle)
 
@@ -348,13 +337,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			newFn.SetLocalCount(symbolTable.totalLocalCount)
 			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_FUNCTION_EXPRESSION:
 		{
 			symbolTable = FUNCTION_SCOPES[current]
-			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), 0, nil)
+			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 			handle := allocator.Allocate(newFn)
 			value := value.EncodeHandle(handle)
 
@@ -369,8 +357,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
-
-			newFn.SetLocalCount(symbolTable.totalLocalCount)
 			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_BLOCK_STATEMENT:
@@ -382,7 +368,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			if symbolTable.block != nil {
 				for range len(symbolTable.block.vars) {
-					fn.ValueChunk().EmitByte(chunk.OP_DELETE_LOCAL)
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 				}
 			}
 			symbolTable.exitBlockScope()
@@ -674,38 +660,50 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
-			symbolTable.exitBlockScope()
 
-			generateByteCode(current.BodyNode, symbolTable, fn)
-			symbolTable.enterBlockScope(current.BodyNode)
+			for _, node := range current.BodyNode.Body {
+				generateByteCode(node, symbolTable, fn)
+			}
+
 			generateByteCode(current.Update, symbolTable, fn)
-			symbolTable.exitBlockScope()
+
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
 
 			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			count, _ := symbolTable.currentBlockVarCount()
+
+			for range count {
+				fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+			}
+			symbolTable.exitBlockScope()
+
 		}
 	case parser.NODE_FOR_OF_STATEMENT:
 		{
 			symbolTable.enterBlockScope(current.BodyNode)
-			fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED) // init iterator value as undefined, will get assigned later
-			generateByteCode(current.Left, symbolTable, fn)
+			fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
 			generateByteCode(current.Right, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_GET_ITERATOR)
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT)
-			generateByteCode(current.Left, symbolTable, fn)
+
+			variable, _ := symbolTable.findVariable(current.Left.Declarations[0].Identifier.Name)
+			fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
 
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+
 			fn.ValueChunk().EmitByte(chunk.OP_JUMP)
 			fn.ValueChunk().EmitUint32(jumpStart - 2)
 			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
-			for range len(symbolTable.block.vars) {
-				fn.ValueChunk().EmitByte(chunk.OP_DELETE_LOCAL)
+
+			count, _ := symbolTable.currentBlockVarCount()
+			for range count {
+				fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 			}
 			symbolTable.exitBlockScope()
 		}
@@ -755,9 +753,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitBytes(chunk.OP_TRY_BLOCK_START, 0, 0, 0, 0)
 			tryStart := uint32(len(fn.ValueChunk().Code) - 4)
 
-			tryBlock := BLOCK_SCOPES[current.Block]
-
 			generateByteCode(current.Block, symbolTable, fn)
+			// tryBlockPointer := current.Block
 			fn.ValueChunk().EmitByte(chunk.OP_TRY_BLOCK_END)
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			fn.ValueChunk().PatchUint32(tryStart, uint32(len(fn.ValueChunk().Code)))
@@ -766,22 +763,39 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			// parser.NODE_CATCH_CLAUSE
 			current = current.Handler
-			for range len(tryBlock.vars) {
-				fn.ValueChunk().EmitByte(chunk.OP_DELETE_LOCAL)
-			}
 
 			if current.Param != nil {
 				symbolTable.enterBlockScope(current.BodyNode)
 				generateByteCode(current.Param, symbolTable, fn)
 				symbolTable.exitBlockScope()
 			} else {
-				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop thrown error value
+				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop thrown error value if param is not used
 			}
 			generateByteCode(current.BodyNode, symbolTable, fn)
 			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
+
+			/* This needs to happen at runtime whenever a error is thrown,
+			we could store the try blocks local count at the start:
+			OP_TRY_BLOCK_START <catch start> <local count>
+
+			For now only thrown values will work
+			Let's see if I get to it later
+
+				symbolTable.enterBlockScope(tryBlockPointer)
+				count, _ := symbolTable.currentBlockVarCount()
+				for range count {
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+				}
+				symbolTable.exitBlockScope()
+			*/
 		}
 	case parser.NODE_THROW_STATEMENT:
 		{
+			count, _ := symbolTable.currentBlockVarCount()
+
+			for range count {
+				fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+			}
 			generateByteCode(current.Argument, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_THROW)
 		}

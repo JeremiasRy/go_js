@@ -5,7 +5,6 @@ import (
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
-	"strings"
 )
 
 func DebugString(v value.Value) string {
@@ -14,14 +13,6 @@ func DebugString(v value.Value) string {
 	} else if v.IsObject() {
 		handle := v.GetHandle()
 		obj, _ := allocator.GetObject(handle)
-
-		if obj, ok := obj.(*object.ObjObject); ok {
-			lines := []string{}
-			for k, v := range obj.Hash {
-				lines = append(lines, fmt.Sprintf("%s: %s", k, DebugString(v)))
-			}
-			return strings.Join(lines, ", ")
-		}
 		return obj.String()
 
 	} else if v.IsNaN() {
@@ -40,6 +31,13 @@ func String(v value.Value) string {
 		return fmt.Sprintf("%v", v.AsBoolean())
 	} else if v.IsObject() {
 		obj, _ := allocator.GetObject(v.GetHandle())
+
+		switch obj := obj.(type) {
+		case *object.ObjError:
+			{
+				return String(obj.Hash["message"])
+			}
+		}
 		return obj.String()
 	} else if v.IsNaN() {
 		return "NaN"

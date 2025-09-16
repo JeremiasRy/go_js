@@ -23,30 +23,19 @@ var heapVars = make(map[int][]value.Value)
 var heapScopesCount int
 
 type CallFrame struct {
-	fn        object.Callable
-	locals    []value.Value
-	nextLocal int
-	returnIp  int
+	fn         object.Callable
+	localStart int
+	returnIp   int
 }
 
-func NewCallFrame(fn object.Callable, locals []value.Value) *CallFrame {
-	return &CallFrame{fn: fn, locals: locals, returnIp: 0}
+func NewCallFrame(fn object.Callable, localStart int) *CallFrame {
+	return &CallFrame{fn: fn, localStart: localStart, returnIp: 0}
 }
 
-func (cf *CallFrame) initCallFrame(fn object.Callable, locals []value.Value, returnIp int) {
+func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp int) {
 	cf.fn = fn
-	cf.locals = locals
+	cf.localStart = localStart
 	cf.returnIp = returnIp
-	cf.nextLocal = fn.Arity()
-}
-
-func (cf *CallFrame) addLocal(v value.Value) {
-	cf.locals[cf.nextLocal] = v
-	cf.nextLocal++
-}
-
-func (cf *CallFrame) getLocal(index int) value.Value {
-	return cf.locals[index]
 }
 
 type VM struct {
@@ -69,10 +58,13 @@ func (vm *VM) call(fn object.Callable, returnIp int) error {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[vm.stackTop:vm.stackTop+fn.LocalCount()], returnIp)
-	vm.stackTop += fn.LocalCount()
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop-fn.Arity(), returnIp)
 	vm.frameCount++
 	return nil
+}
+
+func (vm *VM) currentFrame() CallFrame {
+	return vm.frames[vm.frameCount-1]
 }
 
 func (vm *VM) push(v value.Value) {
@@ -157,7 +149,7 @@ func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 
 func (vm *VM) run() (value.Value, error) {
 	start := time.Now()
-	frame := vm.frames[vm.frameCount-1]
+	frame := vm.currentFrame()
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
 
@@ -165,7 +157,6 @@ func (vm *VM) run() (value.Value, error) {
 		println()
 		println("-- NEW RUNNER SPAWNED --")
 		println()
-		fmt.Printf("<fn %s>\n", frame.fn.Name())
 		PrintChunk(valueChunk)
 	}
 
@@ -356,25 +347,23 @@ func (vm *VM) run() (value.Value, error) {
 				globals[global] = vm.pop()
 				ip++
 			}
-		case chunk.OP_DELETE_LOCAL:
+		case chunk.OP_POP_LOCAL:
 			{
-				if frame.nextLocal > 0 {
-					frame.nextLocal--
-				}
+				vm.stackTop--
 			}
 		case chunk.OP_DEFINE_LOCAL:
 			{
-				variable := vm.pop()
-				frame.addLocal(variable)
+				vm.pop()
+				vm.stackTop++
 			}
 		case chunk.OP_GET_LOCAL:
 			{
-				vm.push(frame.getLocal(int(valueChunk.Code[ip])))
+				vm.push(vm.stack[frame.localStart+int(valueChunk.Code[ip])])
 				ip++
 			}
 		case chunk.OP_SET_LOCAL:
 			{
-				frame.locals[valueChunk.Code[ip]] = vm.pop()
+				vm.stack[frame.localStart+int(valueChunk.Code[ip])] = vm.pop()
 				ip++
 			}
 		case chunk.OP_CREATE_OBJECT:
@@ -476,15 +465,8 @@ func (vm *VM) run() (value.Value, error) {
 					switch fn := obj.(type) {
 					case object.Callable:
 						{
-							bottom := vm.stackTop - fn.Arity()
-							localCount := max(fn.LocalCount(), 0)
-							top := vm.stackTop + localCount
-
-							vm.frames[vm.frameCount].initCallFrame(fn, vm.stack[bottom:top], ip)
-							vm.frameCount++
-							vm.stackTop += localCount
-
-							frame = vm.frames[vm.frameCount-1]
+							vm.call(fn, ip)
+							frame = vm.currentFrame()
 							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
 						}
@@ -561,11 +543,8 @@ func (vm *VM) run() (value.Value, error) {
 									done = iterator.Next()
 								}
 							}
-
-							objArr := object.NewObjArr(len(arr))
-							objArr.Hash["push"] = value.EncodeHandle(allocator.Allocate(object.NewArrayPush(objArr)))
-							objArr.Hash["forEach"] = value.EncodeHandle(allocator.Allocate(object.NewArrayForEach(objArr)))
-							objArr.Hash["filter"] = value.EncodeHandle(allocator.Allocate(object.NewArrayFilter(objArr)))
+							length := len(arr)
+							objArr := constructor.NewArray(length)
 
 							for _, item := range arr {
 								objArr.PushElement(item)
@@ -592,7 +571,8 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				ip = frame.returnIp
 				value := vm.pop()
-				vm.stackTop -= len(frame.locals)
+
+				vm.stackTop = frame.localStart
 				vm.push(value)
 				vm.frameCount--
 
@@ -606,20 +586,14 @@ func (vm *VM) run() (value.Value, error) {
 					return value, nil
 				}
 
-				frame = vm.frames[vm.frameCount-1]
+				frame = vm.currentFrame()
 				valueChunk = *frame.fn.ValueChunk()
 			}
 		case chunk.OP_CREATE_ARRAY:
 			{
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
-				arr := object.NewObjArr(length)
-
-				// maybe a new package? boxer? To clean up run()
-				arr.Hash["push"] = value.EncodeHandle(allocator.Allocate(object.NewArrayPush(arr)))
-				arr.Hash["forEach"] = value.EncodeHandle(allocator.Allocate(object.NewArrayForEach(arr)))
-				arr.Hash["filter"] = value.EncodeHandle(allocator.Allocate(object.NewArrayFilter(arr)))
-
+				arr := constructor.NewArray(length)
 				handle := allocator.Allocate(arr)
 				vm.push(value.EncodeHandle(handle))
 			}

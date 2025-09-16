@@ -30,7 +30,7 @@ var opNames = map[uint8]string{
 	chunk.OP_DEFINE_LOCAL:           "OP_DEFINE_LOCAL",
 	chunk.OP_GET_LOCAL:              "OP_GET_LOCAL",
 	chunk.OP_SET_LOCAL:              "OP_SET_LOCAL",
-	chunk.OP_DELETE_LOCAL:           "OP_DELETE_LOCAL",
+	chunk.OP_POP_LOCAL:              "OP_POP_LOCAL",
 	chunk.OP_DEFINE_GLOBAL:          "OP_DEFINE_GLOBAL",
 	chunk.OP_GET_GLOBAL:             "OP_GET_GLOBAL",
 	chunk.OP_SET_GLOBAL:             "OP_SET_GLOBAL",
@@ -94,7 +94,7 @@ func printFunction(c value.ValueChunk) {
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
-		case chunk.OP_DELETE_LOCAL:
+		case chunk.OP_POP_LOCAL:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
@@ -290,7 +290,7 @@ func printFunction(c value.ValueChunk) {
 				continue
 			case *object.SetTimeout:
 				{
-					fmt.Printf("%s\n", f)
+
 				}
 			case *object.ObjFunction:
 				{
