@@ -496,10 +496,10 @@ func (vm *VM) run() (value.Value, error) {
 							if err != nil {
 								return value.EncodedUndefined(), err
 							}
-
+							runner := NewVM()
 							if fn, ok := obj.(*object.ObjFunction); ok {
 								for !done {
-									runner := NewVM()
+
 									item := iterator.Current()
 									runner.push(item)
 									runner.call(fn, 0)
@@ -523,10 +523,10 @@ func (vm *VM) run() (value.Value, error) {
 							}
 
 							arr := []value.Value{}
-
+							runner := NewVM()
 							if fn, ok := obj.(*object.ObjFunction); ok {
 								for !done {
-									runner := NewVM()
+
 									item := iterator.Current()
 									runner.push(item)
 									runner.call(fn, 0)
@@ -583,6 +583,7 @@ func (vm *VM) run() (value.Value, error) {
 						println("-- RUNNER EXITING --")
 						println()
 					}
+					vm.stackTop = 0
 					return value, nil
 				}
 
