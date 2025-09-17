@@ -142,6 +142,14 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
 }
 
+// used for OP_NEW to pop arguments to constructor.New()
+func (vm *VM) popN(n int) []value.Value {
+	r := make([]value.Value, n)
+	copy(r, vm.stack[vm.stackTop-n:vm.stackTop])
+	vm.stackTop -= n
+	return r
+}
+
 func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	objStr := object.NewObjString(o.CreateString())
 	return value.EncodeHandle(allocator.Allocate(objStr))
@@ -749,6 +757,8 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_NEW:
 			{
+				argCount := valueChunk.Code[ip]
+				ip++
 				callee := vm.pop()
 				obj, err := allocator.GetObject(callee.GetHandle())
 
@@ -756,20 +766,22 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
-				switch ctor := obj.(type) {
-				case *constructor.ErrorConstructor:
-					{
-						arg := vm.pop()
-						obj, err := allocator.GetObject(arg.GetHandle())
+				if ctor, ok := obj.(constructor.Constructor); ok {
+					args := vm.popN(int(argCount))
+					params := make([]any, argCount)
 
-						if err != nil {
-							return value.EncodedUndefined(), err
-						}
-
-						if str, ok := obj.(*object.ObjString); ok {
-							vm.push(ctor.New(str.Value))
-						}
+					for i, v := range args {
+						params[i] = v
 					}
+
+					newObj, err := ctor.New(params...)
+
+					if err != nil {
+						return value.EncodedUndefined(), err
+					}
+
+					objHandle := allocator.Allocate(newObj)
+					vm.push(value.EncodeHandle(objHandle))
 				}
 			}
 		case chunk.OP_THROW:

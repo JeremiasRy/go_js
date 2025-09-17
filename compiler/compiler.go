@@ -179,7 +179,25 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
-func defineError(main *object.ObjFunction, symbolTable *FunctionScope) {
+func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	objCtor := &constructor.ObjectConstructor{}
+	objCtorHandle := allocator.Allocate(objCtor)
+
+	symbolTable.addVariable("Object", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(objCtorHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	arrCtor := &constructor.ArrayConstructor{}
+	arrCtorHandle := allocator.Allocate(arrCtor)
+
+	symbolTable.addVariable("Object", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(arrCtorHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	ctor := &constructor.ErrorConstructor{}
 	ctorHandle := allocator.Allocate(ctor)
 
@@ -202,8 +220,9 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 	defineConsole(main, symbolTable)
-	defineError(main, symbolTable)
+	defineErrorConstructor(main, symbolTable)
 	defineSetTimeout(main, symbolTable)
+	defineArrayConstructor(main, symbolTable)
 
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
@@ -519,10 +538,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					objStr := object.NewObjString(string(v))
-					// boxer would be useful here also
-					objStr.Hash["toUpperCase"] = value.EncodeHandle(allocator.Allocate(object.NewStringToUpperCase(objStr)))
-					objStr.Hash["includes"] = value.EncodeHandle(allocator.Allocate(object.NewStringIncludes(objStr)))
+					objStr := constructor.NewString(string(v))
 					handle := allocator.Allocate(objStr)
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
@@ -803,8 +819,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
+			//safeguards later: len(current.Arguments) > uint8.MAX
+			println(len(current.Arguments))
 			generateByteCode(current.Callee, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_NEW)
+			fn.ValueChunk().EmitByte(uint8(len(current.Arguments)))
+
 		}
 	}
 }

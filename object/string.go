@@ -3,7 +3,6 @@ package object
 import (
 	"fmt"
 	"go_js/value"
-
 	"strings"
 )
 

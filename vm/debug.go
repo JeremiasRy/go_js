@@ -9,7 +9,7 @@ import (
 	"go_js/value"
 )
 
-const DEBUG = false
+const DEBUG = true
 
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:               "OP_CONSTANT",
@@ -105,6 +105,8 @@ func printFunction(c value.ValueChunk) {
 		case chunk.OP_NEW:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			}
 		case chunk.OP_TEMPLATE_LITERAL_START:
 			{
