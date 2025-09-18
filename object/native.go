@@ -62,13 +62,17 @@ func (st *SetTimeout) Set(ms int, callback *ObjFunction) {
 }
 
 func (st *SetTimeout) Work(callBack chan *ObjFunction) {
-	callback := *st.callback
-	tick := time.NewTicker((time.Duration(st.time * 1000)))
+	tick := time.NewTicker((time.Duration(st.time) * time.Millisecond))
 
 	for range tick.C {
-		callBack <- &callback
+		callBack <- st.callback
 		break
 	}
+}
+
+func (st *SetTimeout) CloneForDispatch() *SetTimeout {
+	clone := *st
+	return &clone
 }
 
 type Main struct {
@@ -82,7 +86,5 @@ func NewMain(fn *ObjFunction) *Main {
 }
 
 func (m *Main) Work(callbackChannel chan *ObjFunction) {
-	println("working")
 	callbackChannel <- m.Fn
-	println("done")
 }

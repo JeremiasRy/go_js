@@ -5,10 +5,13 @@ import (
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/constructor"
+	eventloop "go_js/eventLoop"
 	"go_js/object"
+	"go_js/queue"
 	"go_js/stringer"
 	"go_js/value"
 	"math"
+	"sync"
 )
 
 const STACK_MAX = math.MaxUint8
@@ -41,14 +44,13 @@ type VM struct {
 	stackTop       int
 	exceptionStack []int
 
-	jobCannel chan object.Job
-	debug     bool
+	debug bool
 }
 
-func NewVM(debug bool, jobChannel chan object.Job) *VM {
+func NewVM(debug bool) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}, debug: debug, jobCannel: jobChannel}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}, debug: debug}
 }
 
 func (vm *VM) Call(fn object.Callable, returnIp int) error {
@@ -153,7 +155,24 @@ func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	return value.EncodeHandle(allocator.Allocate(objStr))
 }
 
-func (vm *VM) Run() (value.Value, error) {
+func (vm *VM) Run(wg *sync.WaitGroup) {
+Run:
+	fn := queue.Dequeue()
+	for fn != nil {
+
+		vm.Call(fn, 0)
+		vm.run()
+
+		wg.Done()
+		fn = queue.Dequeue()
+	}
+
+	for range queue.QueueC {
+		goto Run
+	}
+}
+
+func (vm *VM) run() (value.Value, error) {
 	frame := vm.currentFrame()
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
@@ -501,14 +520,14 @@ func (vm *VM) Run() (value.Value, error) {
 							if err != nil {
 								return value.EncodedUndefined(), err
 							}
-							runner := NewVM(vm.debug, nil)
+							runner := NewVM(vm.debug)
 							if fn, ok := obj.(*object.ObjFunction); ok {
 								for !done {
 
 									item := iterator.Current()
 									runner.push(item)
 									runner.Call(fn, 0)
-									runner.Run()
+									runner.run()
 									done = iterator.Next()
 								}
 							}
@@ -528,14 +547,14 @@ func (vm *VM) Run() (value.Value, error) {
 							}
 
 							arr := []value.Value{}
-							runner := NewVM(vm.debug, nil)
+							runner := NewVM(vm.debug)
 							if fn, ok := obj.(*object.ObjFunction); ok {
 								for !done {
 
 									item := iterator.Current()
 									runner.push(item)
 									runner.Call(fn, 0)
-									result, err := runner.Run()
+									result, err := runner.run()
 
 									if err != nil {
 										return value.EncodedUndefined(), err
@@ -567,6 +586,24 @@ func (vm *VM) Run() (value.Value, error) {
 							arg := vm.pop()
 							vm.push(fn.Includes(stringer.String(arg)))
 						}
+					case *object.SetTimeout:
+						{
+							ms := vm.pop().AsNumber()
+							callback := vm.pop()
+
+							handle := callback.GetHandle()
+							obj, err := allocator.GetObject(handle)
+
+							if err != nil {
+								return value.EncodedUndefined(), err
+							}
+
+							if callback, ok := obj.(*object.ObjFunction); ok {
+								fn.Set(int(ms), callback)
+								eventloop.Dispatch(fn.CloneForDispatch())
+								vm.push(value.EncodedUndefined())
+							}
+						}
 					}
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(callee))
@@ -575,7 +612,11 @@ func (vm *VM) Run() (value.Value, error) {
 		case chunk.OP_RETURN:
 			{
 				ip = frame.returnIp
-				value := vm.pop()
+				value := value.EncodedUndefined()
+
+				if vm.stackTop > 0 {
+					value = vm.pop()
+				}
 
 				vm.stackTop = frame.localStart
 				vm.push(value)

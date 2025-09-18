@@ -24,7 +24,6 @@ func (*ErrorConstructor) Type() object.ObjType {
 }
 
 func (*ErrorConstructor) New(params ...any) (object.Object, error) {
-	fmt.Printf("%v\n", params)
 	if len(params) < 1 {
 		return nil, errors.New("not enough params for new Error()")
 	}

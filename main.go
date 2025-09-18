@@ -6,6 +6,7 @@ import (
 	eventloop "go_js/eventLoop"
 	"go_js/object"
 	"go_js/parser"
+	"go_js/queue"
 	"go_js/vm"
 	"log"
 	"os"
@@ -15,9 +16,7 @@ import (
 )
 
 const PROFILE = true
-const DEBUG = true
-
-var WAIT_GROUP = sync.WaitGroup{}
+const DEBUG = false
 
 func main() {
 	if PROFILE {
@@ -62,6 +61,7 @@ func main() {
 
 	startCompile := time.Now()
 	main, err := compiler.Compile(ast)
+
 	fmt.Printf("AST Compiled in %s\n", time.Since(startCompile))
 
 	if err != nil {
@@ -69,19 +69,21 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	jobChannel := make(chan object.Job)
-
 	start := time.Now()
-	vm := vm.NewVM(DEBUG, jobChannel)
 
-	eventloop.InitLoop(jobChannel, vm)
-	go eventloop.Start(&wg)
-	wg.Add(1) // for initializing
+	queue.Init()
+	eventloop.Init(&wg)
+
+	vm := vm.NewVM(DEBUG)
+
+	go eventloop.Start()
+	go vm.Run(&wg)
+
 	mainJob := &object.Main{Fn: main}
-	jobChannel <- mainJob
-	wg.Done()
+	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
+
 	fmt.Printf("Thanks! %s\n", time.Since(start))
 
 	if err != nil {

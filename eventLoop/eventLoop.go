@@ -1,63 +1,49 @@
 package eventloop
 
 import (
-	"container/list"
 	"go_js/object"
-	"go_js/vm"
+	"go_js/queue"
 	"sync"
 )
 
 type EventLoop struct {
-	jobCompletionChannel chan *object.ObjFunction
-	jobChannel           chan object.Job
-	tick                 chan struct{}
-	taskQueue            *list.List
+	jobCallbackC chan *object.ObjFunction
+	jobC         chan object.Job
 
-	vm *vm.VM
+	wg *sync.WaitGroup
 }
 
 var el *EventLoop
 
-func InitLoop(jobChannel chan object.Job, vm *vm.VM) {
+func Init(wg *sync.WaitGroup) {
 	if el != nil {
 		return
 	}
 
 	el = &EventLoop{
-		jobChannel:           jobChannel,
-		jobCompletionChannel: make(chan *object.ObjFunction),
-		tick:                 make(chan struct{}),
-		taskQueue:            &list.List{},
-		vm:                   vm,
+		jobC:         make(chan object.Job),
+		jobCallbackC: make(chan *object.ObjFunction),
+		wg:           wg,
 	}
 }
 
-func Start(wg *sync.WaitGroup) {
+func Start() {
 	go func() {
-		for job := range el.jobChannel {
+		for job := range el.jobC {
 			go func() {
-				defer wg.Done()
-				wg.Add(1)
-				job.Work(el.jobCompletionChannel)
+				job.Work(el.jobCallbackC)
 			}()
 		}
 	}()
 
 	go func() {
-		for fn := range el.jobCompletionChannel {
-			el.taskQueue.PushBack(fn)
-			el.tick <- struct{}{}
+		for fn := range el.jobCallbackC {
+			queue.Enqueue(fn, queue.TASK)
 		}
 	}()
+}
 
-	go func() {
-		for range el.tick {
-			wg.Add(1)
-			front := el.taskQueue.Front()
-			el.taskQueue.Remove(front)
-			el.vm.Call(front.Value.(*object.ObjFunction), 0)
-			el.vm.Run()
-			wg.Done()
-		}
-	}()
+func Dispatch(job object.Job) {
+	el.wg.Add(1)
+	el.jobC <- job
 }

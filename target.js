@@ -49,4 +49,15 @@ if (typeof document !== "undefined") {
     document.body.innerHTML = "<h1>Hello from JS!</h1>";
 }
 
-setTimeout(() => console.log("Delayed message"), 1000);
+let message = "delayed message"
+
+setTimeout(() => {
+    console.log(`${message} ${count++}`);
+    setTimeout(() => {
+        console.log(`${message} ${count++}`);
+    }, 4000)
+}, 1000);
+
+setTimeout(() => console.log(`${message} ${count++}`), 2000);
+setTimeout(() => console.log(`${message} ${count++}`), 3000);
+setTimeout(() => console.log(`${message} ${count++}`), 4000);
