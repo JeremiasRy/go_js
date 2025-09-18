@@ -69,8 +69,6 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	start := time.Now()
-
 	queue.Init()
 	eventloop.Init(&wg)
 
@@ -80,6 +78,7 @@ func main() {
 	go vm.Run(&wg)
 
 	mainJob := &object.Main{Fn: main}
+	start := time.Now()
 	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
