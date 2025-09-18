@@ -227,7 +227,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
 
-	main.ValueChunk().EmitByte(chunk.OP_EOF)
+	main.ValueChunk().EmitByte(chunk.OP_RETURN)
 	return main, nil
 }
 

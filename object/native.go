@@ -45,6 +45,8 @@ func (*Clock) Clock() value.Value {
 
 type SetTimeout struct {
 	ObjNativeFn
+	time     int
+	callback *ObjFunction
 }
 
 func NewSetTimeout() *SetTimeout {
@@ -52,4 +54,35 @@ func NewSetTimeout() *SetTimeout {
 	setTimeout.name = "setTimeout"
 
 	return setTimeout
+}
+
+func (st *SetTimeout) Set(ms int, callback *ObjFunction) {
+	st.time = ms
+	st.callback = callback
+}
+
+func (st *SetTimeout) Work(callBack chan *ObjFunction) {
+	callback := *st.callback
+	tick := time.NewTicker((time.Duration(st.time * 1000)))
+
+	for range tick.C {
+		callBack <- &callback
+		break
+	}
+}
+
+type Main struct {
+	Fn *ObjFunction
+}
+
+func NewMain(fn *ObjFunction) *Main {
+	return &Main{
+		Fn: fn,
+	}
+}
+
+func (m *Main) Work(callbackChannel chan *ObjFunction) {
+	println("working")
+	callbackChannel <- m.Fn
+	println("done")
 }

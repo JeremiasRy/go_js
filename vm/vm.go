@@ -4,15 +4,11 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
-	"go_js/compiler"
 	"go_js/constructor"
 	"go_js/object"
-	"go_js/parser"
 	"go_js/stringer"
 	"go_js/value"
-	"log"
 	"math"
-	"time"
 )
 
 const STACK_MAX = math.MaxUint8
@@ -39,21 +35,23 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 }
 
 type VM struct {
-	frames     []CallFrame
-	frameCount int
-	stack      []value.Value
-	stackTop   int
-
+	frames         []CallFrame
+	frameCount     int
+	stack          []value.Value
+	stackTop       int
 	exceptionStack []int
+
+	jobCannel chan object.Job
+	debug     bool
 }
 
-func NewVM() *VM {
+func NewVM(debug bool, jobChannel chan object.Job) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}, debug: debug, jobCannel: jobChannel}
 }
 
-func (vm *VM) call(fn object.Callable, returnIp int) error {
+func (vm *VM) Call(fn object.Callable, returnIp int) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
@@ -155,13 +153,12 @@ func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	return value.EncodeHandle(allocator.Allocate(objStr))
 }
 
-func (vm *VM) run() (value.Value, error) {
-	start := time.Now()
+func (vm *VM) Run() (value.Value, error) {
 	frame := vm.currentFrame()
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
 
-	if DEBUG {
+	if vm.debug {
 		println()
 		println("-- NEW RUNNER SPAWNED --")
 		println()
@@ -173,7 +170,7 @@ func (vm *VM) run() (value.Value, error) {
 		code := valueChunk.Code[ip]
 		ip++
 
-		if DEBUG {
+		if vm.debug {
 			printStack(vm.stack[0:vm.stackTop])
 			println(opNames[code])
 		}
@@ -473,7 +470,7 @@ func (vm *VM) run() (value.Value, error) {
 					switch fn := obj.(type) {
 					case object.Callable:
 						{
-							vm.call(fn, ip)
+							vm.Call(fn, ip)
 							frame = vm.currentFrame()
 							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
@@ -504,14 +501,14 @@ func (vm *VM) run() (value.Value, error) {
 							if err != nil {
 								return value.EncodedUndefined(), err
 							}
-							runner := NewVM()
+							runner := NewVM(vm.debug, nil)
 							if fn, ok := obj.(*object.ObjFunction); ok {
 								for !done {
 
 									item := iterator.Current()
 									runner.push(item)
-									runner.call(fn, 0)
-									runner.run()
+									runner.Call(fn, 0)
+									runner.Run()
 									done = iterator.Next()
 								}
 							}
@@ -531,14 +528,14 @@ func (vm *VM) run() (value.Value, error) {
 							}
 
 							arr := []value.Value{}
-							runner := NewVM()
+							runner := NewVM(vm.debug, nil)
 							if fn, ok := obj.(*object.ObjFunction); ok {
 								for !done {
 
 									item := iterator.Current()
 									runner.push(item)
-									runner.call(fn, 0)
-									result, err := runner.run()
+									runner.Call(fn, 0)
+									result, err := runner.Run()
 
 									if err != nil {
 										return value.EncodedUndefined(), err
@@ -584,14 +581,9 @@ func (vm *VM) run() (value.Value, error) {
 				vm.push(value)
 				vm.frameCount--
 
-				// Main program ends at EOF, if we run out of CallFrames it means we spawned a new VM to run some arbitrary code
 				if vm.frameCount <= 0 {
-					if DEBUG {
-						println()
-						println("-- RUNNER EXITING --")
-						println()
-					}
 					vm.stackTop = 0
+
 					return value, nil
 				}
 
@@ -791,11 +783,6 @@ func (vm *VM) run() (value.Value, error) {
 
 				ip = to
 			}
-		case chunk.OP_EOF:
-			{
-				fmt.Printf("Thanks! %s\n", time.Since(start))
-				return value.EncodedUndefined(), nil
-			}
 		}
 	}
 }
@@ -820,36 +807,4 @@ func setHeapScopes(c *value.ValueChunk, heapScope int) error {
 
 func (vm *VM) log(arg value.Value) {
 	fmt.Printf("%s\n", stringer.String(arg))
-}
-
-func Interpret(source []byte) {
-	startAstParse := time.Now()
-	ast, err := parser.GetAst(source, nil, 0)
-	fmt.Printf("AST parsed in %s\n", time.Since(startAstParse))
-
-	if err != nil {
-		log.Fatalf("Failed to parse javascript, %e", err)
-	}
-
-	if DEBUG {
-		println("### Abtract Syntax Tree ###")
-		parser.PrintNode(ast)
-		println()
-	}
-
-	startCompile := time.Now()
-	main, err := compiler.Compile(ast)
-	fmt.Printf("AST Compiled in %s\n", time.Since(startCompile))
-
-	if err != nil {
-		log.Fatalf("Failed to parse javascript, %e", err)
-	}
-
-	vm := NewVM()
-	vm.call(main, 0)
-	_, err = vm.run()
-
-	if err != nil {
-		log.Fatalf("runtime error: %s", err.Error())
-	}
 }

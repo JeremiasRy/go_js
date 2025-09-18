@@ -9,8 +9,6 @@ import (
 	"go_js/value"
 )
 
-const DEBUG = true
-
 var opNames = map[uint8]string{
 	chunk.OP_CONSTANT:               "OP_CONSTANT",
 	chunk.OP_POP:                    "OP_POP",
@@ -59,7 +57,6 @@ var opNames = map[uint8]string{
 	chunk.OP_TRY_BLOCK_END:          "OP_TRY_BLOCK_END",
 	chunk.OP_THROW:                  "OP_THROW",
 	chunk.OP_NEW:                    "OP_NEW",
-	chunk.OP_EOF:                    "OP_EOF",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -273,11 +270,6 @@ func printFunction(c value.ValueChunk) {
 		case chunk.OP_RETURN:
 			{
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_EOF:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				break
 			}
 		}
 		ip++

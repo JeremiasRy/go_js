@@ -32,6 +32,10 @@ func IsValueObject(v value.Value) (bool, uint32) {
 	return false, 0
 }
 
+type Job interface {
+	Work(callbackChannel chan *ObjFunction)
+}
+
 type Object interface {
 	Type() ObjType
 	String() string

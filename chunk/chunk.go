@@ -50,5 +50,4 @@ const (
 	OP_TRY_BLOCK_END
 	OP_THROW
 	OP_NEW
-	OP_EOF
 )
