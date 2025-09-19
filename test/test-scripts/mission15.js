@@ -55,9 +55,9 @@ setTimeout(() => {
     console.log(`${message} ${count++}`);
     setTimeout(() => {
         console.log(`${message} ${count++}`);
-    }, 4000)
-}, 1000);
+    }, 40)
+}, 10);
 
-setTimeout(() => console.log(`${message} ${count++}`), 2000);
-setTimeout(() => console.log(`${message} ${count++}`), 3000);
-setTimeout(() => console.log(`${message} ${count++}`), 4000);
+setTimeout(() => console.log(`${message} ${count++}`), 20);
+setTimeout(() => console.log(`${message} ${count++}`), 30);
+setTimeout(() => console.log(`${message} ${count++}`), 40);
