@@ -1,16 +1,10 @@
-
-let i = 0
-function looper1() {
-    while (++i < 5) {
-        console.log(i)
-    }
-}
-
-function looper2() {
-    while (i-- > 0) {
-        console.log(i)
-    }
-}
-
-looper1()
-looper2()
+let num = 123;
+let str = "hello";
+let bool = true;
+let n = null;
+let u;
+console.log(num);
+console.log(str);
+console.log(bool);
+console.log(n);
+console.log(u);

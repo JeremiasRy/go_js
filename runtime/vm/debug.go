@@ -17,14 +17,19 @@ var opNames = map[uint8]string{
 	chunk.OP_SUBTRACT:               "OP_SUBTRACT",
 	chunk.OP_MULTIPLY:               "OP_MULTIPLY",
 	chunk.OP_DIVIDE:                 "OP_DIVIDE",
+	chunk.OP_MODULO:                 "OP_MODULO",
+	chunk.OP_EXPONENTIATION:         "OP_EXPONENTIATION",
 	chunk.OP_TRUE:                   "OP_TRUE",
 	chunk.OP_FALSE:                  "OP_FALSE",
 	chunk.OP_EQUALS:                 "OP_EQUALS",
 	chunk.OP_STRICT_EQUALS:          "OP_STRICT_EQUALS",
+	chunk.OP_STRICT_NOT_EQUALS:      "OP_STRICT_NOT_EQUALS",
 	chunk.OP_LESS_THAN_EQUAL:        "OP_LESS_THAN_EQUAL",
 	chunk.OP_LESS_THAN:              "OP_LESS_THAN",
 	chunk.OP_GREATER_THAN_EQUAL:     "OP_GREATER_THAN_EQUAL",
 	chunk.OP_GREATER_THAN:           "OP_GREATER_THAN",
+	chunk.OP_LOGICAL_AND:            "OP_LOGICAL_AND",
+	chunk.OP_LOGICAL_OR:             "OP_LOGICAL_OR",
 	chunk.OP_DEFINE_LOCAL:           "OP_DEFINE_LOCAL",
 	chunk.OP_GET_LOCAL:              "OP_GET_LOCAL",
 	chunk.OP_SET_LOCAL:              "OP_SET_LOCAL",
@@ -95,7 +100,31 @@ func printFunction(c value.ValueChunk) {
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
+		case chunk.OP_EQUALS:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_STRICT_EQUALS:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_STRICT_NOT_EQUALS:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_THROW:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_EXPONENTIATION:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_LOGICAL_OR:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_MODULO:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}

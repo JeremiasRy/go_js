@@ -1,9 +1,10 @@
-const a = 12
-
-if (a > 12) {
-    console.log("over")
-} else if (a < 12) {
-    console.log("under")
-} else {
-    console.log("12")
+let greeting = "hello";
+if (true) {
+    let inner = "world";
+    console.log(greeting + " " + inner);
+}
+try {
+    console.log(inner);
+} catch (e) {
+    console.log("Error: 'inner' is not defined outside its block");
 }

@@ -1,8 +1,5 @@
-let a = 2
-
-function hello() {
-    b = 5
-    console.log(b)
+let sum = 0;
+for (let i = 0; i < 5; i++) {
+    sum += i;
 }
-
-hello()
+console.log(sum);

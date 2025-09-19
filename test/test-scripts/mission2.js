@@ -1,14 +1,8 @@
-function looper1() {
-    for (let i = 0; i < 5; i++) {
-        console.log(i)
-    }
-}
-
-function looper2() {
-    for (let i = 20; i >= 15; i--) {
-        console.log(i)
-    }
-}
-
-looper1()
-looper2()
+let a = 10;
+let b = 3;
+console.log(a + b);
+console.log(a - b);
+console.log(a * b);
+console.log(a / b);
+console.log(a % b);
+console.log(a ** b);

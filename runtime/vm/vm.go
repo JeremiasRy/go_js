@@ -236,6 +236,21 @@ func (vm *VM) run() (value.Value, error) {
 				// type checks required
 				vm.push(value.ValueFromFloat64(a.AsNumber() * b.AsNumber()))
 			}
+		case chunk.OP_EXPONENTIATION:
+			{
+
+				b := vm.pop()
+				a := vm.pop()
+				// type checks required
+				vm.push(value.ValueFromFloat64(math.Pow(a.AsNumber(), b.AsNumber())))
+			}
+		case chunk.OP_MODULO:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				// type checks required
+				vm.push(value.ValueFromFloat64(math.Mod(a.AsNumber(), b.AsNumber())))
+			}
 		case chunk.OP_LESS_THAN:
 			{
 				b := vm.pop()
@@ -280,7 +295,49 @@ func (vm *VM) run() (value.Value, error) {
 					vm.push(value.EncodeFalse())
 				}
 			}
+		case chunk.OP_EQUALS:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				if stringer.String(a) == stringer.String(b) {
+					vm.push(value.EncodeTrue())
+				} else {
+					vm.push(value.EncodeFalse())
+				}
+			}
 		case chunk.OP_STRICT_EQUALS:
+			{
+				b := vm.pop()
+				a := vm.pop()
+
+				bIsObject, bHandle := object.IsValueObject(b)
+				aIsObject, aHandle := object.IsValueObject(a)
+
+				if bIsObject && aIsObject {
+					bObj, _ := allocator.GetObject(bHandle)
+					aObj, _ := allocator.GetObject(aHandle)
+
+					if bObj.Type() == aObj.Type() {
+						if bObj.String() == aObj.String() {
+							vm.push(value.EncodeTrue())
+						} else {
+							vm.push(value.EncodeFalse())
+						}
+
+					} else {
+						vm.push(value.EncodeFalse())
+					}
+					continue
+				}
+
+				if a == b {
+					vm.push(value.EncodeTrue())
+				} else {
+					vm.push(value.EncodeFalse())
+				}
+			}
+		case chunk.OP_STRICT_NOT_EQUALS:
 			{
 				b := vm.pop()
 				a := vm.pop()
@@ -295,11 +352,33 @@ func (vm *VM) run() (value.Value, error) {
 					if bObj.Type() == aObj.Type() {
 
 					} else {
-						vm.push(value.EncodeFalse())
+						vm.push(value.EncodeTrue())
 					}
 				}
 
 				if a == b {
+					vm.push(value.EncodeFalse())
+				} else {
+					vm.push(value.EncodeTrue())
+				}
+			}
+		case chunk.OP_LOGICAL_OR:
+			{
+				right := vm.pop()
+				left := vm.pop()
+
+				if left.AsBoolean() {
+					vm.push(left)
+				} else {
+					vm.push(right)
+				}
+			}
+		case chunk.OP_LOGICAL_AND:
+			{
+				right := vm.pop()
+				left := vm.pop()
+
+				if left.AsBoolean() && right.AsBoolean() {
 					vm.push(value.EncodeTrue())
 				} else {
 					vm.push(value.EncodeFalse())
@@ -441,8 +520,13 @@ func (vm *VM) run() (value.Value, error) {
 				// should interface this...
 				case *object.ObjArr:
 					{
-						value := obj.GetMember(stringer.String(member))
-						vm.push(value)
+						var v value.Value
+						if !member.IsType(value.TAG_OBJ) {
+							v = obj.GetElementAt(int(member.AsNumber()))
+						} else {
+							v = obj.GetMember(stringer.String(member))
+						}
+						vm.push(v)
 						ip++
 					}
 				case *object.ObjObject:

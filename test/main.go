@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -19,13 +20,8 @@ func main() {
 	err := os.Mkdir(DIR_NAME_EXPECTED, 0755)
 
 	if err != nil {
-		if err.Error() == "mkdir expected: file exists" {
-			goto Continue
-		}
 		log.Fatalf("Failed to create %s folder %s", DIR_NAME_EXPECTED, err)
 	}
-
-Continue:
 
 	scripts, err := os.ReadDir(DIR_NAME_TEST_SCRIPTS)
 
@@ -35,7 +31,7 @@ Continue:
 
 	expected := map[string][]byte{}
 
-	println("generating expected outputs...")
+	fmt.Print("generating expected outputs...")
 
 	for _, script := range scripts {
 		name := script.Name()
@@ -54,10 +50,18 @@ Continue:
 		expected[name] = out
 	}
 
-	println("generated expected outputs")
-	fmt.Printf("Running %d tests...\n", len(expected))
+	fmt.Print(" done")
 
-	for _, script := range scripts {
+	fmt.Printf("\nRunning %d tests.\n", len(expected))
+
+	fails := []struct {
+		test     string
+		expected string
+		got      string
+	}{}
+
+	for nth, script := range scripts {
+		fmt.Printf("%d/%d...", nth+1, len(expected))
 		name := script.Name()
 
 		if err != nil {
@@ -68,12 +72,30 @@ Continue:
 		out, err := cmd.CombinedOutput()
 
 		if err != nil {
-			log.Fatalf("failed to run test script %s", err)
+			log.Fatalf("failed to run test script '%s' %s", name, err)
 		}
 
-		if string(expected[name]) != string(out) {
-			println("failed test", name)
-			fmt.Printf("Expected:\n%sGot:\n%s", expected[name], out)
+		if bytes.Equal(expected[name], out) {
+			fmt.Println("✅")
+		} else {
+			fmt.Println("❌")
+			fails = append(fails, struct {
+				test     string
+				expected string
+				got      string
+			}{test: name, expected: string(expected[name]), got: string(out)})
+		}
+	}
+
+	if len(fails) > 0 {
+		fmt.Println()
+		fmt.Println("FAILED TESTS")
+		indent := "		"
+		for _, result := range fails {
+			fmt.Printf("Test case: '%s'\n\n", result.test)
+			fmt.Printf("%s-- Expected --\n%s\n", indent, result.expected)
+			fmt.Printf("%s-- Got --\n%s\n", indent, result.got)
+			fmt.Println("--------")
 		}
 	}
 

@@ -55,6 +55,24 @@ type FunctionScope struct {
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
 var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
 
+var operatorMap = map[parser.BinaryOperator]uint8{
+	parser.LESS_THAN:          chunk.OP_LESS_THAN,
+	parser.GREATER_THAN:       chunk.OP_GREATER_THAN,
+	parser.GREATER_THAN_EQUAL: chunk.OP_GREATER_THAN_EQUAL,
+	parser.LESS_THAN_EQUAL:    chunk.OP_LESS_THAN_EQUAL,
+	parser.MINUS:              chunk.OP_SUBTRACT,
+	parser.PLUS:               chunk.OP_ADD,
+	parser.DIVIDE:             chunk.OP_DIVIDE,
+	parser.MULTIPLY:           chunk.OP_MULTIPLY,
+	parser.EXPONENTIATION:     chunk.OP_EXPONENTIATION,
+	parser.MODULUS:            chunk.OP_MODULO,
+	parser.EQUALS:             chunk.OP_EQUALS,
+	parser.STRICT_EQUALS:      chunk.OP_STRICT_EQUALS,
+	parser.STRICT_NOT_EQUALS:  chunk.OP_STRICT_NOT_EQUALS,
+	"||":                      chunk.OP_LOGICAL_OR,
+	"&&":                      chunk.OP_LOGICAL_AND,
+}
+
 func newBlockScope(parent *BlockScope) *BlockScope {
 	return &BlockScope{vars: Variables{}, parent: parent}
 }
@@ -264,22 +282,33 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Right, symbolTable, fn)
 			var defineOp uint8
 			var setOp uint8
+			var getOp uint8
 
 			switch variable.scope {
 			case LOCAL:
 				{
 					defineOp = chunk.OP_DEFINE_LOCAL
 					setOp = chunk.OP_SET_LOCAL
+					getOp = chunk.OP_GET_LOCAL
 				}
 			case GLOBAL:
 				{
 					defineOp = chunk.OP_DEFINE_GLOBAL
 					setOp = chunk.OP_SET_GLOBAL
+					getOp = chunk.OP_GET_GLOBAL
 				}
 			case HEAP:
 				{
 					defineOp = chunk.OP_DEFINE_HEAP_VAR
 					setOp = chunk.OP_SET_HEAP_VAR
+					getOp = chunk.OP_GET_HEAP_VAR
+				}
+			}
+
+			switch current.AssignmentOperator {
+			case parser.PLUS_ASSIGN:
+				{
+					fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot), chunk.OP_ADD)
 				}
 			}
 
@@ -429,10 +458,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			generateByteCode(current.Object, symbolTable, fn)
-			handle := allocator.Allocate(object.NewObjString(current.Property.Name))
-			memberSlot := fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
+			var slot uint8
+			if current.Property.Type == parser.NODE_LITERAL {
+				slot = parseLiteralWithoutWrite(current.Property, fn)
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, slot)
 
-			fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, memberSlot)
+			} else {
+				handle := allocator.Allocate(object.NewObjString(current.Property.Name))
+				slot = fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, slot)
+			}
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
@@ -512,21 +547,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Right, symbolTable, fn)
 			popStack = true
 
-			switch current.BinaryOperator {
-			case parser.LESS_THAN:
-				fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN)
-			case parser.GREATER_THAN:
-				fn.ValueChunk().EmitByte(chunk.OP_GREATER_THAN)
-			case parser.GREATER_THAN_EQUAL:
-				fn.ValueChunk().EmitByte(chunk.OP_GREATER_THAN_EQUAL)
-			case parser.LESS_THAN_EQUAL:
-				fn.ValueChunk().EmitByte(chunk.OP_LESS_THAN_EQUAL)
-			case parser.MINUS:
-				fn.ValueChunk().EmitByte(chunk.OP_SUBTRACT)
-			case parser.PLUS:
-				fn.ValueChunk().EmitByte(chunk.OP_ADD)
-
-			}
+			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 		}
 	case parser.NODE_LITERAL:
 		{
@@ -575,7 +596,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
-				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+				fn.ValueChunk().EmitBytes(chunk.OP_THROW)
 				return
 			}
 
@@ -824,5 +845,62 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(uint8(len(current.Arguments)))
 
 		}
+	case parser.NODE_CONDITIONAL_EXPRESSION:
+		{
+			generateByteCode(current.Test, symbolTable, fn)
+
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+			jumpStart := len(fn.ValueChunk().Code) - 4
+
+			generateByteCode(current.Consequent, symbolTable, fn)
+			altJump := 0
+			if current.Alternate != nil {
+				fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+				altJump = len(fn.ValueChunk().Code) - 4
+			}
+			fn.ValueChunk().PatchUint32(uint32(jumpStart), uint32(len(fn.ValueChunk().Code)))
+
+			if current.Alternate != nil {
+				generateByteCode(current.Alternate, symbolTable, fn)
+				fn.ValueChunk().PatchUint32(uint32(altJump), uint32(len(fn.ValueChunk().Code)))
+			}
+		}
+	case parser.NODE_LOGICAL_EXPRESSION:
+		{
+			generateByteCode(current.Left, symbolTable, fn)
+			generateByteCode(current.Right, symbolTable, fn)
+			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
+		}
 	}
+}
+
+func parseLiteralWithoutWrite(current *parser.Node, fn object.Callable) uint8 {
+	switch v := current.Value.(type) {
+	case float64:
+		{
+			return fn.ValueChunk().AddConstant(value.ValueFromFloat64(v))
+		}
+	case []byte:
+		{
+			objStr := constructor.NewString(string(v))
+			handle := allocator.Allocate(objStr)
+			return fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
+		}
+	case bool:
+		{
+			if v {
+				return fn.ValueChunk().AddConstant(value.EncodeTrue())
+			} else {
+				return fn.ValueChunk().AddConstant(value.EncodeFalse())
+
+			}
+		}
+	case nil:
+		{
+			if current.Raw == "null" {
+				return fn.ValueChunk().AddConstant(value.EncodeNil())
+			}
+		}
+	}
+	panic("failed to parse literal")
 }

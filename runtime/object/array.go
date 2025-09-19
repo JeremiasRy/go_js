@@ -16,6 +16,10 @@ func NewObjArr(length int) *ObjArr {
 	return arrObj
 }
 
+func (arrObj *ObjArr) GetElementAt(i int) value.Value {
+	return arrObj.items[i]
+}
+
 func (arrObj *ObjArr) PushElement(v value.Value) {
 	arrObj.items = append(arrObj.items, v)
 	arrObj.Hash["length"] = value.ValueFromFloat64(float64(len(arrObj.items)))

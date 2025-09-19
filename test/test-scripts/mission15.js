@@ -45,9 +45,11 @@ try {
     console.log(`Caught: ${error.message}`);
 }
 
+/*
 if (typeof document !== "undefined") {
     document.body.innerHTML = "<h1>Hello from JS!</h1>";
 }
+*/
 
 let message = "delayed message"
 

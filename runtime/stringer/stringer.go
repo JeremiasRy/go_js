@@ -23,7 +23,7 @@ func DebugString(v value.Value) string {
 	} else if v.IsType(value.TAG_NIL) {
 		return "null"
 	} else {
-		return fmt.Sprintf("%f", v.AsNumber())
+		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 	}
 }
 

@@ -1,6 +1,5 @@
-const a = 3
-const b = () => {
-    return "abc"
-}
-
-console.log(`${() => "23"} a = ${a}, b = ${b()}    asdasd`)
+let fruits = ["apple", "banana", "cherry"];
+fruits.push("date");
+console.log(fruits[0]);
+console.log(fruits[3]);
+console.log(fruits.length);

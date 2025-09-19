@@ -140,7 +140,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_IDENTIFIER:
 		variable, table := symbolTable.findVariable(current.Name)
 
-		if variable == nil {
+		if catchScope && variable == nil {
 			symbolTable.addVariable(current.Name, LET, true, nil)
 			return
 		}

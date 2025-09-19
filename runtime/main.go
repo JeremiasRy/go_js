@@ -14,10 +14,10 @@ import (
 	"sync"
 )
 
-const PROFILE = false
-const DEBUG = false
+var PROFILE = false
 
 func main() {
+	var debug bool = false
 	if PROFILE {
 		f, err := os.Create("cpu.prof")
 		if err != nil {
@@ -33,9 +33,13 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	if len(os.Args) != 2 {
+	if len(os.Args) < 2 {
 		println("Usage: go run main.go <input>")
 		os.Exit(1)
+	}
+
+	if len(os.Args) == 3 {
+		debug = os.Args[2] == "--debug"
 	}
 
 	b, err := os.ReadFile(os.Args[1])
@@ -50,7 +54,7 @@ func main() {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
 
-	if DEBUG {
+	if debug {
 		println("### Abtract Syntax Tree ###")
 		parser.PrintNode(ast)
 		println()
@@ -66,7 +70,7 @@ func main() {
 	queue.Init()
 	eventloop.Init(&wg)
 
-	vm := vm.NewVM(DEBUG)
+	vm := vm.NewVM(debug)
 
 	go eventloop.Start()
 	go vm.Run(&wg)
