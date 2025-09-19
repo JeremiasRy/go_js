@@ -62,6 +62,10 @@ func (st *SetTimeout) Set(ms int, callback *ObjFunction) {
 }
 
 func (st *SetTimeout) Work(callBack chan *ObjFunction) {
+	if st.time == 0 {
+		callBack <- st.callback
+		return
+	}
 	tick := time.NewTicker((time.Duration(st.time) * time.Millisecond))
 
 	for range tick.C {

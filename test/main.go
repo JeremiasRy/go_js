@@ -34,6 +34,9 @@ func main() {
 	fmt.Print("generating expected outputs...")
 
 	for _, script := range scripts {
+		if script.IsDir() {
+			continue
+		}
 		name := script.Name()
 
 		if err != nil {
@@ -44,7 +47,7 @@ func main() {
 		out, err := cmd.CombinedOutput()
 
 		if err != nil {
-			log.Fatalf("failed to run test script %s", err)
+			log.Fatalf("failed to run test script %s %s", name, err)
 		}
 
 		expected[name] = out
@@ -61,8 +64,11 @@ func main() {
 	}{}
 
 	for nth, script := range scripts {
-		fmt.Printf("%d/%d...", nth+1, len(expected))
+		if script.IsDir() {
+			continue
+		}
 		name := script.Name()
+		fmt.Printf("%-12s %2d/%d...", name, nth+1, len(expected))
 
 		if err != nil {
 			log.Fatalf("failed to read script order number %s", err)
@@ -72,7 +78,13 @@ func main() {
 		out, err := cmd.CombinedOutput()
 
 		if err != nil {
-			log.Fatalf("failed to run test script '%s' %s", name, err)
+			fmt.Println("❌")
+			fails = append(fails, struct {
+				test     string
+				expected string
+				got      string
+			}{test: name, expected: string(expected[name]), got: err.Error()})
+			continue
 		}
 
 		if bytes.Equal(expected[name], out) {
