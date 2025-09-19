@@ -5,5 +5,5 @@ let result2 = "" || "default";
 console.log(result2);
 
 let obj = null;
-let n = obj && obj.name; // 'obj.name' is not evaluated because 'obj' is falsy.
+let n = obj && obj.name;
 console.log(n);

@@ -4,3 +4,9 @@ if (x > 10) {
 } else {
     console.log("x is not greater than 10");
 }
+
+if (x > 15) {
+    console.log("x is greater than 15");
+} else {
+    console.log("x is not greater than 15");
+}
