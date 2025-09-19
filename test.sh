@@ -1,1 +1,1 @@
-docker build -t go_js_test ./test/. && docker run go_js_test:latest
+docker build -t go_js_test . && docker run go_js_test:latest

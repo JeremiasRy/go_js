@@ -2,7 +2,6 @@ package compiler
 
 import (
 	"cmp"
-	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/constructor"
@@ -123,7 +122,7 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	}
 
 	if _, found := mapToAddTo[name]; found {
-		fmt.Printf("WARN: Already found variable %s from scope\n", name)
+		// fmt.Printf("WARN: Already found variable %s from scope\n", name)
 		return
 	}
 
@@ -820,7 +819,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(node, symbolTable, fn)
 			}
 			//safeguards later: len(current.Arguments) > uint8.MAX
-			println(len(current.Arguments))
 			generateByteCode(current.Callee, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_NEW)
 			fn.ValueChunk().EmitByte(uint8(len(current.Arguments)))

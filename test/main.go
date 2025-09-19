@@ -1,17 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"strconv"
-	"strings"
 )
 
 const DIR_NAME_EXPECTED = "expected"
 const DIR_NAME_TEST_SCRIPTS = "test-scripts"
 
 const PREFIX_TEST_SCIPT = "mission"
+
+const EXPECTED_TEST_RESULT_RUNNER = "node"
+const RUNTIME_BINARY_NAME = "go_js"
 
 func main() {
 	err := os.Mkdir(DIR_NAME_EXPECTED, 0755)
@@ -31,29 +33,48 @@ Continue:
 		log.Fatalf("failed to read test scripts %s", err)
 	}
 
+	expected := map[string][]byte{}
+
+	println("generating expected outputs...")
+
 	for _, script := range scripts {
 		name := script.Name()
-
-		split := strings.Split(strings.Split(name, ".js")[0], "mission")
-		nth, err := strconv.Atoi(split[len(split)-1])
 
 		if err != nil {
 			log.Fatalf("failed to read script order number %s", err)
 		}
 
 		cmd := exec.Command("node", "test-scripts/"+name)
-		expected, err := cmd.CombinedOutput()
+		out, err := cmd.CombinedOutput()
 
 		if err != nil {
 			log.Fatalf("failed to run test script %s", err)
 		}
 
-		file, err := os.Create(DIR_NAME_EXPECTED + "/expected_" + strconv.Itoa(nth))
+		expected[name] = out
+	}
+
+	println("generated expected outputs")
+	fmt.Printf("Running %d tests...\n", len(expected))
+
+	for _, script := range scripts {
+		name := script.Name()
 
 		if err != nil {
-			log.Fatalf("failed to write expected result to a file %s", err)
+			log.Fatalf("failed to read script order number %s", err)
 		}
-		file.Write(expected)
+
+		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, "test-scripts/"+name)
+		out, err := cmd.CombinedOutput()
+
+		if err != nil {
+			log.Fatalf("failed to run test script %s", err)
+		}
+
+		if string(expected[name]) != string(out) {
+			println("failed test", name)
+			fmt.Printf("Expected:\n%sGot:\n%s", expected[name], out)
+		}
 	}
 
 	err = os.RemoveAll(DIR_NAME_EXPECTED)

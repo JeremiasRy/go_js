@@ -5,6 +5,7 @@ import (
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
+	"strconv"
 )
 
 func DebugString(v value.Value) string {
@@ -46,6 +47,6 @@ func String(v value.Value) string {
 	} else if v.IsType(value.TAG_NIL) {
 		return "null"
 	} else {
-		return fmt.Sprintf("%f", v.AsNumber())
+		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 	}
 }
