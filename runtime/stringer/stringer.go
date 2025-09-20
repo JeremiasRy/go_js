@@ -3,9 +3,10 @@ package stringer
 import (
 	"fmt"
 	"go_js/allocator"
-	"go_js/object"
+	"go_js/native"
 	"go_js/value"
 	"strconv"
+	"strings"
 )
 
 func DebugString(v value.Value) string {
@@ -34,9 +35,63 @@ func String(v value.Value) string {
 		obj, _ := allocator.GetObject(v.GetHandle())
 
 		switch obj := obj.(type) {
-		case *object.ObjError:
+		case *native.ObjError:
 			{
-				return String(obj.Hash["message"])
+				return String(obj.Hash["message"].Value)
+			}
+		case *native.ObjArr:
+			{
+				return TypeDecoratedString(v)
+			}
+		case *native.ObjObject:
+			{
+				var b strings.Builder
+				fmt.Fprint(&b, "{")
+				for k, v := range obj.Hash {
+					fmt.Fprintf(&b, " %s: %s,", k, TypeDecoratedString(v.Value))
+				}
+				fmt.Fprintln(&b, "}")
+			}
+		}
+		return obj.String()
+	} else if v.IsNaN() {
+		return "NaN"
+	} else if v.IsType(value.TAG_UNDEFINED) {
+		return "undefined"
+	} else if v.IsType(value.TAG_NIL) {
+		return "null"
+	} else {
+		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+	}
+}
+
+func TypeDecoratedString(v value.Value) string {
+	if v.IsBoolean() {
+		return fmt.Sprintf("%v", v.AsBoolean())
+	} else if v.IsObject() {
+		obj, _ := allocator.GetObject(v.GetHandle())
+
+		switch obj := obj.(type) {
+		case *native.ObjError:
+			{
+				return String(obj.Hash["message"].Value)
+			}
+		case *native.ObjString:
+			{
+				return fmt.Sprintf("'%s'", obj.Value)
+			}
+		case *native.ObjArr:
+			{
+				var b strings.Builder
+				fmt.Fprint(&b, "[")
+				for i, v := range obj.Values() {
+					fmt.Fprintf(&b, " %s", TypeDecoratedString(v))
+					if i != len(obj.Values())-1 {
+						fmt.Fprint(&b, ",")
+					}
+				}
+				fmt.Fprint(&b, " ]")
+				return b.String()
 			}
 		}
 		return obj.String()

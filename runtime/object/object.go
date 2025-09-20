@@ -1,7 +1,6 @@
 package object
 
 import (
-	"fmt"
 	"go_js/value"
 )
 
@@ -21,6 +20,7 @@ const (
 	OBJ_ARRAY_CONSTRUCTOR
 	OBJ_ERROR
 	OBJ_ERROR_CONSTRUCTOR
+	OBJ_CONSOLE
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -41,40 +41,15 @@ type Object interface {
 	String() string
 }
 
+type Hashable interface {
+	GetMember(k value.Value) value.Value
+	SetMember(k, v value.Value)
+}
+
 type Callable interface {
 	ValueChunk() *value.ValueChunk
 	Arity() int
 	HeapScope() int
 	SetHeapScope(scope int)
 	Name() string
-}
-
-type ObjObject struct {
-	Hash map[string]value.Value
-}
-
-func NewObjectHash() *ObjObject {
-	return &ObjObject{
-		Hash: map[string]value.Value{},
-	}
-}
-
-func (*ObjObject) Type() ObjType {
-	return OBJ_OBJECT
-}
-
-func (oh *ObjObject) String() string {
-	return fmt.Sprintf("%v", oh.Hash)
-}
-
-func (obj *ObjObject) GetMember(member string) value.Value {
-	if value, found := obj.Hash[member]; found {
-		return value
-	}
-
-	return value.EncodedUndefined()
-}
-
-func (obj *ObjObject) SetMember(member string, value value.Value) {
-	obj.Hash[member] = value
 }

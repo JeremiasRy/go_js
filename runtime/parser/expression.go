@@ -1049,7 +1049,8 @@ func (p *Parser) checkUnreserved(opts struct {
 		return p.raiseRecoverable(opts.start, "Cannot use 'await' as identifier inside an async function")
 	}
 	curScope := p.currentThisScope()
-	if !(curScope != nil && curScope.Flags&SCOPE_VAR == SCOPE_VAR) && opts.name == "arguments" {
+
+	if !(curScope != nil && curScope.Flags&SCOPE_VAR > 0) && opts.name == "arguments" {
 		return p.raiseRecoverable(opts.start, "Cannot use 'arguments' in class field initializer")
 	}
 

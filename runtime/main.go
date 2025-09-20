@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"go_js/compiler"
 	eventloop "go_js/eventLoop"
-	"go_js/object"
+	"go_js/native"
 	"go_js/parser"
 	"go_js/queue"
 	"go_js/vm"
@@ -75,7 +75,7 @@ func main() {
 	go eventloop.Start()
 	go vm.Run(&wg)
 
-	mainJob := &object.Main{Fn: main}
+	mainJob := &native.Main{Fn: main}
 	eventloop.Dispatch(mainJob)
 
 	wg.Wait()

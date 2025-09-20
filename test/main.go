@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 const DIR_NAME_EXPECTED = "expected"
@@ -102,14 +103,17 @@ func main() {
 	if len(fails) > 0 {
 		fmt.Println()
 		fmt.Println("FAILED TESTS")
-		indent := "		"
+		fmt.Println()
 		for _, result := range fails {
 			fmt.Printf("Test case: '%s'\n\n", result.test)
-			fmt.Printf("%s-- Expected --\n%s\n", indent, result.expected)
-			fmt.Printf("%s-- Got --\n%s\n", indent, result.got)
-			fmt.Println("--------")
+			fmt.Printf("-- Expected --\n%s", result.expected)
+			fmt.Printf("-- Got --\n%s", result.got)
+			fmt.Println()
+			fmt.Printf("%s\n", strings.Repeat("-", 34))
 		}
 	}
+
+	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n", len(scripts)-len(fails), len(scripts))
 
 	err = os.RemoveAll(DIR_NAME_EXPECTED)
 

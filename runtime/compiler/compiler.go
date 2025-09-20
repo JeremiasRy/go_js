@@ -4,7 +4,7 @@ import (
 	"cmp"
 	"go_js/allocator"
 	"go_js/chunk"
-	"go_js/constructor"
+	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
 	"go_js/value"
@@ -186,10 +186,8 @@ func (fs *FunctionScope) currentBlockVarCount() (int, bool) {
 }
 
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
-	console := object.NewObjectHash()
+	console := native.NewObjectConsole()
 	consoleHandle := allocator.Allocate(console)
-	logHandle := allocator.Allocate(object.NewLog())
-	console.SetMember("log", value.EncodeHandle(logHandle))
 	symbolTable.addVariable("console", CONST, false, nil)
 
 	main.ValueChunk().WriteConstant(value.EncodeHandle(consoleHandle))
@@ -197,7 +195,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	objCtor := &constructor.ObjectConstructor{}
+	objCtor := native.NewObjectConstructor()
 	objCtorHandle := allocator.Allocate(objCtor)
 
 	symbolTable.addVariable("Object", CONST, false, nil)
@@ -206,16 +204,16 @@ func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 }
 
 func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	arrCtor := &constructor.ArrayConstructor{}
+	arrCtor := &native.ArrayConstructor{}
 	arrCtorHandle := allocator.Allocate(arrCtor)
 
-	symbolTable.addVariable("Object", CONST, false, nil)
+	symbolTable.addVariable("Array", CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(arrCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
 func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	ctor := &constructor.ErrorConstructor{}
+	ctor := &native.ErrorConstructor{}
 	ctorHandle := allocator.Allocate(ctor)
 
 	symbolTable.addVariable("Error", CONST, false, nil)
@@ -224,7 +222,7 @@ func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 }
 
 func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
-	setTimeout := object.NewSetTimeout()
+	setTimeout := native.NewSetTimeout()
 	setTimeouthandle := allocator.Allocate(setTimeout)
 
 	symbolTable.addVariable("setTimeout", CONST, false, nil)
@@ -236,9 +234,10 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 
+	defineObjectConstructor(main, symbolTable)
 	defineConsole(main, symbolTable)
-	defineErrorConstructor(main, symbolTable)
 	defineSetTimeout(main, symbolTable)
+	defineErrorConstructor(main, symbolTable)
 	defineArrayConstructor(main, symbolTable)
 
 	prePass(ast, symbolTable)
@@ -464,7 +463,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, slot)
 
 			} else {
-				handle := allocator.Allocate(object.NewObjString(current.Property.Name))
+				handle := allocator.Allocate(native.NewObjString(current.Property.Name))
 				slot = fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, slot)
 			}
@@ -558,7 +557,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					objStr := constructor.NewString(string(v))
+					objStr := native.NewString(string(v))
 					handle := allocator.Allocate(objStr)
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
@@ -747,7 +746,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
 			for _, property := range current.Properties {
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.NewObjString(property.Key.Name))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
@@ -765,7 +764,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if len(quasi.Raw) > 0 {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(object.NewObjString(quasi.Raw))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewObjString(quasi.Raw))))
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
 
@@ -882,7 +881,7 @@ func parseLiteralWithoutWrite(current *parser.Node, fn object.Callable) uint8 {
 		}
 	case []byte:
 		{
-			objStr := constructor.NewString(string(v))
+			objStr := native.NewString(string(v))
 			handle := allocator.Allocate(objStr)
 			return fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
 		}

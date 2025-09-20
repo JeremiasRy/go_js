@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
-	"go_js/constructor"
 	eventloop "go_js/eventLoop"
+	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
 	"go_js/stringer"
@@ -98,8 +98,8 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(bHandle)
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			res := aObj.(*object.ObjString).Value + bObj.(*object.ObjString).Value
-			return value.EncodeHandle(allocator.Allocate(object.NewObjString(res)))
+			res := aObj.(*native.ObjString).Value + bObj.(*native.ObjString).Value
+			return value.EncodeHandle(allocator.Allocate(native.NewObjString(res)))
 		} else {
 			// runtime error?
 		}
@@ -109,9 +109,9 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		aObj, _ := allocator.GetObject(aHandle)
 
 		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.(*object.ObjString).Value + stringer.String(b)
+			res := aObj.(*native.ObjString).Value + stringer.String(b)
 
-			return value.EncodeHandle(allocator.Allocate(object.NewObjString(res)))
+			return value.EncodeHandle(allocator.Allocate(native.NewObjString(res)))
 		}
 	}
 
@@ -119,7 +119,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(bHandle)
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := object.NewObjString(stringer.String(a) + bObj.(*object.ObjString).Value)
+			res := native.NewObjString(stringer.String(a) + bObj.(*native.ObjString).Value)
 
 			return value.EncodeHandle(allocator.Allocate(res))
 		}
@@ -151,7 +151,7 @@ func (vm *VM) popN(n int) []value.Value {
 }
 
 func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
-	objStr := object.NewObjString(o.CreateString())
+	objStr := native.NewObjString(o.CreateString())
 	return value.EncodeHandle(allocator.Allocate(objStr))
 }
 
@@ -471,7 +471,7 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_CREATE_OBJECT:
 			{
-				objHash := object.NewObjectHash()
+				objHash := native.NewObjectHash()
 				handle := allocator.Allocate(objHash)
 
 				vm.push(value.EncodeHandle(handle))
@@ -479,7 +479,8 @@ func (vm *VM) run() (value.Value, error) {
 		case chunk.OP_SET_OBJECT_MEMBER:
 			{
 				v := vm.pop()
-				member := vm.pop()
+				k := vm.pop()
+
 				hash := vm.peek()
 
 				isObject, handle := object.IsValueObject(hash)
@@ -499,11 +500,10 @@ func (vm *VM) run() (value.Value, error) {
 
 				obj, _ := allocator.GetObject(handle)
 
-				// this needs to be extended in case value is number or whatever
-				if obj, ok := obj.(*object.ObjObject); ok {
-					obj.SetMember(stringer.String(member), v)
+				if obj, ok := obj.(object.Hashable); ok {
+					obj.SetMember(k, v)
 				} else {
-					return value.EncodedUndefined(), fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(v))
+					return value.EncodedUndefined(), fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(hash))
 				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
@@ -516,43 +516,13 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
-				switch obj := obj.(type) {
-				// should interface this...
-				case *object.ObjArr:
-					{
-						var v value.Value
-						if !member.IsType(value.TAG_OBJ) {
-							v = obj.GetElementAt(int(member.AsNumber()))
-						} else {
-							v = obj.GetMember(stringer.String(member))
-						}
-						vm.push(v)
-						ip++
-					}
-				case *object.ObjObject:
-					{
-						value := obj.GetMember(stringer.String(member))
-						vm.push(value)
-						ip++
-					}
-				case *object.ObjString:
-					{
-						value := obj.GetMember(stringer.String(member))
-						vm.push(value)
-						ip++
-					}
-				case *object.ObjError:
-					{
-						value := obj.GetMember(stringer.String(member))
-						vm.push(value)
-						ip++
-					}
-				default:
-					{
-						return value.EncodedUndefined(), fmt.Errorf("cant get property: %s from: %v", stringer.String(member), hash)
-					}
+				if obj, ok := obj.(object.Hashable); ok {
+					value := obj.GetMember(member)
+					vm.push(value)
+					ip++
+				} else {
+					return value.EncodedUndefined(), fmt.Errorf("cant get property: %s from: %v", stringer.String(member), hash)
 				}
-
 			}
 		case chunk.OP_PUSH_UNDEFINED:
 			{
@@ -578,22 +548,22 @@ func (vm *VM) run() (value.Value, error) {
 							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
 						}
-					case *object.Log:
+					case *native.Log:
 						{
 							arg := vm.pop()
 							vm.log(arg)
 							vm.push(value.EncodedUndefined())
 						}
-					case *object.Clock:
+					case *native.Clock:
 						{
 							vm.push(fn.Clock())
 						}
-					case *object.ArrayPush:
+					case *native.ArrayPush:
 						{
 							arg := vm.pop()
 							vm.push(fn.Push(arg))
 						}
-					case *object.ArrayForEach:
+					case *native.ArrayForEach:
 						{
 							callback := vm.pop()
 							iterator := object.NewIterator(fn.Owner)
@@ -618,7 +588,7 @@ func (vm *VM) run() (value.Value, error) {
 
 							vm.push(value.EncodedUndefined())
 						}
-					case *object.ArrayFilter:
+					case *native.ArrayFilter:
 						{
 							callback := vm.pop()
 							iterator := object.NewIterator(fn.Owner)
@@ -652,7 +622,7 @@ func (vm *VM) run() (value.Value, error) {
 								}
 							}
 							length := len(arr)
-							objArr := constructor.NewArray(length)
+							objArr := native.NewArray(length)
 
 							for _, item := range arr {
 								objArr.PushElement(item)
@@ -661,16 +631,16 @@ func (vm *VM) run() (value.Value, error) {
 							v := value.EncodeHandle(allocator.Allocate(objArr))
 							vm.push(v)
 						}
-					case *object.StringToUpperCase:
+					case *native.StringToUpperCase:
 						{
 							vm.push(value.EncodeHandle(allocator.Allocate(fn.ToUpperCase())))
 						}
-					case *object.StringIncludes:
+					case *native.StringIncludes:
 						{
 							arg := vm.pop()
 							vm.push(fn.Includes(stringer.String(arg)))
 						}
-					case *object.SetTimeout:
+					case *native.SetTimeout:
 						{
 							ms := vm.pop().AsNumber()
 							callback := vm.pop()
@@ -684,9 +654,39 @@ func (vm *VM) run() (value.Value, error) {
 
 							if callback, ok := obj.(*object.ObjFunction); ok {
 								fn.Set(int(ms), callback)
-								eventloop.Dispatch(fn.CloneForDispatch())
+								eventloop.Dispatch(fn.Clone())
 								vm.push(value.EncodedUndefined())
 							}
+						}
+					case *native.ObjectKeys:
+						{
+							arg := vm.pop()
+							arr := fn.Keys(arg)
+
+							length := len(arr)
+							objArr := native.NewArray(length)
+
+							for _, item := range arr {
+								objArr.PushElement(item)
+							}
+
+							v := value.EncodeHandle(allocator.Allocate(objArr))
+							vm.push(v)
+						}
+					case *native.ObjectValues:
+						{
+							arg := vm.pop()
+							arr := fn.Values(arg)
+
+							length := len(arr)
+							objArr := native.NewArray(length)
+
+							for _, item := range arr {
+								objArr.PushElement(item)
+							}
+
+							v := value.EncodeHandle(allocator.Allocate(objArr))
+							vm.push(v)
 						}
 					}
 				} else {
@@ -719,7 +719,7 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				length := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
-				arr := constructor.NewArray(length)
+				arr := native.NewArray(length)
 				handle := allocator.Allocate(arr)
 				vm.push(value.EncodeHandle(handle))
 			}
@@ -734,7 +734,7 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
-				arrOBj, ok := obj.(*object.ObjArr)
+				arrOBj, ok := obj.(*native.ObjArr)
 
 				if !ok {
 					return value.EncodedUndefined(), fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
@@ -856,7 +856,7 @@ func (vm *VM) run() (value.Value, error) {
 
 				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
 					str := b.CreateString()
-					handle := allocator.Allocate(object.NewObjString(str))
+					handle := allocator.Allocate(native.NewObjString(str))
 					vm.push(value.EncodeHandle(handle))
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
@@ -883,7 +883,7 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
-				if ctor, ok := obj.(constructor.Constructor); ok {
+				if ctor, ok := obj.(native.Constructor); ok {
 					args := vm.popN(int(argCount))
 					params := make([]any, argCount)
 

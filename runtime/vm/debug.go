@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
+	"go_js/native"
 	"go_js/object"
 	"go_js/stringer"
 	"go_js/value"
@@ -311,7 +312,7 @@ func printFunction(c value.ValueChunk) {
 			switch f := obj.(type) {
 			case nil:
 				continue
-			case *object.SetTimeout:
+			case *native.SetTimeout:
 				{
 
 				}
