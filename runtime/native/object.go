@@ -41,12 +41,14 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 		}
 
 		if str, ok := member.(*ObjString); ok {
-			return obj.Hash[str.Value].Value
+			if entry, found := obj.Hash[str.Value]; found {
+				return entry.Value
+			}
+			return value.EncodedUndefined()
 		}
 	}
 
 	// todo: should string intern everything to our Hash i.e obj[true] = 23, obj[23] = true
-
 	return value.EncodedUndefined()
 }
 
@@ -80,7 +82,6 @@ func NewObjectValues() *ObjectValues {
 }
 
 func (*ObjectValues) Values(o value.Value) []value.Value {
-
 	if o.IsObject() {
 		obj, err := allocator.GetObject(o.GetHandle())
 

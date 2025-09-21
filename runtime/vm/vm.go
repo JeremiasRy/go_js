@@ -143,7 +143,6 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
 }
 
-// used for OP_NEW to pop arguments to constructor.New()
 func (vm *VM) popN(n int) []value.Value {
 	r := make([]value.Value, n)
 	copy(r, vm.stack[vm.stackTop-n:vm.stackTop])
