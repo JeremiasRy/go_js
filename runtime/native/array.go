@@ -19,6 +19,7 @@ func NewObjArr(length int) *ObjArr {
 }
 
 func (oa *ObjArr) GetMember(v value.Value) value.Value {
+
 	if v.IsObject() {
 		obj, err := allocator.GetObject(v.GetHandle())
 
@@ -30,7 +31,6 @@ func (oa *ObjArr) GetMember(v value.Value) value.Value {
 			return oa.Hash[str.Value].Value
 		}
 	}
-
 	return oa.GetElementAt(int(v.AsNumber()))
 }
 
@@ -51,25 +51,34 @@ func (oa *ObjArr) SetMember(m, v value.Value) {
 	oa.items[int(m.AsNumber())] = v
 }
 
-func (arrObj *ObjArr) GetElementAt(i int) value.Value {
-	return arrObj.items[i]
+func (oa *ObjArr) GetElementAt(i int) value.Value {
+	return oa.items[i]
 }
 
-func (arrObj *ObjArr) PushElement(v value.Value) {
-	arrObj.items = append(arrObj.items, v)
-	arrObj.Hash["length"] = arrObj.NewValueEntry(value.ValueFromFloat64(float64(len(arrObj.items))))
+func (oa *ObjArr) PushElement(v value.Value) {
+	oa.items = append(oa.items, v)
+	oa.Hash["length"] = oa.NewValueEntry(value.ValueFromFloat64(float64(len(oa.items))))
 }
 
-func (arrObj *ObjArr) Type() object.ObjType {
+func (oa *ObjArr) Type() object.ObjType {
 	return object.OBJ_ARRAY
 }
 
-func (arrObj *ObjArr) String() string {
+func (oa *ObjArr) String() string {
 	return "Array"
 }
 
-func (arrObj *ObjArr) Values() []value.Value {
-	return arrObj.items
+func (oa *ObjArr) Values() []value.Value {
+	return oa.items
+}
+
+func (oa *ObjArr) Keys() []value.Value {
+	arr := make([]value.Value, 0, len(oa.items))
+
+	for i := range len(oa.items) {
+		arr = append(arr, value.ValueFromFloat64(float64(i)))
+	}
+	return arr
 }
 
 type ArrayForEach struct {
