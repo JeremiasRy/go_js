@@ -51,15 +51,15 @@ if (typeof document !== "undefined") {
 }
 */
 
-let message = "delayed message"
+let msg = "delayed message"
 
 setTimeout(() => {
-    console.log(`${message} ${count++}`);
+    console.log(`${msg} ${count++}`);
     setTimeout(() => {
-        console.log(`${message} ${count++}`);
+        console.log(`${msg} ${count++}`);
     }, 40)
 }, 10);
 
-setTimeout(() => console.log(`${message} ${count++}`), 20);
-setTimeout(() => console.log(`${message} ${count++}`), 30);
-setTimeout(() => console.log(`${message} ${count++}`), 40);
+setTimeout(() => console.log(`${msg} ${count++}`), 20);
+setTimeout(() => console.log(`${msg} ${count++}`), 30);
+setTimeout(() => console.log(`${msg} ${count++}`), 40);

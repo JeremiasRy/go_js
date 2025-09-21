@@ -500,7 +500,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			switch current.Property.Type {
 			case parser.NODE_LITERAL:
 				generateByteCode(current.Property, symbolTable, fn)
-				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER)
 
 			case parser.NODE_IDENTIFIER:
 				if variable, _ := symbolTable.findVariable(current.Property.Name); variable != nil {
@@ -511,7 +510,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 			fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
-
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
