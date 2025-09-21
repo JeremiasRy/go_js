@@ -502,7 +502,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(current.Property, symbolTable, fn)
 
 			case parser.NODE_IDENTIFIER:
-				if variable, _ := symbolTable.findVariable(current.Property.Name); variable != nil {
+				if current.Computed {
 					generateByteCode(current.Property, symbolTable, fn)
 				} else {
 					handle := allocator.Allocate(native.NewObjString(current.Property.Name))
