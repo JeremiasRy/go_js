@@ -3,7 +3,7 @@ function showArgs() {
     for (const key in arguments) {
         result += arguments[key] + ',';
     }
-    console.log(result.slice(0, -1));
+    console.log(result);
 }
 
 showArgs(1, 'two', true);

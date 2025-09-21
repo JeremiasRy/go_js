@@ -19,7 +19,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
 				arity := len(node.Params)
-
 				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
 			}
 		}
@@ -35,6 +34,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
 		FUNCTION_SCOPES[current] = symbolTable
 
+		// hoisting
 		for _, node := range current.BodyNode.Body {
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
@@ -47,6 +47,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, param := range current.Params {
 			symbolTable.addVariable(param.Name, LET, false, nil)
 		}
+
+		symbolTable.arity = len(current.Params)
 
 		for _, node := range current.BodyNode.Body {
 			prePass(node, symbolTable)
@@ -68,6 +70,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, param := range current.Params {
 			symbolTable.addVariable(param.Name, LET, false, nil)
 		}
+		symbolTable.arity = len(current.Params)
 		if current.IsExpression {
 			prePass(current.BodyNode, symbolTable)
 		} else {
@@ -86,13 +89,13 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				if node.Type == parser.NODE_FUNCTION_DECLARATION {
 					name := node.Identifier.Name
 					arity := len(node.Arguments)
-
 					symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
 				}
 			}
 			for _, param := range current.Params {
 				symbolTable.addVariable(param.Name, LET, false, nil)
 			}
+			symbolTable.arity = len(current.Params)
 
 			if current.IsExpression {
 				prePass(current.BodyNode, symbolTable)
@@ -138,6 +141,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_PROPERTY:
 		prePass(current.Value.(*parser.Node), symbolTable)
 	case parser.NODE_IDENTIFIER:
+		if !symbolTable.needsArgumentsSlice && current.Name == RESERVED_ARGUMENTS {
+			symbolTable.addArgumentsLocalToFunctionScope()
+			return
+		}
+
 		variable, table := symbolTable.findVariable(current.Name)
 
 		if catchScope && variable == nil {
@@ -188,6 +196,12 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Update, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_OF_STATEMENT:
+		prePass(current.BodyNode, symbolTable)
+		symbolTable.enterBlockScope(current.BodyNode)
+		prePass(current.Left, symbolTable)
+		prePass(current.Right, symbolTable)
+		symbolTable.exitBlockScope()
+	case parser.NODE_FOR_IN_STATEMENT:
 		prePass(current.BodyNode, symbolTable)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)

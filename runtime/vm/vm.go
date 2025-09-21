@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
+	"go_js/compiler"
 	eventloop "go_js/eventLoop"
 	"go_js/native"
 	"go_js/object"
@@ -176,6 +177,7 @@ func (vm *VM) run() (value.Value, error) {
 	frame := vm.currentFrame()
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
+	var argCount uint8
 
 	if vm.debug {
 		println()
@@ -508,8 +510,8 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
 			{
+				member := vm.pop()
 				hash := vm.pop()
-				member := valueChunk.Constants[valueChunk.Code[ip]]
 				obj, err := allocator.GetObject(hash.GetHandle())
 
 				if err != nil {
@@ -519,7 +521,6 @@ func (vm *VM) run() (value.Value, error) {
 				if obj, ok := obj.(object.Hashable); ok {
 					value := obj.GetMember(member)
 					vm.push(value)
-					ip++
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("cant get property: %s from: %v", stringer.String(member), hash)
 				}
@@ -547,6 +548,7 @@ func (vm *VM) run() (value.Value, error) {
 							frame = vm.currentFrame()
 							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
+							frame.localStart -= int(argCount)
 						}
 					case *native.Log:
 						{
@@ -566,7 +568,7 @@ func (vm *VM) run() (value.Value, error) {
 					case *native.ArrayForEach:
 						{
 							callback := vm.pop()
-							iterator := object.NewIterator(fn.Owner)
+							iterator := object.NewValueIterator(fn.Owner)
 							done := iterator.Next()
 
 							obj, err := allocator.GetObject(callback.GetHandle())
@@ -591,7 +593,7 @@ func (vm *VM) run() (value.Value, error) {
 					case *native.ArrayFilter:
 						{
 							callback := vm.pop()
-							iterator := object.NewIterator(fn.Owner)
+							iterator := object.NewValueIterator(fn.Owner)
 							done := iterator.Next()
 
 							obj, err := allocator.GetObject(callback.GetHandle())
@@ -745,6 +747,8 @@ func (vm *VM) run() (value.Value, error) {
 		case chunk.OP_GET_ITERATOR:
 			{
 				iteratee := vm.pop()
+				type_ := valueChunk.Code[ip]
+				ip++
 
 				if !iteratee.IsObject() {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not an object", stringer.String(iteratee))
@@ -762,7 +766,15 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not iterable", stringer.String(iteratee))
 				}
 
-				vm.push(value.EncodeHandle(allocator.Allocate(object.NewIterator(iteratorObj))))
+				var iterator *object.Iterator
+
+				if type_ == compiler.ITERATOR_FOR_IN {
+					iterator = object.NewKeyIterator(iteratorObj)
+				} else {
+					iterator = object.NewValueIterator(iteratorObj)
+				}
+
+				vm.push(value.EncodeHandle(allocator.Allocate(iterator)))
 			}
 		case chunk.OP_ITERATOR_NEXT:
 			{
@@ -907,6 +919,23 @@ func (vm *VM) run() (value.Value, error) {
 				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
 
 				ip = to
+			}
+		case chunk.OP_ADD_ARGUMENTS_TO_LOCALS:
+			{
+
+				arr := native.NewArray(int(argCount))
+				for _, v := range vm.stack[vm.stackTop-int(argCount) : vm.stackTop] {
+					arr.PushElement(v)
+				}
+				handle := allocator.Allocate(arr)
+				vm.popN(int(argCount))
+				vm.push(value.EncodeHandle(handle))
+			}
+		case chunk.OP_STORE_ARG_COUNT:
+			{
+				count := valueChunk.Code[ip]
+				ip++
+				argCount = count
 			}
 		}
 	}

@@ -11,6 +11,8 @@ import (
 	"slices"
 )
 
+const RESERVED_ARGUMENTS string = "arguments"
+
 type VariableType uint8
 
 const (
@@ -42,15 +44,21 @@ type Variables map[string]*Variable
 type BlockScope struct {
 	parent *BlockScope
 	vars   Variables
-	forOf  bool
 }
 
 type FunctionScope struct {
-	parent     *FunctionScope
-	tableScope VariableScope
-	vars       Variables
-	block      *BlockScope
+	parent              *FunctionScope
+	tableScope          VariableScope
+	vars                Variables
+	block               *BlockScope
+	arity               int
+	needsArgumentsSlice bool
 }
+
+const (
+	ITERATOR_FOR_OF uint8 = iota
+	ITERATOR_FOR_IN
+)
 
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
 var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
@@ -79,6 +87,18 @@ func newBlockScope(parent *BlockScope) *BlockScope {
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
 	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, block: nil}
+}
+
+func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
+	variable := &Variable{scope: LOCAL, type_: CONST, slot: -1, init: false, undeclared: false, fn: nil}
+	fs.vars[RESERVED_ARGUMENTS] = variable
+	for _, variable := range fs.vars {
+		if variable.slot >= fs.arity {
+			variable.slot++
+		}
+	}
+	fs.vars[RESERVED_ARGUMENTS].slot = fs.arity
+	fs.needsArgumentsSlice = true
 }
 
 func (fs *FunctionScope) isInHeapScope() bool {
@@ -278,7 +298,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
 			variable, _ := symbolTable.findVariable(current.Left.Name)
-			generateByteCode(current.Right, symbolTable, fn)
+
 			var defineOp uint8
 			var setOp uint8
 			var getOp uint8
@@ -305,18 +325,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 
 			switch current.AssignmentOperator {
+			case parser.ASSIGN:
+				{
+					generateByteCode(current.Right, symbolTable, fn)
+
+					if variable.undeclared {
+						fn.ValueChunk().EmitByte(defineOp)
+						variable.undeclared = false
+					} else {
+						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+					}
+				}
 			case parser.PLUS_ASSIGN:
 				{
-					fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot), chunk.OP_ADD)
+					fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
+					generateByteCode(current.Right, symbolTable, fn)
+					fn.ValueChunk().EmitByte(chunk.OP_ADD)
 				}
 			}
 
-			if variable.undeclared {
-				fn.ValueChunk().EmitByte(defineOp)
-				variable.undeclared = false
-			} else {
-				fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
-			}
 		}
 	case parser.NODE_FUNCTION_DECLARATION:
 		{
@@ -352,6 +379,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			}
+
+			if symbolTable.needsArgumentsSlice {
+				fn.ValueChunk().EmitByte(chunk.OP_ADD_ARGUMENTS_TO_LOCALS)
 			}
 
 			for _, node := range current.BodyNode.Body {
@@ -442,8 +473,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			prevPopStack := popStack
 			popStack = false
+
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
+			}
+
+			if current.Callee != nil {
+				callee, _ := symbolTable.findVariable(current.Callee.Name)
+				if callee != nil && callee.fn != nil && len(current.Arguments) > callee.fn.Arity() {
+					fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
+				}
 			}
 			generateByteCode(current.Callee, symbolTable, fn)
 			popStack = prevPopStack
@@ -457,16 +496,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			generateByteCode(current.Object, symbolTable, fn)
-			var slot uint8
-			if current.Property.Type == parser.NODE_LITERAL {
-				slot = parseLiteralWithoutWrite(current.Property, fn)
-				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, slot)
+			switch current.Property.Type {
+			case parser.NODE_LITERAL:
+				generateByteCode(current.Property, symbolTable, fn)
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER)
 
-			} else {
-				handle := allocator.Allocate(native.NewObjString(current.Property.Name))
-				slot = fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
-				fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, slot)
+			case parser.NODE_IDENTIFIER:
+				if variable, _ := symbolTable.findVariable(current.Property.Name); variable != nil {
+					generateByteCode(current.Property, symbolTable, fn)
+				} else {
+					handle := allocator.Allocate(native.NewObjString(current.Property.Name))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+				}
 			}
+			fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
@@ -718,13 +762,39 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable.enterBlockScope(current.BodyNode)
 			fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
 			generateByteCode(current.Right, symbolTable, fn)
-			fn.ValueChunk().EmitByte(chunk.OP_GET_ITERATOR)
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT)
 
-			variable, _ := symbolTable.findVariable(current.Left.Declarations[0].Identifier.Name)
-			fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
+			parseForDotDotLoopVariable(current, symbolTable, fn)
+
+			for _, node := range current.BodyNode.Body {
+				generateByteCode(node, symbolTable, fn)
+			}
+
+			fn.ValueChunk().EmitByte(chunk.OP_JUMP)
+			fn.ValueChunk().EmitUint32(jumpStart - 2)
+			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
+
+			count, _ := symbolTable.currentBlockVarCount()
+			for range count {
+				fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+			}
+			symbolTable.exitBlockScope()
+		}
+	case parser.NODE_FOR_IN_STATEMENT:
+		{
+			symbolTable.enterBlockScope(current.BodyNode)
+			fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
+			generateByteCode(current.Right, symbolTable, fn)
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_IN)
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
+			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT)
+
+			parseForDotDotLoopVariable(current, symbolTable, fn)
 
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
@@ -902,4 +972,16 @@ func parseLiteralWithoutWrite(current *parser.Node, fn object.Callable) uint8 {
 		}
 	}
 	panic("failed to parse literal")
+}
+
+func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	switch current.Left.Type {
+	case parser.NODE_VARIABLE_DECLARATION:
+		{
+			node := current.Left.Declarations
+			variable, _ := symbolTable.findVariable(node[0].Identifier.Name)
+			fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
+		}
+	}
+
 }

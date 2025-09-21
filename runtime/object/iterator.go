@@ -4,6 +4,7 @@ import "go_js/value"
 
 type Iterable interface {
 	Values() []value.Value
+	Keys() []value.Value
 }
 
 type Iterator struct {
@@ -11,8 +12,12 @@ type Iterator struct {
 	values  []value.Value
 }
 
-func NewIterator(obj Iterable) *Iterator {
+func NewValueIterator(obj Iterable) *Iterator {
 	return &Iterator{values: obj.Values(), current: -1}
+}
+
+func NewKeyIterator(obj Iterable) *Iterator {
+	return &Iterator{values: obj.Keys(), current: -1}
 }
 
 func (i *Iterator) Next() bool {
