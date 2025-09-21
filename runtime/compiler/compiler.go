@@ -341,6 +341,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
 					generateByteCode(current.Right, symbolTable, fn)
 					fn.ValueChunk().EmitByte(chunk.OP_ADD)
+					fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
 				}
 			}
 
