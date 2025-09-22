@@ -585,6 +585,8 @@ func (vm *VM) run() (value.Value, error) {
 									runner.run()
 									done = iterator.Next()
 								}
+							} else {
+								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
 							}
 
 							vm.push(value.EncodedUndefined())
@@ -621,6 +623,50 @@ func (vm *VM) run() (value.Value, error) {
 
 									done = iterator.Next()
 								}
+							} else {
+								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							}
+							length := len(arr)
+							objArr := native.NewArray(length)
+
+							for _, item := range arr {
+								objArr.PushElement(item)
+							}
+
+							v := value.EncodeHandle(allocator.Allocate(objArr))
+							vm.push(v)
+						}
+					case *native.ArrayMap:
+						{
+							callback := vm.pop()
+							iterator := object.NewValueIterator(fn.Owner)
+							done := iterator.Next()
+
+							obj, err := allocator.GetObject(callback.GetHandle())
+
+							if err != nil {
+								return value.EncodedUndefined(), err
+							}
+
+							arr := []value.Value{}
+							runner := NewVM(vm.debug)
+							if fn, ok := obj.(*object.ObjFunction); ok {
+								for !done {
+
+									item := iterator.Current()
+									runner.push(item)
+									runner.Call(fn, 0)
+									result, err := runner.run()
+
+									if err != nil {
+										return value.EncodedUndefined(), err
+									}
+
+									arr = append(arr, result)
+									done = iterator.Next()
+								}
+							} else {
+								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
 							}
 							length := len(arr)
 							objArr := native.NewArray(length)
@@ -689,6 +735,7 @@ func (vm *VM) run() (value.Value, error) {
 							v := value.EncodeHandle(allocator.Allocate(objArr))
 							vm.push(v)
 						}
+
 					}
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(callee))
