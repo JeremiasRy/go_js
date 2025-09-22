@@ -16,6 +16,18 @@ type ObjPromise struct {
 	stack     []value.Value
 }
 
+func NewObjectPromise(name string, arity int, chunk *value.ValueChunk) *ObjPromise {
+	if chunk == nil {
+		chunk = value.NewChunk()
+	}
+	return &ObjPromise{
+		name:      name,
+		chunk:     chunk,
+		arity:     arity,
+		heapScope: -1,
+	}
+}
+
 func (op *ObjPromise) Name() string {
 	return op.name
 }

@@ -48,6 +48,7 @@ type Hashable interface {
 }
 
 type Callable interface {
+	Object
 	ValueChunk() *value.ValueChunk
 	Arity() int
 	HeapScope() int

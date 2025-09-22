@@ -37,7 +37,7 @@ type Variable struct {
 	slot       int  // for locals and globals
 	init       bool // used in for of loops
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
-	fn         *object.ObjFunction
+	fn         object.Callable
 }
 
 type Variables map[string]*Variable
@@ -150,7 +150,7 @@ func (fs *FunctionScope) getCurrentSlot() int {
 	return count
 }
 
-func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn *object.ObjFunction) {
+func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn object.Callable) {
 	var mapToAddTo Variables
 
 	if fs.block != nil {

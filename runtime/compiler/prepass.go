@@ -1,6 +1,7 @@
 package compiler
 
 import (
+	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
 )
@@ -19,7 +20,15 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
 				arity := len(node.Params)
-				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
+
+				var fn object.Callable
+				if node.IsAsync {
+					fn = native.NewObjectPromise(name, arity, nil)
+				} else {
+					fn = object.NewFunction(name, arity, nil)
+				}
+
+				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
 		}
 
@@ -40,7 +49,14 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Params)
 
-				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
+				var fn object.Callable
+				if node.IsAsync {
+					fn = native.NewObjectPromise(name, arity, nil)
+				} else {
+					fn = object.NewFunction(name, arity, nil)
+				}
+
+				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
 		}
 
@@ -64,7 +80,14 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				name := node.Identifier.Name
 				arity := len(node.Arguments)
 
-				symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
+				var fn object.Callable
+				if node.IsAsync {
+					fn = native.NewObjectPromise(name, arity, nil)
+				} else {
+					fn = object.NewFunction(name, arity, nil)
+				}
+
+				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
 		}
 		for _, param := range current.Params {
@@ -89,7 +112,14 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				if node.Type == parser.NODE_FUNCTION_DECLARATION {
 					name := node.Identifier.Name
 					arity := len(node.Arguments)
-					symbolTable.addVariable(name, FUNCTION, false, object.NewFunction(name, arity, nil))
+					var fn object.Callable
+					if node.IsAsync {
+						fn = native.NewObjectPromise(name, arity, nil)
+					} else {
+						fn = object.NewFunction(name, arity, nil)
+					}
+
+					symbolTable.addVariable(name, FUNCTION, false, fn)
 				}
 			}
 			for _, param := range current.Params {
