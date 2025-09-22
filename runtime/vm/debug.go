@@ -348,7 +348,7 @@ func printFunction(c value.ValueChunk) {
 func printStack(stack []value.Value) {
 	print("[")
 	for _, val := range stack {
-		fmt.Printf("%s | ", stringer.DebugString(val))
+		fmt.Printf("%s | ", stringer.TypeDecoratedString(val))
 	}
 	println("]")
 }

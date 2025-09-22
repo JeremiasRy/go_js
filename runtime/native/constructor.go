@@ -110,11 +110,13 @@ func (ac *ArrayConstructor) New(params ...any) *ObjArr {
 	push := allocator.Allocate(NewArrayPush(arr))
 	forEach := allocator.Allocate(NewArrayForEach(arr))
 	map_ := allocator.Allocate(NewArrayMap(arr))
+	reduce := allocator.Allocate(NewArrayReduce(arr))
 
 	arr.Hash["filter"] = arr.NewValueEntry(value.EncodeHandle(filter))
 	arr.Hash["push"] = arr.NewValueEntry(value.EncodeHandle(push))
 	arr.Hash["forEach"] = arr.NewValueEntry(value.EncodeHandle(forEach))
 	arr.Hash["map"] = arr.NewValueEntry(value.EncodeHandle(map_))
+	arr.Hash["reduce"] = arr.NewValueEntry(value.EncodeHandle(reduce))
 	arr.Hash["length"] = arr.NewValueEntry(value.ValueFromFloat64(float64(length)))
 
 	return arr
@@ -127,11 +129,13 @@ func NewArray(length int) *ObjArr {
 	push := allocator.Allocate(NewArrayPush(arr))
 	forEach := allocator.Allocate(NewArrayForEach(arr))
 	map_ := allocator.Allocate(NewArrayMap(arr))
+	reduce := allocator.Allocate(NewArrayReduce(arr))
 
 	arr.Hash["filter"] = arr.NewValueEntry(value.EncodeHandle(filter))
 	arr.Hash["push"] = arr.NewValueEntry(value.EncodeHandle(push))
 	arr.Hash["forEach"] = arr.NewValueEntry(value.EncodeHandle(forEach))
 	arr.Hash["map"] = arr.NewValueEntry(value.EncodeHandle(map_))
+	arr.Hash["reduce"] = arr.NewValueEntry(value.EncodeHandle(reduce))
 	arr.Hash["length"] = arr.NewValueEntry(value.ValueFromFloat64(float64(length)))
 
 	return arr

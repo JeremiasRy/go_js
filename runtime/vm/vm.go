@@ -678,6 +678,40 @@ func (vm *VM) run() (value.Value, error) {
 							v := value.EncodeHandle(allocator.Allocate(objArr))
 							vm.push(v)
 						}
+					case *native.ArrayReduce:
+						{
+							initialValue := vm.pop()
+							callback := vm.pop()
+							iterator := object.NewValueIterator(fn.Owner)
+							done := iterator.Next()
+
+							obj, err := allocator.GetObject(callback.GetHandle())
+
+							if err != nil {
+								return value.EncodedUndefined(), err
+							}
+
+							runner := NewVM(vm.debug)
+							if fn, ok := obj.(*object.ObjFunction); ok {
+								for !done {
+									item := iterator.Current()
+									runner.push(initialValue)
+									runner.push(item)
+									runner.Call(fn, 0)
+									result, err := runner.run()
+
+									if err != nil {
+										return value.EncodedUndefined(), err
+									}
+
+									initialValue = result
+									done = iterator.Next()
+								}
+							} else {
+								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							}
+							vm.push(initialValue)
+						}
 					case *native.StringToUpperCase:
 						{
 							vm.push(value.EncodeHandle(allocator.Allocate(fn.ToUpperCase())))

@@ -133,3 +133,14 @@ func NewArrayMap(owner *ObjArr) *ArrayMap {
 	m.name = "map"
 	return m
 }
+
+type ArrayReduce struct {
+	ObjNativeFn
+	Owner *ObjArr
+}
+
+func NewArrayReduce(owner *ObjArr) *ArrayReduce {
+	r := &ArrayReduce{Owner: owner}
+	r.name = "reduce"
+	return r
+}
