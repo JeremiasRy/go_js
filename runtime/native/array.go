@@ -18,20 +18,24 @@ func NewObjArr(length int) *ObjArr {
 	return arrObj
 }
 
-func (oa *ObjArr) GetMember(v value.Value) value.Value {
+func (oa *ObjArr) GetMember(k value.Value) value.Value {
 
-	if v.IsObject() {
-		obj, err := allocator.GetObject(v.GetHandle())
+	if k.IsObject() {
+		obj, err := allocator.GetObject(k.GetHandle())
 
 		if err != nil {
 			panic("coundn't receive object from allocator")
 		}
 
 		if str, ok := obj.(*ObjString); ok {
-			return oa.Hash[str.Value].Value
+			if v, found := oa.Hash[str.Value]; found {
+				return v.Value
+			} else {
+				return value.EncodedUndefined()
+			}
 		}
 	}
-	return oa.GetElementAt(int(v.AsNumber()))
+	return oa.GetElementAt(int(k.AsNumber()))
 }
 
 func (oa *ObjArr) SetMember(m, v value.Value) {
@@ -117,4 +121,15 @@ func NewArrayFilter(owner *ObjArr) *ArrayFilter {
 	f := &ArrayFilter{Owner: owner}
 	f.name = "filter"
 	return f
+}
+
+type ArrayMap struct {
+	ObjNativeFn
+	Owner *ObjArr
+}
+
+func NewArrayMap(owner *ObjArr) *ArrayMap {
+	m := &ArrayMap{Owner: owner}
+	m.name = "map"
+	return m
 }
