@@ -71,12 +71,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
-		if scope, found := FUNCTION_SCOPES[current]; found {
-			symbolTable = scope
-		} else {
-			symbolTable = newFunctionScope(symbolTable, LOCAL)
-			FUNCTION_SCOPES[current] = symbolTable
-		}
+		symbolTable := newFunctionScope(symbolTable, LOCAL)
+		FUNCTION_SCOPES[current] = symbolTable
 
 		// hoist function declarations
 		for _, node := range current.BodyNode.Body {
@@ -291,4 +287,5 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 		}
 	}
+
 }

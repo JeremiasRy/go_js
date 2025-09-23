@@ -2,7 +2,7 @@ async function fetchUser() {
     return new Promise(resolve => {
         setTimeout(() => {
             resolve({ id: 1, name: "Grace" });
-        }, 1000);
+        }, 100);
     });
 }
 

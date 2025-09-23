@@ -10,8 +10,6 @@ type ObjFunction struct {
 	heapScope int
 }
 
-const NOT_IN_HEAP_SCOPE = -1
-
 func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 	if chunk == nil {
 		chunk = value.NewChunk()
@@ -20,7 +18,7 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 		name:      name,
 		chunk:     chunk,
 		arity:     arity,
-		heapScope: NOT_IN_HEAP_SCOPE,
+		heapScope: -1,
 	}
 }
 

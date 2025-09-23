@@ -60,8 +60,6 @@ const (
 	ITERATOR_FOR_IN
 )
 
-const PROMISE_CONSTRUCTOR_NAME = "Promise"
-
 var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
 var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
 
@@ -88,12 +86,7 @@ func newBlockScope(parent *BlockScope) *BlockScope {
 }
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
-	return &FunctionScope{
-		parent:     parent,
-		tableScope: tableScope,
-		vars:       Variables{},
-		block:      nil,
-	}
+	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, block: nil}
 }
 
 func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
@@ -257,15 +250,6 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
-func definePromiseConstructor(main object.Callable, symbolTable *FunctionScope) {
-	promiseCtor := native.NewPromiseConstructor()
-	promiseCtorHandle := allocator.Allocate(promiseCtor)
-
-	symbolTable.addVariable("Promise", CONST, false, nil)
-	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
-	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
-}
-
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
@@ -275,7 +259,6 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineSetTimeout(main, symbolTable)
 	defineErrorConstructor(main, symbolTable)
 	defineArrayConstructor(main, symbolTable)
-	definePromiseConstructor(main, symbolTable)
 
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
@@ -417,41 +400,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 			handle := allocator.Allocate(newFn)
-			v := value.EncodeHandle(handle)
+			value := value.EncodeHandle(handle)
 
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
 			} else {
-				isInHeapScopeAlready := symbolTable.isInHeapScope()
-
-				functions := []*Variable{}
-				for _, variable := range symbolTable.vars {
-					if variable.type_ == FUNCTION {
-						functions = append(functions, variable)
-					}
-
-					// if not in heap scope we'll create a new one
-					if !isInHeapScopeAlready && variable.scope == HEAP {
-						fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
-						isInHeapScopeAlready = true
-					}
-				}
-
-				slices.SortFunc(functions, func(a *Variable, b *Variable) int {
-					return cmp.Compare(a.slot, b.slot)
-				})
-
-				for _, variable := range functions {
-					fnValue := allocator.Allocate(variable.fn)
-					slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-
-					if uint8(variable.slot) != slot {
-						panic("things went south")
-					}
-
-					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-				}
-
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, newFn)
 				}
@@ -461,7 +414,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			fn.ValueChunk().WriteConstant(v)
+			fn.ValueChunk().WriteConstant(value)
 		}
 	case parser.NODE_FUNCTION_EXPRESSION:
 		{
@@ -986,12 +939,38 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Right, symbolTable, fn)
 			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 		}
-	case parser.NODE_AWAIT_EXPRESSION:
+	}
+}
+
+func parseLiteralWithoutWrite(current *parser.Node, fn object.Callable) uint8 {
+	switch v := current.Value.(type) {
+	case float64:
 		{
-			generateByteCode(current.Argument.Callee, symbolTable, fn)
-			fn.ValueChunk().EmitByte(chunk.OP_AWAIT)
+			return fn.ValueChunk().AddConstant(value.ValueFromFloat64(v))
+		}
+	case []byte:
+		{
+			objStr := native.NewString(string(v))
+			handle := allocator.Allocate(objStr)
+			return fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
+		}
+	case bool:
+		{
+			if v {
+				return fn.ValueChunk().AddConstant(value.EncodeTrue())
+			} else {
+				return fn.ValueChunk().AddConstant(value.EncodeFalse())
+
+			}
+		}
+	case nil:
+		{
+			if current.Raw == "null" {
+				return fn.ValueChunk().AddConstant(value.EncodeNil())
+			}
 		}
 	}
+	panic("failed to parse literal")
 }
 
 func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {

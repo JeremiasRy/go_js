@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"go_js/allocator"
-	"go_js/chunk"
 	"go_js/object"
 	"go_js/value"
 	"math"
@@ -160,6 +159,20 @@ func NewString(str string) *ObjString {
 	return objStr
 }
 
+type Main struct {
+	Fn *object.ObjFunction
+}
+
+func NewMain(fn *object.ObjFunction) *Main {
+	return &Main{
+		Fn: fn,
+	}
+}
+
+func (m *Main) Work(callbackChannel chan *object.ObjFunction) {
+	callbackChannel <- m.Fn
+}
+
 type Log struct {
 	ObjNativeFn
 }
@@ -187,7 +200,7 @@ func (*Clock) Clock() value.Value {
 type SetTimeout struct {
 	ObjNativeFn
 	time     int
-	callback object.Callable
+	callback *object.ObjFunction
 }
 
 func NewSetTimeout() *SetTimeout {
@@ -197,31 +210,20 @@ func NewSetTimeout() *SetTimeout {
 	return setTimeout
 }
 
-func (st *SetTimeout) Set(ms int, callback object.Callable) {
+func (st *SetTimeout) Set(ms int, callback *object.ObjFunction) {
 	st.time = ms
 	st.callback = callback
 }
 
-func (st *SetTimeout) Work(callBack chan *object.CallbackChannelValue, done func()) {
-	qv := &object.QueueValue{
-		Fn:          st.callback,
-		StackValues: []value.Value{},
-	}
-
+func (st *SetTimeout) Work(callBack chan *object.ObjFunction) {
 	if st.time == 0 {
-		callBack <- &object.CallbackChannelValue{
-			Qv:   qv,
-			Done: done,
-		}
+		callBack <- st.callback
 		return
 	}
 	tick := time.NewTicker((time.Duration(st.time) * time.Millisecond))
 
 	for range tick.C {
-		callBack <- &object.CallbackChannelValue{
-			Qv:   qv,
-			Done: done,
-		}
+		callBack <- st.callback
 		break
 	}
 }
@@ -229,47 +231,4 @@ func (st *SetTimeout) Work(callBack chan *object.CallbackChannelValue, done func
 func (st *SetTimeout) Clone() *SetTimeout {
 	clone := *st
 	return &clone
-}
-
-type PromiseConstructor struct{}
-
-func NewPromiseConstructor() *PromiseConstructor {
-	return &PromiseConstructor{}
-}
-
-func (*PromiseConstructor) String() string {
-	return "function Promise"
-}
-
-func (*PromiseConstructor) Type() object.ObjType {
-	return object.OBJ_PROMISE_CONSTRUCTOR
-}
-
-func (*PromiseConstructor) New(executor value.Value, c chan ResolveMessage) (*ObjPromise, object.Callable, value.Value, error) {
-	op := &ObjPromise{
-		chunk:          value.NewChunk(),
-		arity:          0,
-		heapScope:      0,
-		Ip:             0,
-		Stack:          []value.Value{},
-		resolveChannel: c,
-	}
-
-	op.chunk.EmitByte(chunk.OP_RETURN)
-	var exec object.Callable
-
-	execObj, err := allocator.GetObject(executor.GetHandle())
-
-	if err != nil {
-		return nil, nil, value.EncodedUndefined(), fmt.Errorf("executor was not an object %s", err)
-	}
-
-	if executor, ok := execObj.(object.Callable); ok {
-		exec = executor
-	}
-
-	resolve := NewResolve(c)
-	resolveHandle := allocator.Allocate(resolve)
-
-	return op, exec, value.EncodeHandle(resolveHandle), nil
 }

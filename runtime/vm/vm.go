@@ -59,13 +59,7 @@ func (vm *VM) Call(fn object.Callable, returnIp int) error {
 		return fmt.Errorf("too many callframes")
 	}
 
-	minusFromStackTop := 0
-
-	if vm.stackTop > fn.Arity()-1 {
-		minusFromStackTop = fn.Arity()
-	}
-
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop-minusFromStackTop, returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop-fn.Arity(), returnIp)
 	vm.frameCount++
 	return nil
 }
@@ -163,26 +157,19 @@ func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 
 func (vm *VM) Run(wg *sync.WaitGroup) {
 Run:
-	task := queue.Dequeue()
-	for task != nil {
-		vm.Call(task.Fn, 0)
-		if fn, ok := task.Fn.(*native.ObjPromise); ok {
-			for _, v := range append(fn.Stack, task.StackValues...) {
-				vm.push(v)
-			}
-		}
+	fn := queue.Dequeue()
+	for fn != nil {
 
+		vm.Call(fn, 0)
 		vm.run()
-		task = queue.Dequeue()
+
+		wg.Done()
+		fn = queue.Dequeue()
 	}
 
-	if eventloop.HasJobs() {
-		for range queue.QueueC {
-			goto Run
-		}
+	for range queue.QueueC {
+		goto Run
 	}
-
-	wg.Done()
 }
 
 func (vm *VM) run() (value.Value, error) {
@@ -191,25 +178,21 @@ func (vm *VM) run() (value.Value, error) {
 	ip := 0
 	var argCount uint8
 
-	if promise, ok := frame.fn.(*native.ObjPromise); ok {
-		ip = promise.Ip
-	}
-
 	if vm.debug {
-		fmt.Println()
-		fmt.Println("-- NEW RUNNER SPAWNED --")
-		fmt.Println()
+		println()
+		println("-- NEW RUNNER SPAWNED --")
+		println()
 		PrintChunk(valueChunk)
 	}
 
 	for {
-		// time.Sleep(time.Millisecond * 100)
+		//time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
 		ip++
 
 		if vm.debug {
 			printStack(vm.stack[0:vm.stackTop])
-			fmt.Println(opNames[code])
+			println(opNames[code])
 		}
 
 		switch code {
@@ -752,7 +735,7 @@ func (vm *VM) run() (value.Value, error) {
 
 							if callback, ok := obj.(*object.ObjFunction); ok {
 								fn.Set(int(ms), callback)
-								eventloop.DispatchJob(fn.Clone())
+								eventloop.Dispatch(fn.Clone())
 								vm.push(value.EncodedUndefined())
 							}
 						}
@@ -786,15 +769,7 @@ func (vm *VM) run() (value.Value, error) {
 							v := value.EncodeHandle(allocator.Allocate(objArr))
 							vm.push(v)
 						}
-					case *native.Resolve:
-						{
-							arg := vm.pop()
-							fn.Resolve(arg)
 
-							vm.frameCount = 0
-							vm.stackTop = 0
-							return value.EncodedUndefined(), nil
-						}
 					}
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(callee))
@@ -813,15 +788,9 @@ func (vm *VM) run() (value.Value, error) {
 				vm.push(value)
 				vm.frameCount--
 
-				if promise, ok := frame.fn.(*native.ObjPromise); ok {
-					promise.ResolveThySelf(value)
-					vm.frameCount = 0
-					vm.stackTop = 0
-				}
-
 				if vm.frameCount <= 0 {
 					vm.stackTop = 0
-					vm.frameCount = 0
+
 					return value, nil
 				}
 
@@ -1006,68 +975,22 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
-				switch ctor := obj.(type) {
-				case *native.ErrorConstructor:
-					{
-						args := vm.popN(int(argCount))
-						params := make([]any, argCount)
+				if ctor, ok := obj.(native.Constructor); ok {
+					args := vm.popN(int(argCount))
+					params := make([]any, argCount)
 
-						for i, v := range args {
-							params[i] = v
-						}
-
-						newObj, err := ctor.New(params...)
-
-						if err != nil {
-							return value.EncodedUndefined(), err
-						}
-
-						objHandle := allocator.Allocate(newObj)
-						vm.push(value.EncodeHandle(objHandle))
+					for i, v := range args {
+						params[i] = v
 					}
-				case *native.PromiseConstructor:
-					{
-						executor := vm.pop()
-						var c chan native.ResolveMessage
 
-						if promise, ok := frame.fn.(*native.ObjPromise); ok {
-							c = promise.GetResolveChannel()
-						}
+					newObj, err := ctor.New(params...)
 
-						promise, exec, resolve, err := ctor.New(executor, c)
-
-						currentHeapScope := frame.fn.HeapScope()
-						executorHeapScope := exec.HeapScope()
-
-						resolveIsHeapVariable := false
-
-						if (currentHeapScope != object.NOT_IN_HEAP_SCOPE && executorHeapScope != object.NOT_IN_HEAP_SCOPE) && currentHeapScope == executorHeapScope {
-							resolveIsHeapVariable = true
-							if scope, found := heapVars[frame.fn.HeapScope()]; found {
-								scope = append(scope, resolve)
-								heapVars[frame.fn.HeapScope()] = scope
-							} else {
-								panic("no heap scope generated for function")
-							}
-						}
-
-						if err != nil {
-							return value.EncodedUndefined(), err
-						}
-
-						eventloop.Dispatch(promise)
-						vm.frameCount = 0
-						vm.Call(exec, 0)
-
-						if !resolveIsHeapVariable {
-							vm.push(resolve)
-						}
-
-						frame = vm.currentFrame()
-						valueChunk = *frame.fn.ValueChunk()
-						ip = 0
-						vm.stackTop = 0
+					if err != nil {
+						return value.EncodedUndefined(), err
 					}
+
+					objHandle := allocator.Allocate(newObj)
+					vm.push(value.EncodeHandle(objHandle))
 				}
 			}
 		case chunk.OP_THROW:
@@ -1087,47 +1010,12 @@ func (vm *VM) run() (value.Value, error) {
 				handle := allocator.Allocate(arr)
 				vm.popN(int(argCount))
 				vm.push(value.EncodeHandle(handle))
-				argCount = 0 // reset argCount
 			}
 		case chunk.OP_STORE_ARG_COUNT:
 			{
 				count := valueChunk.Code[ip]
 				ip++
 				argCount = count
-			}
-		case chunk.OP_AWAIT:
-			{
-				promise := vm.pop()
-				handle := promise.GetHandle()
-				promiseFn, err := allocator.GetObject(handle)
-
-				if err != nil {
-					return value.EncodedUndefined(), err
-				}
-
-				c := make(chan native.ResolveMessage, 1)
-
-				l := vm.stackTop - frame.localStart
-				state := make([]value.Value, l)
-				currentInstruction := ip
-				copy(state, vm.stack[frame.localStart:vm.stackTop])
-
-				if current, ok := frame.fn.(*native.ObjPromise); ok {
-					current.Pause(state, currentInstruction)
-					eventloop.Dispatch(current)
-					current.SetContinueChannel(c)
-				}
-
-				if fn, ok := promiseFn.(*native.ObjPromise); ok {
-					fn.SetResolveChannel(c)
-					vm.Call(fn, 0)
-				}
-
-				frame = vm.currentFrame()
-				valueChunk = *frame.fn.ValueChunk()
-				ip = 0
-				frame.localStart -= int(argCount)
-				vm.stackTop = 0
 			}
 		}
 	}

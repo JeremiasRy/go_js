@@ -7,16 +7,10 @@ import (
 )
 
 type EventLoop struct {
-	jobCallbackChannel chan *object.CallbackChannelValue
-	jobChannel         chan *JobChannelValue
-	jobs               int
+	jobCallbackC chan *object.ObjFunction
+	jobC         chan object.Job
 
 	wg *sync.WaitGroup
-}
-
-type JobChannelValue struct {
-	job  object.Job
-	done func()
 }
 
 var el *EventLoop
@@ -27,43 +21,29 @@ func Init(wg *sync.WaitGroup) {
 	}
 
 	el = &EventLoop{
-		jobChannel:         make(chan *JobChannelValue),
-		jobCallbackChannel: make(chan *object.CallbackChannelValue),
-		wg:                 wg,
+		jobC:         make(chan object.Job),
+		jobCallbackC: make(chan *object.ObjFunction),
+		wg:           wg,
 	}
 }
 
 func Start() {
 	go func() {
-		for message := range el.jobChannel {
+		for job := range el.jobC {
 			go func() {
-				message.job.Work(el.jobCallbackChannel, message.done)
+				job.Work(el.jobCallbackC)
 			}()
 		}
 	}()
 
 	go func() {
-		for message := range el.jobCallbackChannel {
-			queue.Enqueue(message.Qv, queue.TASK)
-			message.Done()
+		for fn := range el.jobCallbackC {
+			queue.Enqueue(fn, queue.TASK)
 		}
 	}()
 }
 
-func DispatchJob(job object.Job) {
-	el.jobs++
-	el.wg.Add(1)
-	el.jobChannel <- &JobChannelValue{job: job, done: func() {
-		el.wg.Done()
-		el.jobs--
-	}}
-}
-
 func Dispatch(job object.Job) {
-	el.jobs++
-	el.jobChannel <- &JobChannelValue{job: job, done: func() { el.jobs-- }}
-}
-
-func HasJobs() bool {
-	return el.jobs > 0
+	el.wg.Add(1)
+	el.jobC <- job
 }

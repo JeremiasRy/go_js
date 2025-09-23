@@ -34,7 +34,7 @@ func main() {
 	}
 
 	if len(os.Args) < 2 {
-		fmt.Println("Usage: go run main.go <input>")
+		println("Usage: go run main.go <input>")
 		os.Exit(1)
 	}
 
@@ -44,7 +44,7 @@ func main() {
 
 	b, err := os.ReadFile(os.Args[1])
 	if err != nil {
-		fmt.Println("Can't read file: ", os.Args[1])
+		println("Can't read file: ", os.Args[1])
 		os.Exit(1)
 	}
 
@@ -55,9 +55,9 @@ func main() {
 	}
 
 	if debug {
-		fmt.Println("### Abtract Syntax Tree ###")
+		println("### Abtract Syntax Tree ###")
 		parser.PrintNode(ast)
-		fmt.Println()
+		println()
 	}
 
 	main, err := compiler.Compile(ast)
@@ -67,7 +67,7 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	queue.Init(&wg)
+	queue.Init()
 	eventloop.Init(&wg)
 
 	vm := vm.NewVM(debug)
@@ -76,8 +76,7 @@ func main() {
 	go vm.Run(&wg)
 
 	mainJob := &native.Main{Fn: main}
-	wg.Add(1)
-	eventloop.DispatchJob(mainJob)
+	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
 
