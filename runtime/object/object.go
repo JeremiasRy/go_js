@@ -22,6 +22,7 @@ const (
 	OBJ_ERROR
 	OBJ_ERROR_CONSTRUCTOR
 	OBJ_CONSOLE
+	OBJ_PROMISE
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -33,8 +34,14 @@ func IsValueObject(v value.Value) (bool, uint32) {
 	return false, 0
 }
 
+type JobChannelMessage struct {
+	Job      Job
+	Callback Callable
+	Done     func()
+}
+
 type Job interface {
-	Work(callbackChannel chan *ObjFunction)
+	Work(callbackChannel chan *JobChannelMessage, done func())
 }
 
 type Object interface {
@@ -50,8 +57,7 @@ type Hashable interface {
 type Callable interface {
 	Object
 	ValueChunk() *value.ValueChunk
-	Arity() int
-	HeapScope() int
+	GetArity() int
+	GetHeapScope() int
 	SetHeapScope(scope int)
-	Name() string
 }

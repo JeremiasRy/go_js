@@ -7,10 +7,11 @@ import (
 )
 
 type EventLoop struct {
-	jobCallbackC chan *object.ObjFunction
-	jobC         chan object.Job
+	jobCallbackChannel chan *object.JobChannelMessage
+	jobChannel         chan *object.JobChannelMessage
 
-	wg *sync.WaitGroup
+	wg   *sync.WaitGroup
+	work int
 }
 
 var el *EventLoop
@@ -21,29 +22,51 @@ func Init(wg *sync.WaitGroup) {
 	}
 
 	el = &EventLoop{
-		jobC:         make(chan object.Job),
-		jobCallbackC: make(chan *object.ObjFunction),
-		wg:           wg,
+		jobChannel:         make(chan *object.JobChannelMessage),
+		jobCallbackChannel: make(chan *object.JobChannelMessage),
+		wg:                 wg,
 	}
 }
 
 func Start() {
 	go func() {
-		for job := range el.jobC {
+		for message := range el.jobChannel {
 			go func() {
-				job.Work(el.jobCallbackC)
+				message.Job.Work(el.jobCallbackChannel, message.Done)
 			}()
 		}
 	}()
 
 	go func() {
-		for fn := range el.jobCallbackC {
-			queue.Enqueue(fn, queue.TASK)
+		for message := range el.jobCallbackChannel {
+			queue.Enqueue(message.Callback, queue.TASK)
+			message.Done()
 		}
 	}()
 }
 
-func Dispatch(job object.Job) {
+func DispatchBackgroundJob(job object.Job) {
 	el.wg.Add(1)
-	el.jobC <- job
+	el.work++
+	message := &object.JobChannelMessage{
+		Job:      job,
+		Callback: nil,
+		Done: func() {
+			el.wg.Done()
+			el.work--
+		},
+	}
+	el.jobChannel <- message
+}
+
+func Dispatch(job object.Job) {
+	el.work++
+	message := &object.JobChannelMessage{
+		Job:      job,
+		Callback: nil,
+		Done: func() {
+			el.work--
+		},
+	}
+	el.jobChannel <- message
 }

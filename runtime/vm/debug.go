@@ -64,6 +64,7 @@ var opNames = map[uint8]string{
 	chunk.OP_NEW:                     "OP_NEW",
 	chunk.OP_ADD_ARGUMENTS_TO_LOCALS: "OP_ADD_ARGUMENTS_TO_LOCALS",
 	chunk.OP_STORE_ARG_COUNT:         "OP_STORE_ARG_COUNT",
+	chunk.OP_AWAIT:                   "OP_AWAIT",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -103,6 +104,10 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
 		case chunk.OP_EQUALS:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_AWAIT:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
@@ -335,9 +340,9 @@ func printFunction(c value.ValueChunk) {
 				{
 
 				}
-			case *object.ObjFunction:
+			case object.Callable:
 				{
-					fmt.Printf("<fn %s>\n", f.Name())
+					fmt.Println(f.String())
 					printFunction(*f.ValueChunk())
 				}
 			}

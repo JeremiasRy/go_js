@@ -481,7 +481,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			if current.Callee != nil {
 				callee, _ := symbolTable.findVariable(current.Callee.Name)
-				if callee != nil && callee.fn != nil && len(current.Arguments) > callee.fn.Arity() {
+				if callee != nil && callee.fn != nil && len(current.Arguments) > callee.fn.GetArity() {
 					fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
 				}
 			}
@@ -940,37 +940,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 		}
 	}
-}
-
-func parseLiteralWithoutWrite(current *parser.Node, fn object.Callable) uint8 {
-	switch v := current.Value.(type) {
-	case float64:
-		{
-			return fn.ValueChunk().AddConstant(value.ValueFromFloat64(v))
-		}
-	case []byte:
-		{
-			objStr := native.NewString(string(v))
-			handle := allocator.Allocate(objStr)
-			return fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
-		}
-	case bool:
-		{
-			if v {
-				return fn.ValueChunk().AddConstant(value.EncodeTrue())
-			} else {
-				return fn.ValueChunk().AddConstant(value.EncodeFalse())
-
-			}
-		}
-	case nil:
-		{
-			if current.Raw == "null" {
-				return fn.ValueChunk().AddConstant(value.EncodeNil())
-			}
-		}
-	}
-	panic("failed to parse literal")
 }
 
 func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {

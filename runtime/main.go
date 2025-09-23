@@ -67,7 +67,7 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	queue.Init()
+	queue.Init(&wg)
 	eventloop.Init(&wg)
 
 	vm := vm.NewVM(debug)
@@ -76,7 +76,7 @@ func main() {
 	go vm.Run(&wg)
 
 	mainJob := &native.Main{Fn: main}
-	eventloop.Dispatch(mainJob)
+	eventloop.DispatchBackgroundJob(mainJob)
 
 	wg.Wait()
 

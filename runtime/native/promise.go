@@ -6,55 +6,39 @@ import (
 	"go_js/value"
 )
 
+type PromiseStatus uint8
+
+const (
+	PENDING PromiseStatus = iota
+	RESOLVED
+	REJECTED
+)
+
+var statusToString = map[PromiseStatus]string{
+	PENDING:  "<pending>",
+	RESOLVED: "<resolved>",
+	REJECTED: "<rejected>",
+}
+
 type ObjPromise struct {
-	name  string
-	chunk *value.ValueChunk
-	arity int
-
-	heapScope int
-	ip        int
-	stack     []value.Value
+	Status PromiseStatus
+	Value  value.Value
 }
 
-func NewObjectPromise(name string, arity int, chunk *value.ValueChunk) *ObjPromise {
-	if chunk == nil {
-		chunk = value.NewChunk()
-	}
+func NewPromise() *ObjPromise {
 	return &ObjPromise{
-		name:      name,
-		chunk:     chunk,
-		arity:     arity,
-		heapScope: -1,
+		Status: PENDING,
+		Value:  value.EncodedUndefined(),
 	}
-}
-
-func (op *ObjPromise) Name() string {
-	return op.name
 }
 
 func (op *ObjPromise) Type() object.ObjType {
-	return object.OBJ_ASYNC_FUNCTION
+	return object.OBJ_PROMISE
 }
 
 func (op *ObjPromise) String() string {
-	return fmt.Sprintf("<async fn %s>", op.name)
+	return fmt.Sprintf("Promise { state: %s, value: %d }", statusToString[op.Status], op.Value)
 }
 
-func (op *ObjPromise) ValueChunk() *value.ValueChunk {
-	return op.chunk
-}
-func (op *ObjPromise) Arity() int {
-	return op.arity
-}
-func (op *ObjPromise) SetHeapScope(scope int) {
-	op.heapScope = scope
-}
-
-func (op *ObjPromise) HeapScope() int {
-	return op.heapScope
-}
-
-func (op *ObjPromise) Pause(stackValues []value.Value, ip int) {
-	op.stack = stackValues
-	op.ip = ip
+type PromiseConstructor struct {
 }

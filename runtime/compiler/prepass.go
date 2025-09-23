@@ -23,7 +23,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 				var fn object.Callable
 				if node.IsAsync {
-					fn = native.NewObjectPromise(name, arity, nil)
+					fn = native.NewAsyncFunction(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
 				}
@@ -51,7 +51,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 				var fn object.Callable
 				if node.IsAsync {
-					fn = native.NewObjectPromise(name, arity, nil)
+					fn = native.NewAsyncFunction(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
 				}
@@ -82,7 +82,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 				var fn object.Callable
 				if node.IsAsync {
-					fn = native.NewObjectPromise(name, arity, nil)
+					fn = native.NewAsyncFunction(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
 				}
@@ -114,7 +114,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					arity := len(node.Arguments)
 					var fn object.Callable
 					if node.IsAsync {
-						fn = native.NewObjectPromise(name, arity, nil)
+						fn = native.NewAsyncFunction(name, arity, nil)
 					} else {
 						fn = object.NewFunction(name, arity, nil)
 					}

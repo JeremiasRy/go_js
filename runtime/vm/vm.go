@@ -59,7 +59,7 @@ func (vm *VM) Call(fn object.Callable, returnIp int) error {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop-fn.Arity(), returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop-fn.GetArity(), returnIp)
 	vm.frameCount++
 	return nil
 }
@@ -159,7 +159,7 @@ func (vm *VM) Run(wg *sync.WaitGroup) {
 Run:
 	fn := queue.Dequeue()
 	for fn != nil {
-
+		wg.Add(1)
 		vm.Call(fn, 0)
 		vm.run()
 
@@ -415,9 +415,9 @@ func (vm *VM) run() (value.Value, error) {
 		case chunk.OP_DEFINE_HEAP_VAR:
 			{
 				variable := vm.pop()
-				if scope, found := heapVars[frame.fn.HeapScope()]; found {
+				if scope, found := heapVars[frame.fn.GetHeapScope()]; found {
 					scope = append(scope, variable)
-					heapVars[frame.fn.HeapScope()] = scope
+					heapVars[frame.fn.GetHeapScope()] = scope
 				} else {
 					panic("no heap scope generated for function")
 				}
@@ -426,13 +426,13 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				heapVar := valueChunk.Code[ip]
 				ip++
-				vm.push(heapVars[frame.fn.HeapScope()][heapVar])
+				vm.push(heapVars[frame.fn.GetHeapScope()][heapVar])
 			}
 		case chunk.OP_SET_HEAP_VAR:
 			{
 				heapVar := valueChunk.Code[ip]
 				ip++
-				heapVars[frame.fn.HeapScope()][heapVar] = vm.pop()
+				heapVars[frame.fn.GetHeapScope()][heapVar] = vm.pop()
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
@@ -494,7 +494,7 @@ func (vm *VM) run() (value.Value, error) {
 					obj, _ := allocator.GetObject(v.GetHandle())
 
 					// check if we have a closure in hand
-					if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope() != -1 {
+					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
 						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
 					}
 				}
@@ -735,7 +735,7 @@ func (vm *VM) run() (value.Value, error) {
 
 							if callback, ok := obj.(*object.ObjFunction); ok {
 								fn.Set(int(ms), callback)
-								eventloop.Dispatch(fn.Clone())
+								eventloop.DispatchBackgroundJob(fn.Clone())
 								vm.push(value.EncodedUndefined())
 							}
 						}
@@ -1030,7 +1030,7 @@ func setHeapScopes(c *value.ValueChunk, heapScope int) error {
 				return err
 			}
 
-			if obj, ok := obj.(*object.ObjFunction); ok && obj.HeapScope() <= heapScope {
+			if obj, ok := obj.(*object.ObjFunction); ok && obj.GetHeapScope() <= heapScope {
 				obj.SetHeapScope(heapScope)
 				setHeapScopes(obj.ValueChunk(), heapScope)
 			}
