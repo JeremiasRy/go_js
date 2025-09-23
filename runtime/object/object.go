@@ -9,6 +9,7 @@ type ObjType uint8
 const (
 	OBJ_FUNCTION ObjType = iota
 	OBJ_ASYNC_FUNCTION
+	OBJ_PROMISE_CONSTRUCTOR
 	OBJ_TEMPLATE_LITERAL
 	OBJ_CLOSURE
 	OBJ_STRING_CONSTRUCTOR
@@ -26,6 +27,16 @@ const (
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
 
+type CallbackChannelValue struct {
+	Done func()
+	Qv   *QueueValue
+}
+
+type QueueValue struct {
+	Fn          Callable
+	StackValues []value.Value
+}
+
 func IsValueObject(v value.Value) (bool, uint32) {
 	if v&value.TAG_OBJ == value.TAG_OBJ {
 		return true, v.GetHandle()
@@ -34,7 +45,7 @@ func IsValueObject(v value.Value) (bool, uint32) {
 }
 
 type Job interface {
-	Work(callbackChannel chan *ObjFunction)
+	Work(callbackChannel chan *CallbackChannelValue, done func())
 }
 
 type Object interface {

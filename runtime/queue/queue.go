@@ -3,6 +3,7 @@ package queue
 import (
 	"container/list"
 	"go_js/object"
+	"sync"
 )
 
 type TaskPriority uint8
@@ -13,14 +14,17 @@ const (
 )
 
 type Queue struct {
+	wg        *sync.WaitGroup
 	microTask *list.List
 	task      *list.List
 }
 
 var q *Queue
+
+// If vm has drained out the queue, but there are still jobs active, this channel is used to notify the VM to pick up a job
 var QueueC = make(chan struct{})
 
-func Init() {
+func Init(wg *sync.WaitGroup) {
 	if q != nil {
 		return
 	}
@@ -28,10 +32,11 @@ func Init() {
 	q = &Queue{
 		microTask: &list.List{},
 		task:      &list.List{},
+		wg:        wg,
 	}
 }
 
-func Enqueue(callback *object.ObjFunction, priority TaskPriority) {
+func Enqueue(v *object.QueueValue, priority TaskPriority) {
 	var l *list.List
 
 	switch priority {
@@ -41,11 +46,11 @@ func Enqueue(callback *object.ObjFunction, priority TaskPriority) {
 		l = q.task
 	}
 
-	l.PushBack(callback)
+	l.PushBack(v)
 	QueueC <- struct{}{}
 }
 
-func Dequeue() *object.ObjFunction {
+func Dequeue() *object.QueueValue {
 	var l *list.List
 
 	if q.microTask.Len() > 0 {
@@ -60,5 +65,5 @@ func Dequeue() *object.ObjFunction {
 
 	front := l.Front()
 	l.Remove(front)
-	return front.Value.(*object.ObjFunction)
+	return front.Value.(*object.QueueValue)
 }

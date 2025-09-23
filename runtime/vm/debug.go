@@ -64,11 +64,13 @@ var opNames = map[uint8]string{
 	chunk.OP_NEW:                     "OP_NEW",
 	chunk.OP_ADD_ARGUMENTS_TO_LOCALS: "OP_ADD_ARGUMENTS_TO_LOCALS",
 	chunk.OP_STORE_ARG_COUNT:         "OP_STORE_ARG_COUNT",
+	chunk.OP_AWAIT:                   "OP_AWAIT",
+	chunk.OP_RESOLVE:                 "OP_RESOLVE",
 }
 
 func PrintChunk(c value.ValueChunk) {
 	printFunction(c)
-	println()
+	fmt.Println()
 }
 
 func printFunction(c value.ValueChunk) {
@@ -77,7 +79,7 @@ func printFunction(c value.ValueChunk) {
 
 	for {
 		if ip >= int(len(opCode)) {
-			println()
+			fmt.Println()
 			break
 		}
 		code := opCode[ip]
@@ -320,6 +322,10 @@ func printFunction(c value.ValueChunk) {
 				ip++
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			}
+		case chunk.OP_AWAIT:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			}
 		}
 		ip++
 	}
@@ -335,7 +341,7 @@ func printFunction(c value.ValueChunk) {
 				{
 
 				}
-			case *object.ObjFunction:
+			case object.Callable:
 				{
 					fmt.Printf("<fn %s>\n", f.Name())
 					printFunction(*f.ValueChunk())
@@ -346,9 +352,9 @@ func printFunction(c value.ValueChunk) {
 }
 
 func printStack(stack []value.Value) {
-	print("[")
+	fmt.Print("[")
 	for _, val := range stack {
 		fmt.Printf("%s | ", stringer.TypeDecoratedString(val))
 	}
-	println("]")
+	fmt.Println("]")
 }
