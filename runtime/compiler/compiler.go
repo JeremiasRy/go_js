@@ -12,6 +12,8 @@ import (
 )
 
 const RESERVED_ARGUMENTS string = "arguments"
+const PROMISE_CTOR_NAME string = "Promise"
+const UNDEFINED_IDENTIFIER string = "undefined"
 
 type VariableType uint8
 
@@ -254,7 +256,7 @@ func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 	promiseCtor := native.NewPromiseConstructor()
 	promiseCtorHandle := allocator.Allocate(promiseCtor)
 
-	symbolTable.addVariable("Promise", CONST, false, nil)
+	symbolTable.addVariable(PROMISE_CTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -701,6 +703,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
+			fn.ReturnsPromise(checkIfNewArgumentIsPromise(current.Argument))
+
 			if current.Argument == nil {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 			} else {
@@ -713,7 +717,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_IDENTIFIER:
 		{
-			if current.Name == "undefined" {
+			if current.Name == UNDEFINED_IDENTIFIER {
 				fn.ValueChunk().WriteConstant(value.EncodedUndefined())
 				return
 			}
@@ -1040,5 +1044,16 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 			fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
 		}
 	}
+}
 
+func checkIfNewArgumentIsPromise(current *parser.Node) bool {
+	switch current.Type {
+	case parser.NODE_NEW_EXPRESSION:
+		{
+			if current.Callee.Type == parser.NODE_IDENTIFIER {
+				return current.Callee.Name == PROMISE_CTOR_NAME
+			}
+		}
+	}
+	return false
 }

@@ -50,3 +50,7 @@ func (fn *ObjFunction) GetHeapScope() int {
 func (fn *ObjFunction) SetHeapScope(scope int) {
 	fn.HeapScope = scope
 }
+
+func (*ObjFunction) ReturnsPromise(v bool) {
+	// just to implement the interface
+}

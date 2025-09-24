@@ -13,6 +13,7 @@ import (
 	"go_js/value"
 	"math"
 	"sync"
+	"time"
 )
 
 const STACK_MAX = math.MaxUint8
@@ -168,9 +169,28 @@ Run:
 
 		fn = queue.Dequeue()
 	}
-	if eventloop.HasWork() {
-		for range queue.QueueC {
-			goto Run
+
+	if vm.debug {
+		fmt.Println()
+		fmt.Println("-- QUEUE DRAINED --")
+	}
+
+	tick := time.NewTicker(100 * time.Millisecond)
+	hasWork := eventloop.HasWork()
+	for hasWork {
+		if vm.debug {
+			fmt.Printf("eventloop has work: %v\n", hasWork)
+		}
+		select {
+		case <-queue.QueueC:
+			{
+				goto Run
+			}
+		case <-tick.C:
+			{
+				hasWork = eventloop.HasWork()
+				continue
+			}
 		}
 	}
 	wg.Done()
@@ -182,21 +202,39 @@ func (vm *VM) run() (value.Value, error) {
 	ip := 0
 	var argCount uint8
 
+	if promise, ok := frame.fn.(*native.ObjAsyncFunction); ok {
+
+		if promise.State != nil {
+			if vm.debug {
+				fmt.Println()
+				fmt.Printf("-- RETURNING PROMISE %v --\n", promise.String())
+				printStack(promise.State.Stack)
+				fmt.Println()
+			}
+			for _, v := range promise.State.Stack {
+				vm.push(v)
+			}
+
+			ip = promise.State.Ip
+		}
+	}
+
 	if vm.debug {
-		println()
-		println("-- NEW RUNNER SPAWNED --")
-		println()
+		fmt.Println()
+		fmt.Println("-- NEW RUNNER SPAWNED --")
+		fmt.Println()
 		PrintChunk(valueChunk)
 	}
 
 	for {
-		//time.Sleep(time.Millisecond * 100)
+		// time.Sleep(time.Millisecond * 100)
 		code := valueChunk.Code[ip]
 		ip++
 
 		if vm.debug {
+			fmt.Println(frame.fn.String())
 			printStack(vm.stack[0:vm.stackTop])
-			println(opNames[code])
+			fmt.Println(opNames[code])
 		}
 
 		switch code {
@@ -476,7 +514,17 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_DEFINE_LOCAL:
 			{
-				vm.pop()
+				v := vm.pop()
+
+				if v.IsObject() {
+					handle := v.GetHandle()
+					if obj, err := allocator.GetObject(handle); err == nil {
+						if promise, ok := obj.(*native.ObjPromise); ok {
+							vm.push(promise.Value)
+							vm.pop()
+						}
+					}
+				}
 				vm.stackTop++
 			}
 		case chunk.OP_GET_LOCAL:
@@ -562,10 +610,12 @@ func (vm *VM) run() (value.Value, error) {
 					switch fn := obj.(type) {
 					case *native.ObjAsyncFunction:
 						{
-							promise := native.NewPromise()
-							fn.SetPromise(promise)
-							handle := allocator.Allocate(promise)
-							vm.push(value.EncodeHandle(handle))
+							if !fn.ReturnArgumentIsPromise {
+								promise := native.NewPromise()
+								fn.SetPromise(promise)
+								handle := allocator.Allocate(promise)
+								vm.push(value.EncodeHandle(handle))
+							}
 
 							vm.Call(fn.Clone(), ip)
 							frame = vm.currentFrame()
@@ -818,25 +868,49 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_RETURN:
 			{
-				ip = frame.returnIp
-				value := value.EncodedUndefined()
-				vm.frameCount--
+				if promise, ok := frame.fn.(*native.ObjAsyncFunction); ok {
+					ip = frame.returnIp
+					value := value.EncodedUndefined()
+					vm.frameCount--
 
-				if vm.stackTop > 0 {
-					value = vm.pop()
+					if vm.stackTop > 0 {
+						value = vm.pop()
+					}
+
+					promise.Resolve(value)
+
+					if vm.frameCount <= 0 {
+						vm.stackTop = 0
+
+						return value, nil
+					}
+
+					vm.stackTop = frame.localStart
+					vm.push(value)
+
+					frame = vm.currentFrame()
+					valueChunk = *frame.fn.ValueChunk()
+				} else {
+					ip = frame.returnIp
+					value := value.EncodedUndefined()
+					vm.frameCount--
+
+					if vm.stackTop > 0 {
+						value = vm.pop()
+					}
+
+					if vm.frameCount <= 0 {
+						vm.stackTop = 0
+
+						return value, nil
+					}
+
+					vm.stackTop = frame.localStart
+					vm.push(value)
+
+					frame = vm.currentFrame()
+					valueChunk = *frame.fn.ValueChunk()
 				}
-
-				if vm.frameCount <= 0 {
-					vm.stackTop = 0
-
-					return value, nil
-				}
-
-				vm.stackTop = frame.localStart
-				vm.push(value)
-
-				frame = vm.currentFrame()
-				valueChunk = *frame.fn.ValueChunk()
 			}
 		case chunk.OP_CREATE_ARRAY:
 			{
@@ -1088,15 +1162,18 @@ func (vm *VM) run() (value.Value, error) {
 		case chunk.OP_AWAIT:
 			{
 				awaitee := vm.pop()
-				obj, err := allocator.GetObject(awaitee.GetHandle())
+				awaiteeObj, err := allocator.GetObject(awaitee.GetHandle())
 
 				if err != nil {
 					return value.EncodeFalse(), err
 				}
 
-				if promise, ok := obj.(*native.ObjPromise); ok {
+				if promise, ok := awaiteeObj.(*native.ObjPromise); ok {
 					if curentAsyncFn, ok := frame.fn.(*native.ObjAsyncFunction); ok {
-						curentAsyncFn.Pause(vm.stack[frame.localStart:vm.stackTop], ip)
+						count := (vm.stackTop - frame.localStart) + 1 // +1 because we popped our promise
+						stack := make([]value.Value, count)
+						copy(stack, append(vm.stack[frame.localStart:vm.stackTop], awaitee))
+						curentAsyncFn.Pause(stack, ip)
 						curentAsyncFn.Await(promise)
 
 						vm.frameCount--

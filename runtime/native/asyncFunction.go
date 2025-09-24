@@ -14,9 +14,10 @@ type PauseState struct {
 type ObjAsyncFunction struct {
 	object.ObjFunction
 
-	State    *PauseState
-	Promise  *ObjPromise
-	Awaiting *ObjPromise
+	State                   *PauseState
+	Promise                 *ObjPromise
+	Awaiting                *ObjPromise
+	ReturnArgumentIsPromise bool
 }
 
 func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsyncFunction {
@@ -52,7 +53,9 @@ func (asyncFn *ObjAsyncFunction) SetPromise(p *ObjPromise) {
 }
 
 func (asyncFn *ObjAsyncFunction) Resolve(v value.Value) {
-	asyncFn.Promise.Resolve(v)
+	if !asyncFn.ReturnArgumentIsPromise {
+		asyncFn.Promise.Resolve(v)
+	}
 }
 
 func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int) {
@@ -76,4 +79,8 @@ func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMes
 	}
 
 	callbackChannel <- message
+}
+
+func (asyncFn *ObjAsyncFunction) ReturnsPromise(v bool) {
+	asyncFn.ReturnArgumentIsPromise = v
 }

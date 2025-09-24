@@ -62,4 +62,5 @@ type Callable interface {
 	GetArity() int
 	GetHeapScope() int
 	SetHeapScope(scope int)
+	ReturnsPromise(v bool)
 }
