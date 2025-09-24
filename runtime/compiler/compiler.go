@@ -409,6 +409,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
+
 			handle := allocator.Allocate(newFn)
 			v := value.EncodeHandle(handle)
 
@@ -439,6 +440,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			}
+
+			if len(current.Params) > 0 {
+				heapVars := []int{}
+
+				for i, n := range current.Params {
+					if v, found := symbolTable.vars[n.Name]; found {
+						if v.scope == HEAP {
+							heapVars = append(heapVars, i)
+						}
+					}
+				}
+
+				if len(heapVars) > 0 {
+					newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)))
+					for _, slot := range heapVars {
+						newFn.ValueChunk().EmitByte(uint8(slot))
+					}
+				}
 			}
 
 			if current.IsExpression {

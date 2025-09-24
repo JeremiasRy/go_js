@@ -12,59 +12,60 @@ import (
 )
 
 var opNames = map[uint8]string{
-	chunk.OP_CONSTANT:                "OP_CONSTANT",
-	chunk.OP_POP:                     "OP_POP",
-	chunk.OP_PUSH_CURRENT:            "OP_PUSH_CURRENT",
-	chunk.OP_ADD:                     "OP_ADD",
-	chunk.OP_SUBTRACT:                "OP_SUBTRACT",
-	chunk.OP_MULTIPLY:                "OP_MULTIPLY",
-	chunk.OP_DIVIDE:                  "OP_DIVIDE",
-	chunk.OP_MODULO:                  "OP_MODULO",
-	chunk.OP_EXPONENTIATION:          "OP_EXPONENTIATION",
-	chunk.OP_EQUALS:                  "OP_EQUALS",
-	chunk.OP_STRICT_EQUALS:           "OP_STRICT_EQUALS",
-	chunk.OP_STRICT_NOT_EQUALS:       "OP_STRICT_NOT_EQUALS",
-	chunk.OP_LESS_THAN_EQUAL:         "OP_LESS_THAN_EQUAL",
-	chunk.OP_LESS_THAN:               "OP_LESS_THAN",
-	chunk.OP_GREATER_THAN_EQUAL:      "OP_GREATER_THAN_EQUAL",
-	chunk.OP_GREATER_THAN:            "OP_GREATER_THAN",
-	chunk.OP_LOGICAL_AND:             "OP_LOGICAL_AND",
-	chunk.OP_LOGICAL_OR:              "OP_LOGICAL_OR",
-	chunk.OP_DEFINE_LOCAL:            "OP_DEFINE_LOCAL",
-	chunk.OP_GET_LOCAL:               "OP_GET_LOCAL",
-	chunk.OP_SET_LOCAL:               "OP_SET_LOCAL",
-	chunk.OP_POP_LOCAL:               "OP_POP_LOCAL",
-	chunk.OP_DEFINE_GLOBAL:           "OP_DEFINE_GLOBAL",
-	chunk.OP_GET_GLOBAL:              "OP_GET_GLOBAL",
-	chunk.OP_SET_GLOBAL:              "OP_SET_GLOBAL",
-	chunk.OP_CREATE_HEAP_SCOPE:       "OP_CREATE_HEAP_SCOPE",
-	chunk.OP_DEFINE_HEAP_VAR:         "OP_DEFINE_HEAP_VAR",
-	chunk.OP_GET_HEAP_VAR:            "OP_GET_HEAP_VAR",
-	chunk.OP_SET_HEAP_VAR:            "OP_SET_HEAP_VAR",
-	chunk.OP_CALL:                    "OP_CALL",
-	chunk.OP_RETURN:                  "OP_RETURN",
-	chunk.OP_JUMP_IF_FALSE:           "OP_JUMP_IF_FALSE",
-	chunk.OP_JUMP_IF_TRUE:            "OP_JUMP_IF_TRUE",
-	chunk.OP_JUMP:                    "OP_JUMP",
-	chunk.OP_CREATE_OBJECT:           "OP_CREATE_OBJECT",
-	chunk.OP_SET_OBJECT_MEMBER:       "OP_SET_OBJECT_MEMBER",
-	chunk.OP_GET_OBJECT_MEMBER:       "OP_GET_OBJECT_MEMBER",
-	chunk.OP_CREATE_ARRAY:            "OP_CREATE_ARRAY",
-	chunk.OP_PUSH_ELEMENT:            "OP_PUSH_ELEMENT",
-	chunk.OP_PUSH_UNDEFINED:          "OP_PUSH_UNDEFINED",
-	chunk.OP_GET_ITERATOR:            "OP_GET_ITERATOR",
-	chunk.OP_ITERATOR_NEXT:           "OP_ITERATOR_NEXT",
-	chunk.OP_ITERATOR_CURRENT:        "OP_ITERATOR_CURRENT",
-	chunk.OP_TEMPLATE_LITERAL_START:  "OP_TEMPLATE_LITERAL_START",
-	chunk.OP_TEMPLATE_PUSH_STRING:    "OP_TEMPLATE_PUSH_STRING",
-	chunk.OP_TEMPLATE_LITERAL_END:    "OP_TEMPLATE_LITERAL_END",
-	chunk.OP_TRY_BLOCK_START:         "OP_TRY_BLOCK_START",
-	chunk.OP_TRY_BLOCK_END:           "OP_TRY_BLOCK_END",
-	chunk.OP_THROW:                   "OP_THROW",
-	chunk.OP_NEW:                     "OP_NEW",
-	chunk.OP_ADD_ARGUMENTS_TO_LOCALS: "OP_ADD_ARGUMENTS_TO_LOCALS",
-	chunk.OP_STORE_ARG_COUNT:         "OP_STORE_ARG_COUNT",
-	chunk.OP_AWAIT:                   "OP_AWAIT",
+	chunk.OP_CONSTANT:                        "OP_CONSTANT",
+	chunk.OP_POP:                             "OP_POP",
+	chunk.OP_PUSH_CURRENT:                    "OP_PUSH_CURRENT",
+	chunk.OP_ADD:                             "OP_ADD",
+	chunk.OP_SUBTRACT:                        "OP_SUBTRACT",
+	chunk.OP_MULTIPLY:                        "OP_MULTIPLY",
+	chunk.OP_DIVIDE:                          "OP_DIVIDE",
+	chunk.OP_MODULO:                          "OP_MODULO",
+	chunk.OP_EXPONENTIATION:                  "OP_EXPONENTIATION",
+	chunk.OP_EQUALS:                          "OP_EQUALS",
+	chunk.OP_STRICT_EQUALS:                   "OP_STRICT_EQUALS",
+	chunk.OP_STRICT_NOT_EQUALS:               "OP_STRICT_NOT_EQUALS",
+	chunk.OP_LESS_THAN_EQUAL:                 "OP_LESS_THAN_EQUAL",
+	chunk.OP_LESS_THAN:                       "OP_LESS_THAN",
+	chunk.OP_GREATER_THAN_EQUAL:              "OP_GREATER_THAN_EQUAL",
+	chunk.OP_GREATER_THAN:                    "OP_GREATER_THAN",
+	chunk.OP_LOGICAL_AND:                     "OP_LOGICAL_AND",
+	chunk.OP_LOGICAL_OR:                      "OP_LOGICAL_OR",
+	chunk.OP_DEFINE_LOCAL:                    "OP_DEFINE_LOCAL",
+	chunk.OP_GET_LOCAL:                       "OP_GET_LOCAL",
+	chunk.OP_SET_LOCAL:                       "OP_SET_LOCAL",
+	chunk.OP_POP_LOCAL:                       "OP_POP_LOCAL",
+	chunk.OP_DEFINE_GLOBAL:                   "OP_DEFINE_GLOBAL",
+	chunk.OP_GET_GLOBAL:                      "OP_GET_GLOBAL",
+	chunk.OP_SET_GLOBAL:                      "OP_SET_GLOBAL",
+	chunk.OP_CREATE_HEAP_SCOPE:               "OP_CREATE_HEAP_SCOPE",
+	chunk.OP_DEFINE_HEAP_VAR:                 "OP_DEFINE_HEAP_VAR",
+	chunk.OP_GET_HEAP_VAR:                    "OP_GET_HEAP_VAR",
+	chunk.OP_SET_HEAP_VAR:                    "OP_SET_HEAP_VAR",
+	chunk.OP_CALL:                            "OP_CALL",
+	chunk.OP_RETURN:                          "OP_RETURN",
+	chunk.OP_JUMP_IF_FALSE:                   "OP_JUMP_IF_FALSE",
+	chunk.OP_JUMP_IF_TRUE:                    "OP_JUMP_IF_TRUE",
+	chunk.OP_JUMP:                            "OP_JUMP",
+	chunk.OP_CREATE_OBJECT:                   "OP_CREATE_OBJECT",
+	chunk.OP_SET_OBJECT_MEMBER:               "OP_SET_OBJECT_MEMBER",
+	chunk.OP_GET_OBJECT_MEMBER:               "OP_GET_OBJECT_MEMBER",
+	chunk.OP_CREATE_ARRAY:                    "OP_CREATE_ARRAY",
+	chunk.OP_PUSH_ELEMENT:                    "OP_PUSH_ELEMENT",
+	chunk.OP_PUSH_UNDEFINED:                  "OP_PUSH_UNDEFINED",
+	chunk.OP_GET_ITERATOR:                    "OP_GET_ITERATOR",
+	chunk.OP_ITERATOR_NEXT:                   "OP_ITERATOR_NEXT",
+	chunk.OP_ITERATOR_CURRENT:                "OP_ITERATOR_CURRENT",
+	chunk.OP_TEMPLATE_LITERAL_START:          "OP_TEMPLATE_LITERAL_START",
+	chunk.OP_TEMPLATE_PUSH_STRING:            "OP_TEMPLATE_PUSH_STRING",
+	chunk.OP_TEMPLATE_LITERAL_END:            "OP_TEMPLATE_LITERAL_END",
+	chunk.OP_TRY_BLOCK_START:                 "OP_TRY_BLOCK_START",
+	chunk.OP_TRY_BLOCK_END:                   "OP_TRY_BLOCK_END",
+	chunk.OP_THROW:                           "OP_THROW",
+	chunk.OP_NEW:                             "OP_NEW",
+	chunk.OP_ADD_ARGUMENTS_TO_LOCALS:         "OP_ADD_ARGUMENTS_TO_LOCALS",
+	chunk.OP_STORE_ARG_COUNT:                 "OP_STORE_ARG_COUNT",
+	chunk.OP_AWAIT:                           "OP_AWAIT",
+	chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS: "OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -324,6 +325,19 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 				ip++
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+
+				amount := opCode[ip]
+
+				for range amount {
+					ip++
+					fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+				}
 			}
 		}
 		ip++
