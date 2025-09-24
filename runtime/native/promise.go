@@ -77,3 +77,23 @@ func (pCtor *PromiseConstructor) Type() object.ObjType {
 func (pCtor *PromiseConstructor) String() string {
 	return "function Promise"
 }
+
+type ResolveFunc struct {
+	owner *ObjPromise
+}
+
+func NewResolveFunc(owner *ObjPromise) *ResolveFunc {
+	return &ResolveFunc{owner: owner}
+}
+
+func (*ResolveFunc) Type() object.ObjType {
+	return object.OBJ_RESOLVE_FUNCTION
+}
+
+func (*ResolveFunc) String() string {
+	return "function Resolve"
+}
+
+func (resolve *ResolveFunc) Resolve(v value.Value) {
+	resolve.owner.Resolve(v)
+}

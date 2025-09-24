@@ -171,7 +171,7 @@ func NewMain(fn *object.ObjFunction) *Main {
 
 func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	msg := &object.JobChannelMessage{
-		Callback: m.Fn,
+		Callback: m.Fn.Clone(),
 		Done:     done,
 	}
 	callbackChannel <- msg

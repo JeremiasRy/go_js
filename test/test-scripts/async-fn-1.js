@@ -1,3 +1,4 @@
+/*
 async function fetchUser() {
     return new Promise(resolve => {
         setTimeout(() => {
@@ -12,3 +13,4 @@ async function main() {
 }
 
 main();
+*/

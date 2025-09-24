@@ -59,7 +59,9 @@ func (vm *VM) Call(fn object.Callable, returnIp int) error {
 		return fmt.Errorf("too many callframes")
 	}
 
-	vm.frames[vm.frameCount].initCallFrame(fn, vm.stackTop-fn.GetArity(), returnIp)
+	localStart := max(vm.stackTop-fn.GetArity(), 0)
+
+	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnIp)
 	vm.frameCount++
 	return nil
 }
@@ -166,7 +168,6 @@ Run:
 
 		fn = queue.Dequeue()
 	}
-	fmt.Println("event loop has work: ", eventloop.HasWork())
 	if eventloop.HasWork() {
 		for range queue.QueueC {
 			goto Run
@@ -439,8 +440,15 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
-				variable := vm.pop()
-				vm.addGlobal(variable)
+				v := vm.pop()
+				if v.IsObject() {
+					obj, _ := allocator.GetObject(v.GetHandle())
+					// check if we have a closure in hand
+					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
+					}
+				}
+				vm.addGlobal(v)
 			}
 		case chunk.OP_GET_GLOBAL:
 			{
@@ -451,7 +459,15 @@ func (vm *VM) run() (value.Value, error) {
 		case chunk.OP_SET_GLOBAL:
 			{
 				global := valueChunk.Code[ip]
-				globals[global] = vm.pop()
+				v := vm.pop()
+				if v.IsObject() {
+					obj, _ := allocator.GetObject(v.GetHandle())
+					// check if we have a closure in hand
+					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
+					}
+				}
+				globals[global] = v
 				ip++
 			}
 		case chunk.OP_POP_LOCAL:
@@ -785,6 +801,15 @@ func (vm *VM) run() (value.Value, error) {
 							v := value.EncodeHandle(allocator.Allocate(objArr))
 							vm.push(v)
 						}
+					case *native.ResolveFunc:
+						{
+							if vm.stackTop == 0 {
+								vm.push(value.EncodedUndefined())
+							}
+
+							v := vm.pop()
+							fn.Resolve(v)
+						}
 
 					}
 				} else {
@@ -1021,10 +1046,13 @@ func (vm *VM) run() (value.Value, error) {
 						}
 
 						promise := native.NewPromise()
+						resolve := native.NewResolveFunc(promise)
+						resolveHandle := allocator.Allocate(resolve)
 
 						if executor, ok := executor.(object.Callable); ok {
 							runner := NewVM(vm.debug)
 							runner.Call(executor, 0)
+							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run()
 						}
 
@@ -1071,11 +1099,44 @@ func (vm *VM) run() (value.Value, error) {
 						curentAsyncFn.Pause(vm.stack[frame.localStart:vm.stackTop], ip)
 						curentAsyncFn.Await(promise)
 
-						ip = frame.returnIp
 						vm.frameCount--
-						frame = vm.currentFrame()
-						valueChunk = *frame.fn.ValueChunk()
+
+						if vm.frameCount > 0 {
+							ip = frame.returnIp
+							frame = vm.currentFrame()
+							valueChunk = *frame.fn.ValueChunk()
+						}
 					}
+				}
+			}
+		case chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS:
+			{
+				amount := valueChunk.Code[ip]
+				ip++
+
+				removeMap := map[int]bool{}
+
+				for range amount {
+					idx := int(valueChunk.Code[ip])
+					removeMap[idx] = true
+					ip++
+					heapVars[frame.fn.GetHeapScope()] = append(heapVars[frame.fn.GetHeapScope()], vm.stack[frame.localStart+idx])
+				}
+
+				localCount := (vm.stackTop - frame.localStart) - int(amount)
+
+				locals := make([]value.Value, 0, localCount)
+
+				for i, v := range vm.stack[frame.localStart:vm.stackTop] {
+					if !removeMap[i] {
+						locals = append(locals, v)
+					}
+				}
+
+				vm.stackTop = frame.localStart
+
+				for _, v := range locals {
+					vm.push(v)
 				}
 			}
 		}

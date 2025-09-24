@@ -50,7 +50,7 @@ func Enqueue(callback object.Callable, priority TaskPriority) {
 	QueueC <- struct{}{}
 }
 
-func Dequeue() *object.ObjFunction {
+func Dequeue() object.Callable {
 	var l *list.List
 
 	if q.microTask.Len() > 0 {
@@ -66,5 +66,5 @@ func Dequeue() *object.ObjFunction {
 	front := l.Front()
 	l.Remove(front)
 	q.wg.Done()
-	return front.Value.(*object.ObjFunction)
+	return front.Value.(object.Callable)
 }

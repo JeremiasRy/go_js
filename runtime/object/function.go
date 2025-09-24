@@ -43,10 +43,10 @@ func (fn *ObjFunction) GetArity() int {
 	return fn.Arity
 }
 
-func (fn ObjFunction) GetHeapScope() int {
+func (fn *ObjFunction) GetHeapScope() int {
 	return fn.HeapScope
 }
 
-func (fn ObjFunction) SetHeapScope(scope int) {
+func (fn *ObjFunction) SetHeapScope(scope int) {
 	fn.HeapScope = scope
 }

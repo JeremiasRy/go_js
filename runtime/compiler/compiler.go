@@ -392,6 +392,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 			}
 
+			if fn.GetArity() > 0 {
+				heapVars := []int{}
+
+				for i, n := range current.Params {
+					if v, found := symbolTable.vars[n.Name]; found {
+						if v.scope == HEAP {
+							heapVars = append(heapVars, i)
+						}
+					}
+				}
+
+				if len(heapVars) > 0 {
+					fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)))
+					for _, slot := range heapVars {
+						fn.ValueChunk().EmitByte(uint8(slot))
+					}
+				}
+			}
+
 			if symbolTable.needsArgumentsSlice {
 				fn.ValueChunk().EmitByte(chunk.OP_ADD_ARGUMENTS_TO_LOCALS)
 			}
@@ -694,6 +713,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_IDENTIFIER:
 		{
+			if current.Name == "undefined" {
+				fn.ValueChunk().WriteConstant(value.EncodedUndefined())
+				return
+			}
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
