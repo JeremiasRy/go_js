@@ -286,6 +286,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				prePass(node, symbolTable)
 			}
 		}
+	case parser.NODE_AWAIT_EXPRESSION:
+		{
+			prePass(current.Argument, symbolTable)
+		}
 	}
 
 }

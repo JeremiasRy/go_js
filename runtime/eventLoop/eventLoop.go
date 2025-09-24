@@ -45,7 +45,7 @@ func Start() {
 	}()
 }
 
-func DispatchBackgroundJob(job object.Job) {
+func Dispatch(job object.Job) {
 	el.wg.Add(1)
 	el.work++
 	message := &object.JobChannelMessage{
@@ -59,14 +59,6 @@ func DispatchBackgroundJob(job object.Job) {
 	el.jobChannel <- message
 }
 
-func Dispatch(job object.Job) {
-	el.work++
-	message := &object.JobChannelMessage{
-		Job:      job,
-		Callback: nil,
-		Done: func() {
-			el.work--
-		},
-	}
-	el.jobChannel <- message
+func HasWork() bool {
+	return el.work > 0
 }

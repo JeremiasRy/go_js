@@ -1,6 +1,7 @@
 package native
 
 import (
+	eventloop "go_js/eventLoop"
 	"go_js/object"
 	"go_js/value"
 )
@@ -13,8 +14,9 @@ type PauseState struct {
 type ObjAsyncFunction struct {
 	object.ObjFunction
 
-	State   *PauseState
-	Promise *ObjPromise
+	State    *PauseState
+	Promise  *ObjPromise
+	Awaiting *ObjPromise
 }
 
 func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsyncFunction {
@@ -50,8 +52,7 @@ func (asyncFn *ObjAsyncFunction) SetPromise(p *ObjPromise) {
 }
 
 func (asyncFn *ObjAsyncFunction) Resolve(v value.Value) {
-	asyncFn.Promise.Status = RESOLVED
-	asyncFn.Promise.Value = v
+	asyncFn.Promise.Resolve(v)
 }
 
 func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int) {
@@ -59,4 +60,20 @@ func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int) {
 		Stack: s,
 		Ip:    ip,
 	}
+}
+
+func (asyncFn *ObjAsyncFunction) Await(p *ObjPromise) {
+	asyncFn.Awaiting = p
+	eventloop.Dispatch(asyncFn)
+}
+
+func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	asyncFn.Awaiting.Listen()
+	message := &object.JobChannelMessage{
+		Job:      nil,
+		Callback: asyncFn,
+		Done:     done,
+	}
+
+	callbackChannel <- message
 }

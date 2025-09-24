@@ -76,7 +76,7 @@ func main() {
 	go vm.Run(&wg)
 
 	mainJob := &native.Main{Fn: main}
-	eventloop.DispatchBackgroundJob(mainJob)
+	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
 

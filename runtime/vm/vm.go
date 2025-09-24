@@ -156,20 +156,23 @@ func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 }
 
 func (vm *VM) Run(wg *sync.WaitGroup) {
+	wg.Add(1)
 Run:
 	fn := queue.Dequeue()
 	for fn != nil {
-		wg.Add(1)
+
 		vm.Call(fn, 0)
 		vm.run()
 
-		wg.Done()
 		fn = queue.Dequeue()
 	}
-
-	for range queue.QueueC {
-		goto Run
+	fmt.Println("event loop has work: ", eventloop.HasWork())
+	if eventloop.HasWork() {
+		for range queue.QueueC {
+			goto Run
+		}
 	}
+	wg.Done()
 }
 
 func (vm *VM) run() (value.Value, error) {
@@ -541,6 +544,19 @@ func (vm *VM) run() (value.Value, error) {
 					}
 
 					switch fn := obj.(type) {
+					case *native.ObjAsyncFunction:
+						{
+							promise := native.NewPromise()
+							fn.SetPromise(promise)
+							handle := allocator.Allocate(promise)
+							vm.push(value.EncodeHandle(handle))
+
+							vm.Call(fn.Clone(), ip)
+							frame = vm.currentFrame()
+							valueChunk = *frame.fn.ValueChunk()
+							ip = 0
+							frame.localStart -= int(argCount)
+						}
 					case object.Callable:
 						{
 							vm.Call(fn, ip)
@@ -735,7 +751,7 @@ func (vm *VM) run() (value.Value, error) {
 
 							if callback, ok := obj.(*object.ObjFunction); ok {
 								fn.Set(int(ms), callback)
-								eventloop.DispatchBackgroundJob(fn.Clone())
+								eventloop.Dispatch(fn.Clone())
 								vm.push(value.EncodedUndefined())
 							}
 						}
@@ -779,20 +795,20 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				ip = frame.returnIp
 				value := value.EncodedUndefined()
+				vm.frameCount--
 
 				if vm.stackTop > 0 {
 					value = vm.pop()
 				}
-
-				vm.stackTop = frame.localStart
-				vm.push(value)
-				vm.frameCount--
 
 				if vm.frameCount <= 0 {
 					vm.stackTop = 0
 
 					return value, nil
 				}
+
+				vm.stackTop = frame.localStart
+				vm.push(value)
 
 				frame = vm.currentFrame()
 				valueChunk = *frame.fn.ValueChunk()
@@ -975,22 +991,46 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
-				if ctor, ok := obj.(native.Constructor); ok {
-					args := vm.popN(int(argCount))
-					params := make([]any, argCount)
+				switch ctor := obj.(type) {
+				case native.Constructor:
+					{
+						args := vm.popN(int(argCount))
+						params := make([]any, argCount)
 
-					for i, v := range args {
-						params[i] = v
+						for i, v := range args {
+							params[i] = v
+						}
+
+						newObj, err := ctor.New(params...)
+
+						if err != nil {
+							return value.EncodedUndefined(), err
+						}
+
+						objHandle := allocator.Allocate(newObj)
+						vm.push(value.EncodeHandle(objHandle))
 					}
+				case *native.PromiseConstructor:
+					{
+						arg := vm.pop()
+						handle := arg.GetHandle()
+						executor, err := allocator.GetObject(handle)
 
-					newObj, err := ctor.New(params...)
+						if err != nil {
+							return value.EncodedUndefined(), err
+						}
 
-					if err != nil {
-						return value.EncodedUndefined(), err
+						promise := native.NewPromise()
+
+						if executor, ok := executor.(object.Callable); ok {
+							runner := NewVM(vm.debug)
+							runner.Call(executor, 0)
+							runner.run()
+						}
+
+						handle = allocator.Allocate(promise)
+						vm.push(value.EncodeHandle(handle))
 					}
-
-					objHandle := allocator.Allocate(newObj)
-					vm.push(value.EncodeHandle(objHandle))
 				}
 			}
 		case chunk.OP_THROW:
@@ -1016,6 +1056,27 @@ func (vm *VM) run() (value.Value, error) {
 				count := valueChunk.Code[ip]
 				ip++
 				argCount = count
+			}
+		case chunk.OP_AWAIT:
+			{
+				awaitee := vm.pop()
+				obj, err := allocator.GetObject(awaitee.GetHandle())
+
+				if err != nil {
+					return value.EncodeFalse(), err
+				}
+
+				if promise, ok := obj.(*native.ObjPromise); ok {
+					if curentAsyncFn, ok := frame.fn.(*native.ObjAsyncFunction); ok {
+						curentAsyncFn.Pause(vm.stack[frame.localStart:vm.stackTop], ip)
+						curentAsyncFn.Await(promise)
+
+						ip = frame.returnIp
+						vm.frameCount--
+						frame = vm.currentFrame()
+						valueChunk = *frame.fn.ValueChunk()
+					}
+				}
 			}
 		}
 	}
