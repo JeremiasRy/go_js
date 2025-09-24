@@ -421,7 +421,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				// if not in heap scope we'll create a new one
 				if !isInHeapScopeAlready && variable.scope == HEAP {
-					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 					isInHeapScopeAlready = true
 				}
 			}
