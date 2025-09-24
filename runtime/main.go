@@ -67,7 +67,7 @@ func main() {
 	}
 	var wg sync.WaitGroup
 
-	queue.Init()
+	queue.Init(&wg)
 	eventloop.Init(&wg)
 
 	vm := vm.NewVM(debug)

@@ -3,6 +3,7 @@ package queue
 import (
 	"container/list"
 	"go_js/object"
+	"sync"
 )
 
 type TaskPriority uint8
@@ -15,12 +16,14 @@ const (
 type Queue struct {
 	microTask *list.List
 	task      *list.List
+
+	wg *sync.WaitGroup
 }
 
 var q *Queue
 var QueueC = make(chan struct{})
 
-func Init() {
+func Init(wg *sync.WaitGroup) {
 	if q != nil {
 		return
 	}
@@ -28,10 +31,12 @@ func Init() {
 	q = &Queue{
 		microTask: &list.List{},
 		task:      &list.List{},
+		wg:        wg,
 	}
 }
 
-func Enqueue(callback *object.ObjFunction, priority TaskPriority) {
+func Enqueue(callback object.Callable, priority TaskPriority) {
+	q.wg.Add(1)
 	var l *list.List
 
 	switch priority {
@@ -45,7 +50,7 @@ func Enqueue(callback *object.ObjFunction, priority TaskPriority) {
 	QueueC <- struct{}{}
 }
 
-func Dequeue() *object.ObjFunction {
+func Dequeue() object.Callable {
 	var l *list.List
 
 	if q.microTask.Len() > 0 {
@@ -60,5 +65,6 @@ func Dequeue() *object.ObjFunction {
 
 	front := l.Front()
 	l.Remove(front)
-	return front.Value.(*object.ObjFunction)
+	q.wg.Done()
+	return front.Value.(object.Callable)
 }

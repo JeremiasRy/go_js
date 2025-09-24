@@ -1,3 +1,4 @@
+
 async function fetchUser() {
     return new Promise(resolve => {
         setTimeout(() => {

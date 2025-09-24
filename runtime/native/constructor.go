@@ -169,8 +169,12 @@ func NewMain(fn *object.ObjFunction) *Main {
 	}
 }
 
-func (m *Main) Work(callbackChannel chan *object.ObjFunction) {
-	callbackChannel <- m.Fn
+func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	msg := &object.JobChannelMessage{
+		Callback: m.Fn.Clone(),
+		Done:     done,
+	}
+	callbackChannel <- msg
 }
 
 type Log struct {
@@ -215,15 +219,20 @@ func (st *SetTimeout) Set(ms int, callback *object.ObjFunction) {
 	st.callback = callback
 }
 
-func (st *SetTimeout) Work(callBack chan *object.ObjFunction) {
+func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	message := &object.JobChannelMessage{
+		Job:      nil,
+		Callback: st.callback,
+		Done:     done,
+	}
 	if st.time == 0 {
-		callBack <- st.callback
+		callbackChannel <- message
 		return
 	}
 	tick := time.NewTicker((time.Duration(st.time) * time.Millisecond))
 
 	for range tick.C {
-		callBack <- st.callback
+		callbackChannel <- message
 		break
 	}
 }

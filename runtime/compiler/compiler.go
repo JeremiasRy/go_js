@@ -12,6 +12,8 @@ import (
 )
 
 const RESERVED_ARGUMENTS string = "arguments"
+const PROMISE_CTOR_NAME string = "Promise"
+const UNDEFINED_IDENTIFIER string = "undefined"
 
 type VariableType uint8
 
@@ -37,7 +39,7 @@ type Variable struct {
 	slot       int  // for locals and globals
 	init       bool // used in for of loops
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
-	fn         *object.ObjFunction
+	fn         object.Callable
 }
 
 type Variables map[string]*Variable
@@ -150,7 +152,7 @@ func (fs *FunctionScope) getCurrentSlot() int {
 	return count
 }
 
-func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn *object.ObjFunction) {
+func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn object.Callable) {
 	var mapToAddTo Variables
 
 	if fs.block != nil {
@@ -250,6 +252,15 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	promiseCtor := native.NewPromiseConstructor()
+	promiseCtorHandle := allocator.Allocate(promiseCtor)
+
+	symbolTable.addVariable(PROMISE_CTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
@@ -259,6 +270,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineSetTimeout(main, symbolTable)
 	defineErrorConstructor(main, symbolTable)
 	defineArrayConstructor(main, symbolTable)
+	definePromiseConstructor(main, symbolTable)
 
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
@@ -382,6 +394,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 			}
 
+			if fn.GetArity() > 0 {
+				heapVars := []int{}
+
+				for i, n := range current.Params {
+					if v, found := symbolTable.vars[n.Name]; found {
+						if v.scope == HEAP {
+							heapVars = append(heapVars, i)
+						}
+					}
+				}
+
+				if len(heapVars) > 0 {
+					fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)))
+					for _, slot := range heapVars {
+						fn.ValueChunk().EmitByte(uint8(slot))
+					}
+				}
+			}
+
 			if symbolTable.needsArgumentsSlice {
 				fn.ValueChunk().EmitByte(chunk.OP_ADD_ARGUMENTS_TO_LOCALS)
 			}
@@ -399,8 +430,57 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
+
 			handle := allocator.Allocate(newFn)
-			value := value.EncodeHandle(handle)
+			v := value.EncodeHandle(handle)
+
+			functions := []*Variable{}
+			isInHeapScopeAlready := symbolTable.isInHeapScope()
+			for _, variable := range symbolTable.vars {
+				if variable.type_ == FUNCTION {
+					functions = append(functions, variable)
+				}
+
+				// if not in heap scope we'll create a new one
+				if !isInHeapScopeAlready && variable.scope == HEAP {
+					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+					isInHeapScopeAlready = true
+				}
+			}
+
+			slices.SortFunc(functions, func(a *Variable, b *Variable) int {
+				return cmp.Compare(a.slot, b.slot)
+			})
+
+			for _, variable := range functions {
+				fnValue := allocator.Allocate(variable.fn)
+				slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
+
+				if uint8(variable.slot) != slot {
+					panic("things went south")
+				}
+
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			}
+
+			if len(current.Params) > 0 {
+				heapVars := []int{}
+
+				for i, n := range current.Params {
+					if v, found := symbolTable.vars[n.Name]; found {
+						if v.scope == HEAP {
+							heapVars = append(heapVars, i)
+						}
+					}
+				}
+
+				if len(heapVars) > 0 {
+					newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)))
+					for _, slot := range heapVars {
+						newFn.ValueChunk().EmitByte(uint8(slot))
+					}
+				}
+			}
 
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -414,7 +494,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 			}
 
-			fn.ValueChunk().WriteConstant(value)
+			fn.ValueChunk().WriteConstant(v)
 		}
 	case parser.NODE_FUNCTION_EXPRESSION:
 		{
@@ -481,7 +561,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			if current.Callee != nil {
 				callee, _ := symbolTable.findVariable(current.Callee.Name)
-				if callee != nil && callee.fn != nil && len(current.Arguments) > callee.fn.Arity() {
+				if callee != nil && callee.fn != nil && len(current.Arguments) > callee.fn.GetArity() {
 					fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
 				}
 			}
@@ -623,6 +703,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
+			fn.ReturnsPromise(checkIfNewArgumentIsPromise(current.Argument))
+
 			if current.Argument == nil {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 			} else {
@@ -635,6 +717,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_IDENTIFIER:
 		{
+			if current.Name == UNDEFINED_IDENTIFIER {
+				fn.ValueChunk().WriteConstant(value.EncodedUndefined())
+				return
+			}
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
@@ -939,38 +1025,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Right, symbolTable, fn)
 			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 		}
-	}
-}
-
-func parseLiteralWithoutWrite(current *parser.Node, fn object.Callable) uint8 {
-	switch v := current.Value.(type) {
-	case float64:
+	case parser.NODE_AWAIT_EXPRESSION:
 		{
-			return fn.ValueChunk().AddConstant(value.ValueFromFloat64(v))
-		}
-	case []byte:
-		{
-			objStr := native.NewString(string(v))
-			handle := allocator.Allocate(objStr)
-			return fn.ValueChunk().AddConstant(value.EncodeHandle(handle))
-		}
-	case bool:
-		{
-			if v {
-				return fn.ValueChunk().AddConstant(value.EncodeTrue())
-			} else {
-				return fn.ValueChunk().AddConstant(value.EncodeFalse())
-
-			}
-		}
-	case nil:
-		{
-			if current.Raw == "null" {
-				return fn.ValueChunk().AddConstant(value.EncodeNil())
-			}
+			popStack = false
+			generateByteCode(current.Argument, symbolTable, fn)
+			popStack = true
+			fn.ValueChunk().EmitByte(chunk.OP_AWAIT)
 		}
 	}
-	panic("failed to parse literal")
 }
 
 func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
@@ -982,5 +1044,16 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 			fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
 		}
 	}
+}
 
+func checkIfNewArgumentIsPromise(current *parser.Node) bool {
+	switch current.Type {
+	case parser.NODE_NEW_EXPRESSION:
+		{
+			if current.Callee.Type == parser.NODE_IDENTIFIER {
+				return current.Callee.Name == PROMISE_CTOR_NAME
+			}
+		}
+	}
+	return false
 }

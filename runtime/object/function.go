@@ -3,22 +3,23 @@ package object
 import "go_js/value"
 
 type ObjFunction struct {
-	name  string
-	chunk *value.ValueChunk
-	arity int
-
-	heapScope int
+	Name      string
+	Chunk     *value.ValueChunk
+	Arity     int
+	HeapScope int
 }
+
+const NOT_IN_HEAP_SCOPE int = -1
 
 func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 	if chunk == nil {
 		chunk = value.NewChunk()
 	}
 	return &ObjFunction{
-		name:      name,
-		chunk:     chunk,
-		arity:     arity,
-		heapScope: -1,
+		Name:      name,
+		Chunk:     chunk,
+		Arity:     arity,
+		HeapScope: NOT_IN_HEAP_SCOPE,
 	}
 }
 
@@ -31,23 +32,25 @@ func (*ObjFunction) Type() ObjType {
 }
 
 func (fn *ObjFunction) String() string {
-	return "<fn " + fn.name + ">"
-}
-
-func (fn *ObjFunction) Name() string {
-	return fn.name
+	return "<fn " + fn.Name + ">"
 }
 
 func (fn *ObjFunction) ValueChunk() *value.ValueChunk {
-	return fn.chunk
-}
-func (fn *ObjFunction) Arity() int {
-	return fn.arity
-}
-func (fn *ObjFunction) SetHeapScope(scope int) {
-	fn.heapScope = scope
+	return fn.Chunk
 }
 
-func (fn *ObjFunction) HeapScope() int {
-	return fn.heapScope
+func (fn *ObjFunction) GetArity() int {
+	return fn.Arity
+}
+
+func (fn *ObjFunction) GetHeapScope() int {
+	return fn.HeapScope
+}
+
+func (fn *ObjFunction) SetHeapScope(scope int) {
+	fn.HeapScope = scope
+}
+
+func (*ObjFunction) ReturnsPromise(v bool) {
+	// just to implement the interface
 }

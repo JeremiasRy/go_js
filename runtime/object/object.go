@@ -8,6 +8,7 @@ type ObjType uint8
 
 const (
 	OBJ_FUNCTION ObjType = iota
+	OBJ_ASYNC_FUNCTION
 	OBJ_TEMPLATE_LITERAL
 	OBJ_CLOSURE
 	OBJ_STRING_CONSTRUCTOR
@@ -21,6 +22,9 @@ const (
 	OBJ_ERROR
 	OBJ_ERROR_CONSTRUCTOR
 	OBJ_CONSOLE
+	OBJ_PROMISE
+	OBJ_PROMISE_CONSTRUCTOR
+	OBJ_RESOLVE_FUNCTION
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -32,8 +36,14 @@ func IsValueObject(v value.Value) (bool, uint32) {
 	return false, 0
 }
 
+type JobChannelMessage struct {
+	Job      Job
+	Callback Callable
+	Done     func()
+}
+
 type Job interface {
-	Work(callbackChannel chan *ObjFunction)
+	Work(callbackChannel chan *JobChannelMessage, done func())
 }
 
 type Object interface {
@@ -47,9 +57,10 @@ type Hashable interface {
 }
 
 type Callable interface {
+	Object
 	ValueChunk() *value.ValueChunk
-	Arity() int
-	HeapScope() int
+	GetArity() int
+	GetHeapScope() int
 	SetHeapScope(scope int)
-	Name() string
+	ReturnsPromise(v bool)
 }
