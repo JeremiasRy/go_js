@@ -11,9 +11,10 @@ import (
 	"slices"
 )
 
+const CONSOLE_OBJECT_NAME string = "console"
 const RESERVED_ARGUMENTS string = "arguments"
-const PROMISE_CTOR_NAME string = "Promise"
 const UNDEFINED_IDENTIFIER string = "undefined"
+const SET_TIMEOUT_NAME string = "setTimeout"
 
 type VariableType uint8
 
@@ -210,7 +211,7 @@ func (fs *FunctionScope) currentBlockVarCount() (int, bool) {
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := native.NewObjectConsole()
 	consoleHandle := allocator.Allocate(console)
-	symbolTable.addVariable("console", CONST, false, nil)
+	symbolTable.addVariable(CONSOLE_OBJECT_NAME, CONST, false, nil)
 
 	main.ValueChunk().WriteConstant(value.EncodeHandle(consoleHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
@@ -220,7 +221,7 @@ func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 	objCtor := native.NewObjectConstructor()
 	objCtorHandle := allocator.Allocate(objCtor)
 
-	symbolTable.addVariable("Object", CONST, false, nil)
+	symbolTable.addVariable(native.OBJECT_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(objCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -229,7 +230,7 @@ func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 	arrCtor := &native.ArrayConstructor{}
 	arrCtorHandle := allocator.Allocate(arrCtor)
 
-	symbolTable.addVariable("Array", CONST, false, nil)
+	symbolTable.addVariable(native.ARRAY_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(arrCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -238,7 +239,7 @@ func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 	ctor := &native.ErrorConstructor{}
 	ctorHandle := allocator.Allocate(ctor)
 
-	symbolTable.addVariable("Error", CONST, false, nil)
+	symbolTable.addVariable(native.ERROR_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -247,7 +248,7 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 	setTimeout := native.NewSetTimeout()
 	setTimeouthandle := allocator.Allocate(setTimeout)
 
-	symbolTable.addVariable("setTimeout", CONST, false, nil)
+	symbolTable.addVariable(SET_TIMEOUT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(setTimeouthandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -256,7 +257,7 @@ func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 	promiseCtor := native.NewPromiseConstructor()
 	promiseCtorHandle := allocator.Allocate(promiseCtor)
 
-	symbolTable.addVariable(PROMISE_CTOR_NAME, CONST, false, nil)
+	symbolTable.addVariable(native.PROMISE_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -1051,7 +1052,7 @@ func checkIfNewArgumentIsPromise(current *parser.Node) bool {
 	case parser.NODE_NEW_EXPRESSION:
 		{
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
-				return current.Callee.Name == PROMISE_CTOR_NAME
+				return current.Callee.Name == native.PROMISE_CONSTRUCTOR_NAME
 			}
 		}
 	}

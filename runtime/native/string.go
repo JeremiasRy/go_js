@@ -11,11 +11,22 @@ type ObjString struct {
 	Value string
 }
 
+type LightString string
+
+func (LightString) Type() object.ObjType {
+	return object.OBJ_STRING
+}
+
+func (str LightString) String() string {
+	return string(str)
+}
+
 func NewObjString(str string) *ObjString {
 	objStr := &ObjString{
 		Value: str,
 	}
-	objStr.Hash = map[string]ObjectValueEntry{}
+	objStr.Members = map[string]ObjectValueEntry{}
+	objStr.SetMember(KEY_PROTO, PROTOTYPE_STRING)
 
 	return objStr
 }
@@ -29,40 +40,34 @@ func (str *ObjString) String() string {
 }
 
 type StringToUpperCase struct {
+	InstanceMethod
 	ObjNativeFn
-	owner *ObjString
 }
 
-func NewStringToUpperCase(owner *ObjString) *StringToUpperCase {
-	toUpperCase := &StringToUpperCase{
-		owner: owner,
-	}
-
+func NewStringToUpperCase() *StringToUpperCase {
+	toUpperCase := &StringToUpperCase{}
 	toUpperCase.name = "toUpperCase"
-
 	return toUpperCase
 }
 
-func (toUpperCase *StringToUpperCase) ToUpperCase() *ObjString {
-	return NewObjString(strings.ToUpper(toUpperCase.owner.Value))
+func (toUpperCase *StringToUpperCase) ToUpperCase(owner *ObjString) *ObjString {
+	return NewObjString(strings.ToUpper(owner.Value))
 }
 
 type StringIncludes struct {
+	InstanceMethod
 	ObjNativeFn
-	owner *ObjString
 }
 
-func NewStringIncludes(owner *ObjString) *StringIncludes {
-	fn := &StringIncludes{
-		owner: owner,
-	}
+func NewStringIncludes() *StringIncludes {
+	fn := &StringIncludes{}
 
 	fn.name = "includes"
 	return fn
 }
 
-func (includes *StringIncludes) Includes(str string) value.Value {
-	if strings.Contains(includes.owner.Value, str) {
+func (*StringIncludes) Includes(owner *ObjString, str string) value.Value {
+	if strings.Contains(owner.Value, str) {
 		return value.EncodeTrue()
 	}
 	return value.EncodeFalse()

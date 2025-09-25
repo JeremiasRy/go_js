@@ -1,7 +1,7 @@
 package native
 
 import (
-	eventloop "go_js/eventLoop"
+	"go_js/eventloop"
 	"go_js/object"
 	"go_js/value"
 )

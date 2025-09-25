@@ -13,13 +13,14 @@ type ObjArr struct {
 
 func NewObjArr(length int) *ObjArr {
 	arrObj := &ObjArr{items: make([]value.Value, 0, length)}
-	arrObj.Hash = make(map[string]ObjectValueEntry)
+	arrObj.Members = map[string]ObjectValueEntry{}
+
+	arrObj.SetMember(KEY_PROTO, PROTOTYPE_ARRAY)
 
 	return arrObj
 }
 
 func (oa *ObjArr) GetMember(k value.Value) value.Value {
-
 	if k.IsObject() {
 		obj, err := allocator.GetObject(k.GetHandle())
 
@@ -27,32 +28,53 @@ func (oa *ObjArr) GetMember(k value.Value) value.Value {
 			panic("coundn't receive object from allocator")
 		}
 
-		if str, ok := obj.(*ObjString); ok {
-			if v, found := oa.Hash[str.Value]; found {
+		if obj.Type() == object.OBJ_STRING {
+			key := obj.String()
+
+			if v, found := oa.Members[key]; found {
+
 				return v.Value
-			} else {
-				return value.EncodedUndefined()
 			}
+
+			proto := oa.GetMember(KEY_PROTO)
+			protoObj, err := allocator.GetObject(proto.GetHandle())
+
+			if err != nil {
+				panic("couldnt get prototype from object")
+			}
+
+			if protoObj, ok := protoObj.(*Prototype); ok {
+				return protoObj.GetMember(k)
+			}
+
 		}
 	}
 	return oa.GetElementAt(int(k.AsNumber()))
 }
 
-func (oa *ObjArr) SetMember(m, v value.Value) {
-	if m.IsObject() {
-		obj, err := allocator.GetObject(m.GetHandle())
+func (oa *ObjArr) SetMember(k, v value.Value) {
+	if k.IsObject() {
+		obj, err := allocator.GetObject(k.GetHandle())
 
 		if err != nil {
 			panic("coundn't receive object from allocator")
 		}
 
-		if str, ok := obj.(*ObjString); ok {
-			oa.Hash[str.Value] = oa.NewValueEntry(v)
+		if obj.Type() == object.OBJ_STRING {
+			key := obj.String()
+
+			if entry, ok := oa.Members[key]; ok {
+				entry.Value = v
+				oa.Members[key] = entry
+			} else {
+
+				oa.Members[key] = oa.NewValueEntry(v)
+			}
 			return
 		}
 	}
 
-	oa.items[int(m.AsNumber())] = v
+	oa.items[int(k.AsNumber())] = v
 }
 
 func (oa *ObjArr) GetElementAt(i int) value.Value {
@@ -61,7 +83,12 @@ func (oa *ObjArr) GetElementAt(i int) value.Value {
 
 func (oa *ObjArr) PushElement(v value.Value) {
 	oa.items = append(oa.items, v)
-	oa.Hash["length"] = oa.NewValueEntry(value.ValueFromFloat64(float64(len(oa.items))))
+	prevLength := oa.GetMember(KEY_LENGTH)
+
+	num := prevLength.AsNumber()
+	num += 1
+
+	oa.SetMember(KEY_LENGTH, value.ValueFromFloat64(num))
 }
 
 func (oa *ObjArr) Type() object.ObjType {
@@ -86,61 +113,61 @@ func (oa *ObjArr) Keys() []value.Value {
 }
 
 type ArrayForEach struct {
+	InstanceMethod
 	ObjNativeFn
-	Owner *ObjArr
 }
 
-func NewArrayForEach(owner *ObjArr) *ArrayForEach {
-	f := &ArrayForEach{Owner: owner}
+func NewArrayForEach() *ArrayForEach {
+	f := &ArrayForEach{}
 	f.name = "forEach"
 	return f
 }
 
 type ArrayPush struct {
+	InstanceMethod
 	ObjNativeFn
-	owner *ObjArr
 }
 
-func NewArrayPush(owner *ObjArr) *ArrayPush {
-	p := &ArrayPush{owner: owner}
+func NewArrayPush() *ArrayPush {
+	p := &ArrayPush{}
 	p.name = "push"
 	return p
 }
 
-func (p *ArrayPush) Push(v value.Value) value.Value {
-	p.owner.PushElement(v)
-	return p.owner.Hash["length"].Value
+func (p *ArrayPush) Push(owner *ObjArr, v value.Value) value.Value {
+	owner.PushElement(v)
+	return owner.Members["length"].Value
 }
 
 type ArrayFilter struct {
+	InstanceMethod
 	ObjNativeFn
-	Owner *ObjArr
 }
 
-func NewArrayFilter(owner *ObjArr) *ArrayFilter {
-	f := &ArrayFilter{Owner: owner}
+func NewArrayFilter() *ArrayFilter {
+	f := &ArrayFilter{}
 	f.name = "filter"
 	return f
 }
 
 type ArrayMap struct {
+	InstanceMethod
 	ObjNativeFn
-	Owner *ObjArr
 }
 
-func NewArrayMap(owner *ObjArr) *ArrayMap {
-	m := &ArrayMap{Owner: owner}
+func NewArrayMap() *ArrayMap {
+	m := &ArrayMap{}
 	m.name = "map"
 	return m
 }
 
 type ArrayReduce struct {
+	InstanceMethod
 	ObjNativeFn
-	Owner *ObjArr
 }
 
-func NewArrayReduce(owner *ObjArr) *ArrayReduce {
-	r := &ArrayReduce{Owner: owner}
+func NewArrayReduce() *ArrayReduce {
+	r := &ArrayReduce{}
 	r.name = "reduce"
 	return r
 }

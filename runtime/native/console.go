@@ -20,8 +20,11 @@ func (*Console) String() string {
 
 func NewObjectConsole() *Console {
 	c := &Console{}
-	c.Hash = map[string]ObjectValueEntry{}
+	c.Members = map[string]ObjectValueEntry{}
+	c.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
-	c.Hash["log"] = c.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewLog())))
+	log := value.EncodeHandle(allocator.Allocate(LightString("log")))
+
+	c.SetMember(log, value.EncodeHandle(allocator.Allocate(NewLog())))
 	return c
 }

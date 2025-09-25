@@ -5,7 +5,7 @@ import (
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"
-	eventloop "go_js/eventLoop"
+	"go_js/eventloop"
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
@@ -200,6 +200,7 @@ func (vm *VM) run() (value.Value, error) {
 	frame := vm.currentFrame()
 	valueChunk := *frame.fn.ValueChunk()
 	ip := 0
+
 	var argCount uint8
 
 	if promise, ok := frame.fn.(*native.ObjAsyncFunction); ok {
@@ -578,14 +579,26 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				member := vm.pop()
 				hash := vm.pop()
-				obj, err := allocator.GetObject(hash.GetHandle())
+				objObject, err := allocator.GetObject(hash.GetHandle())
 
 				if err != nil {
 					return value.EncodedUndefined(), err
 				}
 
-				if obj, ok := obj.(object.Hashable); ok {
-					value := obj.GetMember(member)
+				if object, ok := objObject.(object.Hashable); ok {
+					value := object.GetMember(member)
+
+					if value.IsObject() {
+						member, err := allocator.GetObject(value.GetHandle())
+
+						if err != nil {
+							continue
+						}
+
+						if _, ok := member.(native.Instancer); ok {
+							value = native.NewMethodHandle(objObject, member)
+						}
+					}
 					vm.push(value)
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("cant get property: %s from: %v", stringer.String(member), hash)
@@ -598,227 +611,196 @@ func (vm *VM) run() (value.Value, error) {
 		case chunk.OP_CALL:
 			{
 				callee := vm.pop()
-				isObject, handle := object.IsValueObject(callee)
 
-				if isObject {
-					obj, err := allocator.GetObject(handle)
+				if callee.IsObject() {
+					callee, err := allocator.GetObject(callee.GetHandle())
 
 					if err != nil {
 						return value.EncodedUndefined(), err
 					}
 
-					switch fn := obj.(type) {
-					case *native.ObjAsyncFunction:
+					switch fn := callee.(type) {
+					case *native.MethodHandle:
 						{
-							if !fn.ReturnArgumentIsPromise {
-								promise := native.NewPromise()
-								fn.SetPromise(promise)
-								handle := allocator.Allocate(promise)
-								vm.push(value.EncodeHandle(handle))
-							}
+							thisCtx := fn.ThisContext
+							callee := fn.Function
 
-							vm.Call(fn.Clone(), ip)
-							frame = vm.currentFrame()
-							valueChunk = *frame.fn.ValueChunk()
-							ip = 0
-							frame.localStart -= int(argCount)
-						}
-					case object.Callable:
-						{
-							vm.Call(fn, ip)
-							frame = vm.currentFrame()
-							valueChunk = *frame.fn.ValueChunk()
-							ip = 0
-							frame.localStart -= int(argCount)
-						}
-					case *native.Log:
-						{
-							arg := vm.pop()
-							vm.log(arg)
-							vm.push(value.EncodedUndefined())
-						}
-					case *native.Clock:
-						{
-							vm.push(fn.Clock())
-						}
-					case *native.ArrayPush:
-						{
-							arg := vm.pop()
-							vm.push(fn.Push(arg))
-						}
-					case *native.ArrayForEach:
-						{
-							callback := vm.pop()
-							iterator := object.NewValueIterator(fn.Owner)
-							done := iterator.Next()
-
-							obj, err := allocator.GetObject(callback.GetHandle())
-
-							if err != nil {
-								return value.EncodedUndefined(), err
-							}
-							runner := NewVM(vm.debug)
-							if fn, ok := obj.(*object.ObjFunction); ok {
-								for !done {
-
-									item := iterator.Current()
-									runner.push(item)
-									runner.Call(fn, 0)
-									runner.run()
-									done = iterator.Next()
+							switch method := callee.(type) {
+							case *native.ArrayPush:
+								{
+									arg := vm.pop()
+									vm.push(method.Push(thisCtx.(*native.ObjArr), arg))
 								}
-							} else {
-								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
-							}
+							case *native.ArrayForEach:
+								{
+									callback := vm.pop()
+									iterator := object.NewValueIterator(thisCtx.(object.Iterable))
+									done := iterator.Next()
 
-							vm.push(value.EncodedUndefined())
-						}
-					case *native.ArrayFilter:
-						{
-							callback := vm.pop()
-							iterator := object.NewValueIterator(fn.Owner)
-							done := iterator.Next()
+									obj, err := allocator.GetObject(callback.GetHandle())
 
-							obj, err := allocator.GetObject(callback.GetHandle())
+									if err != nil {
+										return value.EncodedUndefined(), err
+									}
+									runner := NewVM(vm.debug)
+									if fn, ok := obj.(*object.ObjFunction); ok {
+										for !done {
 
-							if err != nil {
-								return value.EncodedUndefined(), err
-							}
+											item := iterator.Current()
+											runner.push(item)
+											runner.Call(fn, 0)
+											runner.run()
+											done = iterator.Next()
+										}
+									} else {
+										return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
+									}
 
-							arr := []value.Value{}
-							runner := NewVM(vm.debug)
-							if fn, ok := obj.(*object.ObjFunction); ok {
-								for !done {
+									vm.push(value.EncodedUndefined())
+								}
+							case *native.ArrayFilter:
+								{
+									callback := vm.pop()
+									iterator := object.NewValueIterator(thisCtx.(object.Iterable))
+									done := iterator.Next()
 
-									item := iterator.Current()
-									runner.push(item)
-									runner.Call(fn, 0)
-									result, err := runner.run()
+									obj, err := allocator.GetObject(callback.GetHandle())
 
 									if err != nil {
 										return value.EncodedUndefined(), err
 									}
 
-									if result.AsBoolean() {
-										arr = append(arr, item)
+									arr := []value.Value{}
+									runner := NewVM(vm.debug)
+									if fn, ok := obj.(*object.ObjFunction); ok {
+										for !done {
+
+											item := iterator.Current()
+											runner.push(item)
+											runner.Call(fn, 0)
+											result, err := runner.run()
+
+											if err != nil {
+												return value.EncodedUndefined(), err
+											}
+
+											if result.AsBoolean() {
+												arr = append(arr, item)
+											}
+
+											done = iterator.Next()
+										}
+									} else {
+										return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
+									}
+									length := len(arr)
+									objArr := native.NewArray(length)
+
+									for _, item := range arr {
+										objArr.PushElement(item)
 									}
 
-									done = iterator.Next()
+									v := value.EncodeHandle(allocator.Allocate(objArr))
+									vm.push(v)
 								}
-							} else {
-								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
-							}
-							length := len(arr)
-							objArr := native.NewArray(length)
+							case *native.ArrayMap:
+								{
+									callback := vm.pop()
+									iterator := object.NewValueIterator(thisCtx.(object.Iterable))
+									done := iterator.Next()
 
-							for _, item := range arr {
-								objArr.PushElement(item)
-							}
-
-							v := value.EncodeHandle(allocator.Allocate(objArr))
-							vm.push(v)
-						}
-					case *native.ArrayMap:
-						{
-							callback := vm.pop()
-							iterator := object.NewValueIterator(fn.Owner)
-							done := iterator.Next()
-
-							obj, err := allocator.GetObject(callback.GetHandle())
-
-							if err != nil {
-								return value.EncodedUndefined(), err
-							}
-
-							arr := []value.Value{}
-							runner := NewVM(vm.debug)
-							if fn, ok := obj.(*object.ObjFunction); ok {
-								for !done {
-
-									item := iterator.Current()
-									runner.push(item)
-									runner.Call(fn, 0)
-									result, err := runner.run()
+									obj, err := allocator.GetObject(callback.GetHandle())
 
 									if err != nil {
 										return value.EncodedUndefined(), err
 									}
 
-									arr = append(arr, result)
-									done = iterator.Next()
+									arr := []value.Value{}
+									runner := NewVM(vm.debug)
+									if fn, ok := obj.(*object.ObjFunction); ok {
+										for !done {
+
+											item := iterator.Current()
+											runner.push(item)
+											runner.Call(fn, 0)
+											result, err := runner.run()
+
+											if err != nil {
+												return value.EncodedUndefined(), err
+											}
+
+											arr = append(arr, result)
+											done = iterator.Next()
+										}
+									} else {
+										return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
+									}
+									length := len(arr)
+									objArr := native.NewArray(length)
+
+									for _, item := range arr {
+										objArr.PushElement(item)
+									}
+
+									v := value.EncodeHandle(allocator.Allocate(objArr))
+									vm.push(v)
 								}
-							} else {
-								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
-							}
-							length := len(arr)
-							objArr := native.NewArray(length)
+							case *native.ArrayReduce:
+								{
+									initialValue := vm.pop()
+									callback := vm.pop()
+									iterator := object.NewValueIterator(thisCtx.(object.Iterable))
+									done := iterator.Next()
 
-							for _, item := range arr {
-								objArr.PushElement(item)
-							}
-
-							v := value.EncodeHandle(allocator.Allocate(objArr))
-							vm.push(v)
-						}
-					case *native.ArrayReduce:
-						{
-							initialValue := vm.pop()
-							callback := vm.pop()
-							iterator := object.NewValueIterator(fn.Owner)
-							done := iterator.Next()
-
-							obj, err := allocator.GetObject(callback.GetHandle())
-
-							if err != nil {
-								return value.EncodedUndefined(), err
-							}
-
-							runner := NewVM(vm.debug)
-							if fn, ok := obj.(*object.ObjFunction); ok {
-								for !done {
-									item := iterator.Current()
-									runner.push(initialValue)
-									runner.push(item)
-									runner.Call(fn, 0)
-									result, err := runner.run()
+									obj, err := allocator.GetObject(callback.GetHandle())
 
 									if err != nil {
 										return value.EncodedUndefined(), err
 									}
 
-									initialValue = result
-									done = iterator.Next()
+									runner := NewVM(vm.debug)
+									if fn, ok := obj.(*object.ObjFunction); ok {
+										for !done {
+											item := iterator.Current()
+											runner.push(initialValue)
+											runner.push(item)
+											runner.Call(fn, 0)
+											result, err := runner.run()
+
+											if err != nil {
+												return value.EncodedUndefined(), err
+											}
+
+											initialValue = result
+											done = iterator.Next()
+										}
+									} else {
+										return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
+									}
+									vm.push(initialValue)
 								}
-							} else {
-								return value.EncodedUndefined(), fmt.Errorf("callback was not a function %s", stringer.String(callback))
-							}
-							vm.push(initialValue)
-						}
-					case *native.StringToUpperCase:
-						{
-							vm.push(value.EncodeHandle(allocator.Allocate(fn.ToUpperCase())))
-						}
-					case *native.StringIncludes:
-						{
-							arg := vm.pop()
-							vm.push(fn.Includes(stringer.String(arg)))
-						}
-					case *native.SetTimeout:
-						{
-							ms := vm.pop().AsNumber()
-							callback := vm.pop()
+							case *native.StringToUpperCase:
+								{
+									vm.push(value.EncodeHandle(allocator.Allocate(method.ToUpperCase(thisCtx.(*native.ObjString)))))
+								}
+							case *native.StringIncludes:
+								{
+									arg := vm.pop()
+									vm.push(method.Includes(thisCtx.(*native.ObjString), stringer.String(arg)))
+								}
 
-							handle := callback.GetHandle()
-							obj, err := allocator.GetObject(handle)
+							case *native.ToString:
+								{
+									handle := allocator.Allocate(native.NewObjString(method.ToString(thisCtx)))
+									vm.push(value.EncodeHandle(handle))
+								}
+							case *native.Log:
+								{
+									arg := vm.pop()
 
-							if err != nil {
-								return value.EncodedUndefined(), err
-							}
-
-							if callback, ok := obj.(*object.ObjFunction); ok {
-								fn.Set(int(ms), callback)
-								eventloop.Dispatch(fn.Clone())
-								vm.push(value.EncodedUndefined())
+									vm.log(arg)
+									vm.push(value.EncodedUndefined())
+								}
 							}
 						}
 					case *native.ObjectKeys:
@@ -859,6 +841,52 @@ func (vm *VM) run() (value.Value, error) {
 
 							v := vm.pop()
 							fn.Resolve(v)
+						}
+					case *native.SetTimeout:
+						{
+							ms := vm.pop().AsNumber()
+							callback := vm.pop()
+
+							handle := callback.GetHandle()
+							obj, err := allocator.GetObject(handle)
+
+							if err != nil {
+								return value.EncodedUndefined(), err
+							}
+
+							if callback, ok := obj.(*object.ObjFunction); ok {
+								fn.Set(int(ms), callback)
+								eventloop.Dispatch(fn.Clone())
+								vm.push(value.EncodedUndefined())
+							}
+						}
+					case *native.ObjAsyncFunction:
+						{
+							if !fn.ReturnArgumentIsPromise {
+								promise := native.NewPromise()
+								fn.SetPromise(promise)
+								handle := allocator.Allocate(promise)
+								vm.push(value.EncodeHandle(handle))
+							}
+
+							vm.Call(fn.Clone(), ip)
+							frame = vm.currentFrame()
+							valueChunk = *frame.fn.ValueChunk()
+							ip = 0
+							frame.localStart -= int(argCount)
+						}
+					case object.Callable:
+						{
+							vm.Call(fn, ip)
+							frame = vm.currentFrame()
+							valueChunk = *frame.fn.ValueChunk()
+							ip = 0
+							frame.localStart -= int(argCount)
+						}
+
+					case *native.Clock:
+						{
+							vm.push(fn.Clock())
 						}
 
 					}
