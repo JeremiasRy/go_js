@@ -240,7 +240,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_EXPRESSION_STATEMENT:
 		prePass(current.Expression, symbolTable)
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
-		if variable, _ := symbolTable.findVariable(current.Left.Name); variable == nil {
+		if variable, _ := symbolTable.findVariable(current.Left.Name); current.Left.Type != parser.NODE_MEMBER_EXPRESSION && variable == nil {
 			symbolTable.addVariable(current.Left.Name, LET, true, nil)
 		}
 		prePass(current.Left, symbolTable)

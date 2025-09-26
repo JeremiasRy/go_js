@@ -69,7 +69,7 @@ func main() {
 			continue
 		}
 		name := script.Name()
-		fmt.Printf("%-32s %2d/%d... ", name, nth+1, len(expected))
+		fmt.Printf("%-50s %2d/%d... ", name, nth+1, len(expected))
 
 		if err != nil {
 			log.Fatalf("failed to read script order number %s", err)

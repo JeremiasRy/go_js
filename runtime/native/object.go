@@ -5,6 +5,7 @@ import (
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
+	"strconv"
 )
 
 type MethodHandle struct {
@@ -95,7 +96,26 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 		}
 	}
 
-	// todo: should string intern everything to our Hash i.e obj[true] = 23, obj[23] = true
+	if k.IsNumber() {
+		key := strconv.FormatFloat(k.AsNumber(), 'f', -1, 64)
+
+		if v, found := obj.Members[key]; found {
+			return v.Value
+		}
+
+		proto := obj.Members[PROTOTYPE_KEY].Value
+		protoObj, err := allocator.GetObject(proto.GetHandle())
+
+		if err != nil {
+			panic("couldnt get prototype from object")
+		}
+
+		if protoObj, ok := protoObj.(*Prototype); ok {
+			return protoObj.GetMember(k)
+		}
+	}
+
+	// todo: should string intern everything to our Hash
 	return value.EncodedUndefined()
 }
 
@@ -115,6 +135,17 @@ func (obj *ObjObject) SetMember(k, v value.Value) {
 			} else {
 				obj.Members[key] = obj.NewValueEntry(v)
 			}
+		}
+	}
+
+	if k.IsNumber() {
+		key := strconv.FormatFloat(k.AsNumber(), 'f', -1, 64)
+
+		if entry, ok := obj.Members[key]; ok {
+			entry.Value = v
+			obj.Members[key] = entry
+		} else {
+			obj.Members[key] = obj.NewValueEntry(v)
 		}
 	}
 

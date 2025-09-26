@@ -83,7 +83,7 @@ func TypeDecoratedString(v value.Value) string {
 					c++
 					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
 					if l != c {
-						fmt.Fprint(&b, ",")
+						fmt.Fprint(&b, ", ")
 					}
 				}
 				fmt.Fprint(&b, " }")

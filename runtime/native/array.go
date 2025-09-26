@@ -1,7 +1,6 @@
 package native
 
 import (
-	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
 )
@@ -18,63 +17,6 @@ func NewObjArr(length int) *ObjArr {
 	arrObj.SetMember(KEY_PROTO, PROTOTYPE_ARRAY)
 
 	return arrObj
-}
-
-func (oa *ObjArr) GetMember(k value.Value) value.Value {
-	if k.IsObject() {
-		obj, err := allocator.GetObject(k.GetHandle())
-
-		if err != nil {
-			panic("coundn't receive object from allocator")
-		}
-
-		if obj.Type() == object.OBJ_STRING {
-			key := obj.String()
-
-			if v, found := oa.Members[key]; found {
-
-				return v.Value
-			}
-
-			proto := oa.GetMember(KEY_PROTO)
-			protoObj, err := allocator.GetObject(proto.GetHandle())
-
-			if err != nil {
-				panic("couldnt get prototype from object")
-			}
-
-			if protoObj, ok := protoObj.(*Prototype); ok {
-				return protoObj.GetMember(k)
-			}
-
-		}
-	}
-	return oa.GetElementAt(int(k.AsNumber()))
-}
-
-func (oa *ObjArr) SetMember(k, v value.Value) {
-	if k.IsObject() {
-		obj, err := allocator.GetObject(k.GetHandle())
-
-		if err != nil {
-			panic("coundn't receive object from allocator")
-		}
-
-		if obj.Type() == object.OBJ_STRING {
-			key := obj.String()
-
-			if entry, ok := oa.Members[key]; ok {
-				entry.Value = v
-				oa.Members[key] = entry
-			} else {
-
-				oa.Members[key] = oa.NewValueEntry(v)
-			}
-			return
-		}
-	}
-
-	oa.items[int(k.AsNumber())] = v
 }
 
 func (oa *ObjArr) GetElementAt(i int) value.Value {
@@ -136,7 +78,7 @@ func NewArrayPush() *ArrayPush {
 
 func (p *ArrayPush) Push(owner *ObjArr, v value.Value) value.Value {
 	owner.PushElement(v)
-	return owner.Members["length"].Value
+	return owner.GetMember(KEY_LENGTH)
 }
 
 type ArrayFilter struct {

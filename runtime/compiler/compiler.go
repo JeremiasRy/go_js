@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"cmp"
+	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/native"
@@ -84,6 +85,10 @@ var operatorMap = map[parser.BinaryOperator]uint8{
 	"&&":                      chunk.OP_LOGICAL_AND,
 }
 
+var unaryOperatorMap = map[parser.UnaryOperator]uint8{
+	parser.UNARY_NEGATE: chunk.OP_NEGATE,
+}
+
 func newBlockScope(parent *BlockScope) *BlockScope {
 	return &BlockScope{vars: Variables{}, parent: parent}
 }
@@ -163,7 +168,7 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	}
 
 	if _, found := mapToAddTo[name]; found {
-		// fmt.Printf("WARN: Already found variable %s from scope\n", name)
+		//fmt.Printf("WARN: Already found variable %s from scope\n", name)
 		return
 	}
 
@@ -189,6 +194,7 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 		block = block.parent
 	}
 
+	// nothing found check the function scope
 	for current != nil {
 		if variable, found := current.vars[name]; found {
 			return variable, current
@@ -310,7 +316,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
-			variable, _ := symbolTable.findVariable(current.Left.Name)
+			var variable *Variable
+			isMember := false
+
+			switch current.Left.Type {
+			case parser.NODE_MEMBER_EXPRESSION:
+				variable, _ = symbolTable.findVariable(current.Left.Object.Name)
+				isMember = true
+			default:
+				variable, _ = symbolTable.findVariable(current.Left.Name)
+
+			}
 
 			var defineOp uint8
 			var setOp uint8
@@ -337,24 +353,45 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 
-			switch current.AssignmentOperator {
-			case parser.ASSIGN:
-				{
-					generateByteCode(current.Right, symbolTable, fn)
+			if isMember {
+				setOp = chunk.OP_SET_OBJECT_MEMBER
+				fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
 
-					if variable.undeclared {
-						fn.ValueChunk().EmitByte(defineOp)
-						variable.undeclared = false
-					} else {
-						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+				switch current.AssignmentOperator {
+				case parser.ASSIGN:
+					{
+
+						if current.Left.Computed {
+							generateByteCode(current.Left.Property, symbolTable, fn)
+						} else {
+							str := native.LightString(current.Left.Property.Name)
+							handle := allocator.Allocate(str)
+							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+						}
+						generateByteCode(current.Right, symbolTable, fn)
+						fn.ValueChunk().EmitBytes(setOp, chunk.OP_POP)
 					}
 				}
-			case parser.PLUS_ASSIGN:
-				{
-					fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
-					generateByteCode(current.Right, symbolTable, fn)
-					fn.ValueChunk().EmitByte(chunk.OP_ADD)
-					fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+			} else {
+				switch current.AssignmentOperator {
+				case parser.ASSIGN:
+					{
+						generateByteCode(current.Right, symbolTable, fn)
+
+						if variable.undeclared {
+							fn.ValueChunk().EmitByte(defineOp)
+							variable.undeclared = false
+						} else {
+							fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+						}
+					}
+				case parser.PLUS_ASSIGN:
+					{
+						fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
+						generateByteCode(current.Right, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_ADD)
+						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+					}
 				}
 			}
 
@@ -589,6 +626,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					handle := allocator.Allocate(native.NewObjString(current.Property.Name))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
+			case parser.NODE_UNARY_EXPRESSION:
+				{
+					generateByteCode(current.Property, symbolTable, fn)
+				}
 			}
 			fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
 		}
@@ -725,7 +766,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
-				fn.ValueChunk().EmitBytes(chunk.OP_THROW)
+				key := value.EncodeHandle(allocator.Allocate(native.LightString("message")))
+				msg := value.EncodeHandle(allocator.Allocate(native.LightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
+
+				err := native.NewError()
+				err.SetMember(key, msg)
+
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(err)))
+				fn.ValueChunk().EmitByte(chunk.OP_THROW)
 				return
 			}
 
@@ -955,9 +1003,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			current = current.Handler
 
 			if current.Param != nil {
-				symbolTable.enterBlockScope(current.BodyNode)
-				generateByteCode(current.Param, symbolTable, fn)
-				symbolTable.exitBlockScope()
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 			} else {
 				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop thrown error value if param is not used
 			}
@@ -1032,6 +1078,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Argument, symbolTable, fn)
 			popStack = true
 			fn.ValueChunk().EmitByte(chunk.OP_AWAIT)
+		}
+	case parser.NODE_UNARY_EXPRESSION:
+		{
+			generateByteCode(current.Argument, symbolTable, fn)
+			fn.ValueChunk().EmitByte(unaryOperatorMap[current.UnaryOperator])
 		}
 	}
 }

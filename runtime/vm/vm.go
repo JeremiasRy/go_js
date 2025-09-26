@@ -428,6 +428,16 @@ func (vm *VM) run() (value.Value, error) {
 					vm.push(value.EncodeFalse())
 				}
 			}
+		case chunk.OP_NEGATE:
+			{
+				v := vm.pop()
+
+				if v.IsNumber() {
+					vm.push(value.ValueFromFloat64(-(v.AsNumber())))
+				} else {
+					return value.EncodedUndefined(), fmt.Errorf("no support for negating %s yet", stringer.String(v))
+				}
+			}
 		case chunk.OP_JUMP_IF_FALSE:
 			{
 				v := vm.pop()
@@ -585,6 +595,12 @@ func (vm *VM) run() (value.Value, error) {
 					return value.EncodedUndefined(), err
 				}
 
+				if arr, ok := objObject.(*native.ObjArr); ok && member.IsInteger() {
+					value := arr.GetElementAt(int(member.AsNumber()))
+					vm.push(value)
+					continue
+				}
+
 				if object, ok := objObject.(object.Hashable); ok {
 					value := object.GetMember(member)
 
@@ -620,6 +636,7 @@ func (vm *VM) run() (value.Value, error) {
 					}
 
 					switch fn := callee.(type) {
+					// MethodHandle means we have an instance method at hand
 					case *native.MethodHandle:
 						{
 							thisCtx := fn.ThisContext
@@ -803,6 +820,7 @@ func (vm *VM) run() (value.Value, error) {
 								}
 							}
 						}
+						// Static functions
 					case *native.ObjectKeys:
 						{
 							arg := vm.pop()

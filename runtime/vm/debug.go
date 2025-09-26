@@ -66,6 +66,7 @@ var opNames = map[uint8]string{
 	chunk.OP_STORE_ARG_COUNT:                 "OP_STORE_ARG_COUNT",
 	chunk.OP_AWAIT:                           "OP_AWAIT",
 	chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS: "OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS",
+	chunk.OP_NEGATE:                          "OP_NEGATE",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -84,6 +85,10 @@ func printFunction(c value.ValueChunk) {
 		}
 		code := opCode[ip]
 		switch code {
+		case chunk.OP_NEGATE:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_CONSTANT:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
