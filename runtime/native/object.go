@@ -84,6 +84,10 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 			}
 
 			proto := obj.Members[PROTOTYPE_KEY].Value
+
+			if proto.IsType(value.TAG_NIL) {
+				return value.EncodedUndefined()
+			}
 			protoObj, err := allocator.GetObject(proto.GetHandle())
 
 			if err != nil {
@@ -104,6 +108,11 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 		}
 
 		proto := obj.Members[PROTOTYPE_KEY].Value
+
+		if proto.IsType(value.TAG_NIL) {
+			return value.EncodedUndefined()
+		}
+
 		protoObj, err := allocator.GetObject(proto.GetHandle())
 
 		if err != nil {
