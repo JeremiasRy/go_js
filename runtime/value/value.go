@@ -115,7 +115,10 @@ func (v Value) IsBoolean() bool {
 }
 
 func (v Value) IsType(tag Value) bool {
-	return tag&v == tag
+	if tag == TAG_OBJ {
+		return v&TAG_OBJ == TAG_OBJ
+	}
+	return v == tag
 }
 
 func (v Value) IsNumber() bool {
