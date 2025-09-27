@@ -27,6 +27,7 @@ func NewObjString(str string) *ObjString {
 	}
 	objStr.Members = map[string]ObjectValueEntry{}
 	objStr.SetMember(KEY_PROTO, PROTOTYPE_STRING)
+	objStr.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(str))))
 
 	return objStr
 }
@@ -71,4 +72,9 @@ func (*StringIncludes) Includes(owner *ObjString, str string) value.Value {
 		return value.EncodeTrue()
 	}
 	return value.EncodeFalse()
+}
+
+type StringLength struct {
+	InstanceMethod
+	ObjNativeFn
 }

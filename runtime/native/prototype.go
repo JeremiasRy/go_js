@@ -14,12 +14,14 @@ const (
 	STRING_CONSTRUCTOR_NAME  string = "String"
 	PROMISE_CONSTRUCTOR_NAME string = "Promise"
 	ERROR_CONSTRUCTOR_NAME   string = "Error"
+	DATE_CONSTRUCTOR_NAME    string = "Date"
 )
 
 var (
 	PROTOTYPE_OBJECT value.Value
 	PROTOTYPE_ARRAY  value.Value
 	PROTOTYPE_STRING value.Value
+	PROTOTYPE_DATE   value.Value
 )
 
 type Prototype struct {
@@ -120,4 +122,18 @@ func initStringPrototype() {
 	p.SetMember(KEY_TOUPPERCASE, toUpperCase)
 
 	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
+}
+
+func initDatePrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_STRING")
+	}
+
+	p := &Prototype{
+		name: DATE_CONSTRUCTOR_NAME,
+	}
+
+	p.Members = map[string]ObjectValueEntry{}
+
+	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 }

@@ -1,4 +1,4 @@
-const numTrials = 10000;
+const numTrials = 1000000;
 let successCount = 0;
 const startTime = Date.now();
 

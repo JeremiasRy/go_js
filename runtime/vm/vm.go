@@ -912,11 +912,10 @@ func (vm *VM) run() (value.Value, error) {
 							ip = 0
 							frame.localStart -= int(argCount)
 						}
-					case *native.Clock:
+					case *native.Now:
 						{
-							vm.push(fn.Clock())
+							vm.push(fn.Now())
 						}
-
 					}
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(callee))

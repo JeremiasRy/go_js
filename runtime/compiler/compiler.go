@@ -272,6 +272,15 @@ func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	dateCtor := native.NewDateConstructor()
+	dateCtorHandle := allocator.Allocate(dateCtor)
+
+	symbolTable.addVariable(native.DATE_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(dateCtorHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
@@ -282,6 +291,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineErrorConstructor(main, symbolTable)
 	defineArrayConstructor(main, symbolTable)
 	definePromiseConstructor(main, symbolTable)
+	defineDateConstructor(main, symbolTable)
 
 	prePass(ast, symbolTable)
 	generateByteCode(ast, symbolTable, main)
@@ -896,6 +906,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+			count, _ := symbolTable.currentBlockVarCount()
+
+			for range count {
+				fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+			}
 
 			generateByteCode(current.Update, symbolTable, fn)
 
@@ -903,11 +918,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
 
 			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
-			count, _ := symbolTable.currentBlockVarCount()
-
-			for range count {
-				fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-			}
+			fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL) // pop initalizer var needs to be fixed...
 			symbolTable.exitBlockScope()
 
 		}
@@ -969,11 +980,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
+			prevPopstack := popStack
+			popStack = false
 			for _, property := range current.Properties {
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewObjString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
+			popStack = prevPopstack
 		}
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
