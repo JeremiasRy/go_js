@@ -58,4 +58,9 @@ const (
 	OP_AWAIT
 	OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS // op <amount> <...slot>; i.e OP_DEFINE_HEAP_VAR_FROM_PARAMS 2 0 3
 	OP_NEGATE
+	OP_CREATE_CLASS_START //  pops name from stack, creates empty ClassObj and prototype objects and pushes them to stack [ObjClass, Prototype]
+	OP_CREATE_CLASS_END
+	OP_PUSH_METHOD
+	OP_PUSH_PROPERTY
+	OP_THIS
 )

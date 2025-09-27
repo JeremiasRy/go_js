@@ -1,6 +1,7 @@
 package native
 
 import (
+	"fmt"
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
@@ -23,8 +24,7 @@ var (
 
 type Prototype struct {
 	ObjObject
-	parent *Prototype
-	name   string
+	name string
 }
 
 // somewhat ugly empty struct to recognize instance methods
@@ -42,18 +42,31 @@ func (p *Prototype) Name() string {
 	return p.name
 }
 
+func (p *Prototype) String() string {
+	return fmt.Sprintf("Prototype %s", p.name)
+}
+
 func (p *Prototype) Type() object.ObjType {
 	return object.OBJ_PROTOTYPE
 }
 
+func NewPrototype(name string) *Prototype {
+	p := &Prototype{
+		name: name,
+	}
+	p.Members = map[string]ObjectValueEntry{}
+
+	return p
+}
+
 func initObjectPrototype() {
 	p := &Prototype{
-		parent: nil,
-		name:   OBJECT_CONSTRUCTOR_NAME,
+		name: OBJECT_CONSTRUCTOR_NAME,
 	}
 	p.Members = map[string]ObjectValueEntry{}
 
 	handle := value.EncodeHandle(allocator.Allocate(NewToString()))
+	p.SetMember(KEY_PROTO, value.EncodeNil())
 
 	p.SetMember(KEY_TOSTRING, handle)
 
@@ -61,9 +74,11 @@ func initObjectPrototype() {
 }
 
 func initArrayPrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized before PROTOTYPE_ARRAY")
+	}
 	p := &Prototype{
-		parent: nil,
-		name:   ARRAY_CONSTRUCTOR_NAME,
+		name: ARRAY_CONSTRUCTOR_NAME,
 	}
 	p.Members = map[string]ObjectValueEntry{}
 
@@ -72,6 +87,8 @@ func initArrayPrototype() {
 	forEach := value.EncodeHandle(allocator.Allocate(NewArrayForEach()))
 	map_ := value.EncodeHandle(allocator.Allocate(NewArrayMap()))
 	reduce := value.EncodeHandle(allocator.Allocate(NewArrayReduce()))
+
+	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
 	p.SetMember(KEY_FILTER, filter)
 	p.SetMember(KEY_PUSH, push)
@@ -84,14 +101,20 @@ func initArrayPrototype() {
 }
 
 func initStringPrototype() {
-	p := &Prototype{
-		parent: nil,
-		name:   STRING_CONSTRUCTOR_NAME,
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_STRING")
 	}
+
+	p := &Prototype{
+		name: STRING_CONSTRUCTOR_NAME,
+	}
+
 	p.Members = map[string]ObjectValueEntry{}
 
 	includes := value.EncodeHandle(allocator.Allocate(NewStringIncludes()))
 	toUpperCase := value.EncodeHandle(allocator.Allocate(NewStringToUpperCase()))
+
+	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
 	p.SetMember(KEY_INCLUDES, includes)
 	p.SetMember(KEY_TOUPPERCASE, toUpperCase)

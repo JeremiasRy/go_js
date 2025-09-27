@@ -27,6 +27,8 @@ const (
 	OBJ_RESOLVE_FUNCTION
 	OBJ_PROTOTYPE
 	OBJ_METHOD_HANDLE
+	OBJ_CLASS
+	OBJ_CLASS_METHOD
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -65,4 +67,5 @@ type Callable interface {
 	GetHeapScope() int
 	SetHeapScope(scope int)
 	ReturnsPromise(v bool)
+	Clone() Callable
 }

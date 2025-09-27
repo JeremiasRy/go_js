@@ -23,7 +23,7 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 	}
 }
 
-func (fn *ObjFunction) Clone() *ObjFunction {
+func (fn *ObjFunction) Clone() Callable {
 	clone := *fn
 	return &clone
 }

@@ -23,6 +23,7 @@ const (
 	CONST VariableType = iota
 	LET
 	FUNCTION
+	METHOD
 	FOR
 	CATCH_PARAM
 )
@@ -33,6 +34,7 @@ const (
 	HEAP VariableScope = iota
 	LOCAL
 	GLOBAL
+	THIS
 )
 
 type Variable struct {
@@ -43,6 +45,8 @@ type Variable struct {
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
 	fn         object.Callable
 }
+
+var ThisVariable *Variable = &Variable{scope: THIS}
 
 type Variables map[string]*Variable
 type BlockScope struct {
@@ -316,13 +320,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
+
 			var variable *Variable
 			isMember := false
 
 			switch current.Left.Type {
 			case parser.NODE_MEMBER_EXPRESSION:
-				variable, _ = symbolTable.findVariable(current.Left.Object.Name)
 				isMember = true
+				if current.Left.Object.Type == parser.NODE_THIS_EXPRESSION {
+					variable = ThisVariable
+					break
+				}
+				variable, _ = symbolTable.findVariable(current.Left.Object.Name)
 			default:
 				variable, _ = symbolTable.findVariable(current.Left.Name)
 
@@ -351,16 +360,23 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					setOp = chunk.OP_SET_HEAP_VAR
 					getOp = chunk.OP_GET_HEAP_VAR
 				}
+			case THIS:
+				{
+					getOp = chunk.OP_THIS
+				}
 			}
 
 			if isMember {
 				setOp = chunk.OP_SET_OBJECT_MEMBER
-				fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
+				fn.ValueChunk().EmitByte(getOp)
+
+				if getOp != chunk.OP_THIS {
+					fn.ValueChunk().EmitByte(uint8(variable.slot))
+				}
 
 				switch current.AssignmentOperator {
 				case parser.ASSIGN:
 					{
-
 						if current.Left.Computed {
 							generateByteCode(current.Left.Property, symbolTable, fn)
 						} else {
@@ -632,6 +648,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 			fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+		}
+	case parser.NODE_THIS_EXPRESSION:
+		{
+			fn.ValueChunk().EmitByte(chunk.OP_THIS)
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
@@ -1083,6 +1103,55 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			generateByteCode(current.Argument, symbolTable, fn)
 			fn.ValueChunk().EmitByte(unaryOperatorMap[current.UnaryOperator])
+		}
+	case parser.NODE_CLASS_DECLARATION:
+		{
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(current.Identifier.Name))))
+			fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
+
+			generateByteCode(current.BodyNode, symbolTable, fn)
+
+			fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_END)
+			switch symbolTable.tableScope {
+			case GLOBAL:
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+			case LOCAL:
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			}
+		}
+	case parser.NODE_CLASS_BODY:
+		{
+			symbolTable = FUNCTION_SCOPES[current]
+			for _, node := range current.Body {
+				generateByteCode(node, symbolTable, fn)
+			}
+		}
+	case parser.NODE_METHOD_DEFINITION:
+		{
+			symbolTable = FUNCTION_SCOPES[current]
+			name := current.Key.Name
+
+			function := current.Value.(*parser.Node)
+			method := object.NewFunction(fmt.Sprintf("Class method %s", name), len(function.Params), nil)
+
+			for _, node := range function.BodyNode.Body {
+				generateByteCode(node, symbolTable, method)
+			}
+			if method.ValueChunk().Code[len(method.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+			}
+
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(method)))
+			fn.ValueChunk().EmitByte(chunk.OP_PUSH_METHOD)
+		}
+	case parser.NODE_PROPERTY_DEFINITION:
+		{
+			name := current.Key.Name
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(name))))
+			generateByteCode(current.Value.(*parser.Node), symbolTable, fn)
+
+			fn.ValueChunk().EmitByte(chunk.OP_PUSH_PROPERTY)
 		}
 	}
 }

@@ -19,7 +19,8 @@ func (onf *ObjNativeFn) String() string {
 
 func Init() {
 	createCommonHandles()
-	initArrayPrototype()
 	initObjectPrototype()
+
+	initArrayPrototype()
 	initStringPrototype()
 }

@@ -7,6 +7,7 @@ import (
 )
 
 var catchScope = false
+var classCompiler = false
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	if current == nil {
@@ -94,6 +95,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			symbolTable.addVariable(param.Name, LET, false, nil)
 		}
 		symbolTable.arity = len(current.Params)
+
 		if current.IsExpression {
 			prePass(current.BodyNode, symbolTable)
 		} else {
@@ -180,6 +182,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		if catchScope && variable == nil {
 			symbolTable.addVariable(current.Name, LET, true, nil)
+			return
+		}
+
+		if classCompiler && variable == nil {
+			symbolTable.addVariable(current.Name, LET, false, nil)
 			return
 		}
 
@@ -289,6 +296,37 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_AWAIT_EXPRESSION:
 		{
 			prePass(current.Argument, symbolTable)
+		}
+	case parser.NODE_CLASS_DECLARATION:
+		{
+			classCompiler = true
+			symbolTable.addVariable(current.Identifier.Name, CONST, false, nil)
+			prePass(current.BodyNode, symbolTable)
+			classCompiler = false
+		}
+	case parser.NODE_CLASS_BODY:
+		{
+			symbolTable := newFunctionScope(symbolTable, LOCAL)
+			FUNCTION_SCOPES[current] = symbolTable
+
+			for _, node := range current.Body {
+				prePass(node, symbolTable)
+			}
+		}
+	case parser.NODE_METHOD_DEFINITION:
+		{
+			symbolTable := newFunctionScope(symbolTable, LOCAL)
+			FUNCTION_SCOPES[current] = symbolTable
+
+			function := current.Value.(*parser.Node)
+
+			for _, node := range function.Params {
+				prePass(node, symbolTable)
+			}
+
+			for _, node := range function.BodyNode.Body {
+				prePass(node, symbolTable)
+			}
 		}
 	}
 

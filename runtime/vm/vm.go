@@ -25,18 +25,16 @@ var heapScopesCount int
 
 type CallFrame struct {
 	fn         object.Callable
+	thisCtx    value.Value
 	localStart int
 	returnIp   int
 }
 
-func NewCallFrame(fn object.Callable, localStart int) *CallFrame {
-	return &CallFrame{fn: fn, localStart: localStart, returnIp: 0}
-}
-
-func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp int) {
+func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp int, this value.Value) {
 	cf.fn = fn
 	cf.localStart = localStart
 	cf.returnIp = returnIp
+	cf.thisCtx = this
 }
 
 type VM struct {
@@ -55,14 +53,14 @@ func NewVM(debug bool) *VM {
 	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}, debug: debug}
 }
 
-func (vm *VM) Call(fn object.Callable, returnIp int) error {
+func (vm *VM) Call(fn object.Callable, returnIp int, this value.Value) error {
 	if vm.frameCount == FRAMES_MAX {
 		return fmt.Errorf("too many callframes")
 	}
 
 	localStart := max(vm.stackTop-fn.GetArity(), 0)
 
-	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnIp)
+	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnIp, this)
 	vm.frameCount++
 	return nil
 }
@@ -158,13 +156,17 @@ func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	return value.EncodeHandle(allocator.Allocate(objStr))
 }
 
+func (vm *VM) peekN(i int) value.Value {
+	return vm.stack[vm.stackTop-(i+1)]
+}
+
 func (vm *VM) Run(wg *sync.WaitGroup) {
 	wg.Add(1)
 Run:
 	fn := queue.Dequeue()
 	for fn != nil {
 
-		vm.Call(fn, 0)
+		vm.Call(fn, 0, value.EncodedUndefined())
 		vm.run()
 
 		fn = queue.Dequeue()
@@ -643,6 +645,15 @@ func (vm *VM) run() (value.Value, error) {
 							callee := fn.Function
 
 							switch method := callee.(type) {
+							case *native.Method:
+								{
+									this := value.EncodeHandle(allocator.Allocate(thisCtx))
+									vm.Call(method.Fn, ip, this)
+									frame = vm.currentFrame()
+									valueChunk = *frame.fn.ValueChunk()
+									ip = 0
+									frame.localStart -= int(argCount)
+								}
 							case *native.ArrayPush:
 								{
 									arg := vm.pop()
@@ -665,7 +676,7 @@ func (vm *VM) run() (value.Value, error) {
 
 											item := iterator.Current()
 											runner.push(item)
-											runner.Call(fn, 0)
+											runner.Call(fn, 0, value.EncodedUndefined())
 											runner.run()
 											done = iterator.Next()
 										}
@@ -694,7 +705,7 @@ func (vm *VM) run() (value.Value, error) {
 
 											item := iterator.Current()
 											runner.push(item)
-											runner.Call(fn, 0)
+											runner.Call(fn, 0, value.EncodedUndefined())
 											result, err := runner.run()
 
 											if err != nil {
@@ -739,7 +750,7 @@ func (vm *VM) run() (value.Value, error) {
 
 											item := iterator.Current()
 											runner.push(item)
-											runner.Call(fn, 0)
+											runner.Call(fn, 0, value.EncodedUndefined())
 											result, err := runner.run()
 
 											if err != nil {
@@ -781,7 +792,7 @@ func (vm *VM) run() (value.Value, error) {
 											item := iterator.Current()
 											runner.push(initialValue)
 											runner.push(item)
-											runner.Call(fn, 0)
+											runner.Call(fn, 0, value.EncodedUndefined())
 											result, err := runner.run()
 
 											if err != nil {
@@ -887,7 +898,7 @@ func (vm *VM) run() (value.Value, error) {
 								vm.push(value.EncodeHandle(handle))
 							}
 
-							vm.Call(fn.Clone(), ip)
+							vm.Call(fn.Clone(), ip, value.EncodedUndefined())
 							frame = vm.currentFrame()
 							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
@@ -895,13 +906,12 @@ func (vm *VM) run() (value.Value, error) {
 						}
 					case object.Callable:
 						{
-							vm.Call(fn, ip)
+							vm.Call(fn, ip, value.EncodedUndefined())
 							frame = vm.currentFrame()
 							valueChunk = *frame.fn.ValueChunk()
 							ip = 0
 							frame.localStart -= int(argCount)
 						}
-
 					case *native.Clock:
 						{
 							vm.push(fn.Clock())
@@ -928,6 +938,9 @@ func (vm *VM) run() (value.Value, error) {
 					if vm.frameCount <= 0 {
 						vm.stackTop = 0
 
+						if vm.debug {
+							fmt.Println("--")
+						}
 						return value, nil
 					}
 
@@ -948,6 +961,9 @@ func (vm *VM) run() (value.Value, error) {
 					if vm.frameCount <= 0 {
 						vm.stackTop = 0
 
+						if vm.debug {
+							fmt.Println("--")
+						}
 						return value, nil
 					}
 
@@ -1137,6 +1153,36 @@ func (vm *VM) run() (value.Value, error) {
 				}
 
 				switch ctor := obj.(type) {
+				case *native.ObjClass:
+					{
+						instance := ctor.NewInstance()
+						ctor := instance.GetMember(native.KEY_CTOR)
+
+						obj, err := allocator.GetObject(ctor.GetHandle())
+
+						if err != nil {
+							return value.EncodedUndefined(), fmt.Errorf("contructor was not an object %s", stringer.String(ctor))
+						}
+
+						if constructor, ok := obj.(*native.Method); ok {
+							builder := NewVM(vm.debug)
+							fn := object.NewFunction("builder", 0, nil)
+							fn.ValueChunk().EmitBytes(chunk.OP_CALL, chunk.OP_RETURN)
+
+							for _, v := range vm.popN(constructor.Fn.GetArity()) {
+								builder.push(v)
+							}
+
+							builder.push(native.NewMethodHandle(instance, constructor))
+							builder.Call(fn, 0, value.EncodedUndefined())
+							builder.run()
+
+							vm.push(value.EncodeHandle(allocator.Allocate(instance)))
+						} else {
+							return value.EncodedUndefined(), fmt.Errorf("contructor was not an function %s", stringer.String(ctor))
+						}
+
+					}
 				case native.Constructor:
 					{
 						args := vm.popN(int(argCount))
@@ -1171,7 +1217,7 @@ func (vm *VM) run() (value.Value, error) {
 
 						if executor, ok := executor.(object.Callable); ok {
 							runner := NewVM(vm.debug)
-							runner.Call(executor, 0)
+							runner.Call(executor, 0, value.EncodedUndefined())
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run()
 						}
@@ -1261,6 +1307,91 @@ func (vm *VM) run() (value.Value, error) {
 				for _, v := range locals {
 					vm.push(v)
 				}
+			}
+		case chunk.OP_CREATE_CLASS_START:
+			{
+				name := vm.pop()
+
+				if n, err := allocator.GetObject(name.GetHandle()); err == nil && n.Type() == object.OBJ_STRING {
+					name := n.String()
+
+					class := native.NewObjClass(name)
+					proto := native.NewPrototype(name)
+
+					vm.push(value.EncodeHandle(allocator.Allocate(class)))
+					vm.push(value.EncodeHandle(allocator.Allocate(proto)))
+				} else {
+					return value.EncodedUndefined(), fmt.Errorf("%s is not a string", stringer.String(name))
+				}
+			}
+		case chunk.OP_CREATE_CLASS_END:
+			{
+				proto := vm.pop()
+				class := vm.peek()
+
+				classObj, _ := allocator.GetObject(class.GetHandle())
+				protoObj, _ := allocator.GetObject(proto.GetHandle())
+
+				classObj.(*native.ObjClass).SetPrototype(protoObj.(*native.Prototype))
+			}
+		case chunk.OP_PUSH_METHOD:
+			{
+				method := vm.pop()
+
+				methodObj, err := allocator.GetObject(method.GetHandle())
+
+				if err != nil {
+					return value.EncodedUndefined(), fmt.Errorf("%s was not an object", stringer.String(method))
+				}
+
+				if m, ok := methodObj.(object.Callable); ok {
+					if m.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+						m = m.Clone()
+					}
+					method = value.EncodeHandle(allocator.Allocate(native.NewMethod(m)))
+				} else {
+					return value.EncodedUndefined(), fmt.Errorf("%s was not an function", stringer.String(method))
+				}
+
+				key := vm.pop()
+
+				prototype := vm.peek()
+
+				protoObj, err := allocator.GetObject(prototype.GetHandle())
+
+				if err != nil {
+					return value.EncodedUndefined(), fmt.Errorf("%s was not an object", stringer.String(prototype))
+				}
+
+				if p, ok := protoObj.(*native.Prototype); ok {
+					p.SetMember(key, method)
+				} else {
+					return value.EncodedUndefined(), fmt.Errorf("%s was not an prototype", stringer.String(prototype))
+				}
+			}
+		case chunk.OP_PUSH_PROPERTY:
+			{
+				v := vm.pop()
+				k := vm.pop()
+
+				class := vm.peekN(1)
+
+				classObj, err := allocator.GetObject(class.GetHandle())
+
+				if err != nil {
+					return value.EncodedUndefined(), fmt.Errorf("%s was not an object", stringer.String(class))
+				}
+
+				if c, ok := classObj.(*native.ObjClass); ok {
+					c.PushProperty(k, v)
+				} else {
+					return value.EncodedUndefined(), fmt.Errorf("%s was not an class object", stringer.String(class))
+
+				}
+			}
+		case chunk.OP_THIS:
+			{
+				vm.push(frame.thisCtx)
 			}
 		}
 	}

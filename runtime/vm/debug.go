@@ -67,6 +67,11 @@ var opNames = map[uint8]string{
 	chunk.OP_AWAIT:                           "OP_AWAIT",
 	chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS: "OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS",
 	chunk.OP_NEGATE:                          "OP_NEGATE",
+	chunk.OP_CREATE_CLASS_START:              "OP_CREATE_CLASS_START",
+	chunk.OP_CREATE_CLASS_END:                "OP_CREATE_CLASS_END",
+	chunk.OP_PUSH_METHOD:                     "OP_PUSH_METHOD",
+	chunk.OP_PUSH_PROPERTY:                   "OP_PUSH_PROPERTY",
+	chunk.OP_THIS:                            "OP_THIS",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -85,6 +90,26 @@ func printFunction(c value.ValueChunk) {
 		}
 		code := opCode[ip]
 		switch code {
+		case chunk.OP_THIS:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_PUSH_PROPERTY:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_PUSH_METHOD:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_CREATE_CLASS_START:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_CREATE_CLASS_END:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
 		case chunk.OP_NEGATE:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
