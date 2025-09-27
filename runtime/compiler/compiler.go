@@ -2,6 +2,7 @@ package compiler
 
 import (
 	"cmp"
+	"fmt"
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/native"
@@ -11,9 +12,10 @@ import (
 	"slices"
 )
 
+const CONSOLE_OBJECT_NAME string = "console"
 const RESERVED_ARGUMENTS string = "arguments"
-const PROMISE_CTOR_NAME string = "Promise"
 const UNDEFINED_IDENTIFIER string = "undefined"
+const SET_TIMEOUT_NAME string = "setTimeout"
 
 type VariableType uint8
 
@@ -21,6 +23,7 @@ const (
 	CONST VariableType = iota
 	LET
 	FUNCTION
+	METHOD
 	FOR
 	CATCH_PARAM
 )
@@ -31,6 +34,7 @@ const (
 	HEAP VariableScope = iota
 	LOCAL
 	GLOBAL
+	THIS
 )
 
 type Variable struct {
@@ -41,6 +45,8 @@ type Variable struct {
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
 	fn         object.Callable
 }
+
+var ThisVariable *Variable = &Variable{scope: THIS}
 
 type Variables map[string]*Variable
 type BlockScope struct {
@@ -81,6 +87,10 @@ var operatorMap = map[parser.BinaryOperator]uint8{
 	parser.STRICT_NOT_EQUALS:  chunk.OP_STRICT_NOT_EQUALS,
 	"||":                      chunk.OP_LOGICAL_OR,
 	"&&":                      chunk.OP_LOGICAL_AND,
+}
+
+var unaryOperatorMap = map[parser.UnaryOperator]uint8{
+	parser.UNARY_NEGATE: chunk.OP_NEGATE,
 }
 
 func newBlockScope(parent *BlockScope) *BlockScope {
@@ -162,7 +172,7 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	}
 
 	if _, found := mapToAddTo[name]; found {
-		// fmt.Printf("WARN: Already found variable %s from scope\n", name)
+		//fmt.Printf("WARN: Already found variable %s from scope\n", name)
 		return
 	}
 
@@ -188,6 +198,7 @@ func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
 		block = block.parent
 	}
 
+	// nothing found check the function scope
 	for current != nil {
 		if variable, found := current.vars[name]; found {
 			return variable, current
@@ -210,7 +221,7 @@ func (fs *FunctionScope) currentBlockVarCount() (int, bool) {
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := native.NewObjectConsole()
 	consoleHandle := allocator.Allocate(console)
-	symbolTable.addVariable("console", CONST, false, nil)
+	symbolTable.addVariable(CONSOLE_OBJECT_NAME, CONST, false, nil)
 
 	main.ValueChunk().WriteConstant(value.EncodeHandle(consoleHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
@@ -220,7 +231,7 @@ func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 	objCtor := native.NewObjectConstructor()
 	objCtorHandle := allocator.Allocate(objCtor)
 
-	symbolTable.addVariable("Object", CONST, false, nil)
+	symbolTable.addVariable(native.OBJECT_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(objCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -229,7 +240,7 @@ func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 	arrCtor := &native.ArrayConstructor{}
 	arrCtorHandle := allocator.Allocate(arrCtor)
 
-	symbolTable.addVariable("Array", CONST, false, nil)
+	symbolTable.addVariable(native.ARRAY_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(arrCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -238,7 +249,7 @@ func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 	ctor := &native.ErrorConstructor{}
 	ctorHandle := allocator.Allocate(ctor)
 
-	symbolTable.addVariable("Error", CONST, false, nil)
+	symbolTable.addVariable(native.ERROR_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -247,7 +258,7 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 	setTimeout := native.NewSetTimeout()
 	setTimeouthandle := allocator.Allocate(setTimeout)
 
-	symbolTable.addVariable("setTimeout", CONST, false, nil)
+	symbolTable.addVariable(SET_TIMEOUT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(setTimeouthandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -256,7 +267,7 @@ func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 	promiseCtor := native.NewPromiseConstructor()
 	promiseCtorHandle := allocator.Allocate(promiseCtor)
 
-	symbolTable.addVariable(PROMISE_CTOR_NAME, CONST, false, nil)
+	symbolTable.addVariable(native.PROMISE_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -309,7 +320,22 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
-			variable, _ := symbolTable.findVariable(current.Left.Name)
+
+			var variable *Variable
+			isMember := false
+
+			switch current.Left.Type {
+			case parser.NODE_MEMBER_EXPRESSION:
+				isMember = true
+				if current.Left.Object.Type == parser.NODE_THIS_EXPRESSION {
+					variable = ThisVariable
+					break
+				}
+				variable, _ = symbolTable.findVariable(current.Left.Object.Name)
+			default:
+				variable, _ = symbolTable.findVariable(current.Left.Name)
+
+			}
 
 			var defineOp uint8
 			var setOp uint8
@@ -334,26 +360,54 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					setOp = chunk.OP_SET_HEAP_VAR
 					getOp = chunk.OP_GET_HEAP_VAR
 				}
+			case THIS:
+				{
+					getOp = chunk.OP_THIS
+				}
 			}
 
-			switch current.AssignmentOperator {
-			case parser.ASSIGN:
-				{
-					generateByteCode(current.Right, symbolTable, fn)
+			if isMember {
+				setOp = chunk.OP_SET_OBJECT_MEMBER
+				fn.ValueChunk().EmitByte(getOp)
 
-					if variable.undeclared {
-						fn.ValueChunk().EmitByte(defineOp)
-						variable.undeclared = false
-					} else {
-						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+				if getOp != chunk.OP_THIS {
+					fn.ValueChunk().EmitByte(uint8(variable.slot))
+				}
+
+				switch current.AssignmentOperator {
+				case parser.ASSIGN:
+					{
+						if current.Left.Computed {
+							generateByteCode(current.Left.Property, symbolTable, fn)
+						} else {
+							str := native.LightString(current.Left.Property.Name)
+							handle := allocator.Allocate(str)
+							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+						}
+						generateByteCode(current.Right, symbolTable, fn)
+						fn.ValueChunk().EmitBytes(setOp, chunk.OP_POP)
 					}
 				}
-			case parser.PLUS_ASSIGN:
-				{
-					fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
-					generateByteCode(current.Right, symbolTable, fn)
-					fn.ValueChunk().EmitByte(chunk.OP_ADD)
-					fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+			} else {
+				switch current.AssignmentOperator {
+				case parser.ASSIGN:
+					{
+						generateByteCode(current.Right, symbolTable, fn)
+
+						if variable.undeclared {
+							fn.ValueChunk().EmitByte(defineOp)
+							variable.undeclared = false
+						} else {
+							fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+						}
+					}
+				case parser.PLUS_ASSIGN:
+					{
+						fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
+						generateByteCode(current.Right, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_ADD)
+						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+					}
 				}
 			}
 
@@ -588,8 +642,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					handle := allocator.Allocate(native.NewObjString(current.Property.Name))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
+			case parser.NODE_UNARY_EXPRESSION:
+				{
+					generateByteCode(current.Property, symbolTable, fn)
+				}
 			}
 			fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+		}
+	case parser.NODE_THIS_EXPRESSION:
+		{
+			fn.ValueChunk().EmitByte(chunk.OP_THIS)
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
@@ -724,7 +786,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
-				fn.ValueChunk().EmitBytes(chunk.OP_THROW)
+				key := value.EncodeHandle(allocator.Allocate(native.LightString("message")))
+				msg := value.EncodeHandle(allocator.Allocate(native.LightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
+
+				err := native.NewError()
+				err.SetMember(key, msg)
+
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(err)))
+				fn.ValueChunk().EmitByte(chunk.OP_THROW)
 				return
 			}
 
@@ -954,9 +1023,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			current = current.Handler
 
 			if current.Param != nil {
-				symbolTable.enterBlockScope(current.BodyNode)
-				generateByteCode(current.Param, symbolTable, fn)
-				symbolTable.exitBlockScope()
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 			} else {
 				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop thrown error value if param is not used
 			}
@@ -1032,6 +1099,60 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			popStack = true
 			fn.ValueChunk().EmitByte(chunk.OP_AWAIT)
 		}
+	case parser.NODE_UNARY_EXPRESSION:
+		{
+			generateByteCode(current.Argument, symbolTable, fn)
+			fn.ValueChunk().EmitByte(unaryOperatorMap[current.UnaryOperator])
+		}
+	case parser.NODE_CLASS_DECLARATION:
+		{
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(current.Identifier.Name))))
+			fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
+
+			generateByteCode(current.BodyNode, symbolTable, fn)
+
+			fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_END)
+			switch symbolTable.tableScope {
+			case GLOBAL:
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+			case LOCAL:
+				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			}
+		}
+	case parser.NODE_CLASS_BODY:
+		{
+			symbolTable = FUNCTION_SCOPES[current]
+			for _, node := range current.Body {
+				generateByteCode(node, symbolTable, fn)
+			}
+		}
+	case parser.NODE_METHOD_DEFINITION:
+		{
+			symbolTable = FUNCTION_SCOPES[current]
+			name := current.Key.Name
+
+			function := current.Value.(*parser.Node)
+			method := object.NewFunction(fmt.Sprintf("Class method %s", name), len(function.Params), nil)
+
+			for _, node := range function.BodyNode.Body {
+				generateByteCode(node, symbolTable, method)
+			}
+			if method.ValueChunk().Code[len(method.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+			}
+
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(method)))
+			fn.ValueChunk().EmitByte(chunk.OP_PUSH_METHOD)
+		}
+	case parser.NODE_PROPERTY_DEFINITION:
+		{
+			name := current.Key.Name
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(name))))
+			generateByteCode(current.Value.(*parser.Node), symbolTable, fn)
+
+			fn.ValueChunk().EmitByte(chunk.OP_PUSH_PROPERTY)
+		}
 	}
 }
 
@@ -1051,7 +1172,7 @@ func checkIfNewArgumentIsPromise(current *parser.Node) bool {
 	case parser.NODE_NEW_EXPRESSION:
 		{
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
-				return current.Callee.Name == PROMISE_CTOR_NAME
+				return current.Callee.Name == native.PROMISE_CONSTRUCTOR_NAME
 			}
 		}
 	}

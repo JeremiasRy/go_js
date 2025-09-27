@@ -115,7 +115,24 @@ func (v Value) IsBoolean() bool {
 }
 
 func (v Value) IsType(tag Value) bool {
-	return tag&v == tag
+	if tag == TAG_OBJ {
+		return v&TAG_OBJ == TAG_OBJ
+	}
+	return v == tag
+}
+
+func (v Value) IsNumber() bool {
+	return !v.IsObject() && !v.IsBoolean() && !v.IsType(TAG_NIL) && !v.IsType(TAG_UNDEFINED)
+}
+
+func (v Value) IsInteger() bool {
+	if v.IsNumber() {
+		f := v.AsNumber()
+		_, frac := math.Modf(f)
+
+		return frac == 0.0
+	}
+	return false
 }
 
 // TODO extend this to handle 'falsy' values: nill, undefined, "", 0, 1, etc...

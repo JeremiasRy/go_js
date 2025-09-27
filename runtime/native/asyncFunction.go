@@ -1,7 +1,7 @@
 package native
 
 import (
-	eventloop "go_js/eventLoop"
+	"go_js/eventloop"
 	"go_js/object"
 	"go_js/value"
 )
@@ -35,7 +35,7 @@ func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsync
 	return asyncFn
 }
 
-func (asyncFn *ObjAsyncFunction) Clone() *ObjAsyncFunction {
+func (asyncFn *ObjAsyncFunction) Clone() object.Callable {
 	clone := *asyncFn
 	return &clone
 }

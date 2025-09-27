@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 	"go_js/compiler"
-	eventloop "go_js/eventLoop"
+	"go_js/eventloop"
 	"go_js/native"
 	"go_js/parser"
 	"go_js/queue"
@@ -59,12 +59,14 @@ func main() {
 		parser.PrintNode(ast)
 		println()
 	}
+	native.Init()
 
 	main, err := compiler.Compile(ast)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
+
 	var wg sync.WaitGroup
 
 	queue.Init(&wg)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/native"
+
 	"go_js/value"
 	"strconv"
 	"strings"
@@ -37,7 +38,7 @@ func String(v value.Value) string {
 		switch obj := obj.(type) {
 		case *native.ObjError:
 			{
-				return String(obj.Hash["message"].Value)
+				return String(obj.Members["message"].Value)
 			}
 		case *native.ObjArr:
 			{
@@ -47,7 +48,7 @@ func String(v value.Value) string {
 			{
 				var b strings.Builder
 				fmt.Fprint(&b, "{")
-				for k, v := range obj.Hash {
+				for k, v := range obj.Members {
 					fmt.Fprintf(&b, " %s: %s,", k, TypeDecoratedString(v.Value))
 				}
 				fmt.Fprintln(&b, "}")
@@ -72,9 +73,39 @@ func TypeDecoratedString(v value.Value) string {
 		obj, _ := allocator.GetObject(v.GetHandle())
 
 		switch obj := obj.(type) {
+		case *native.ObjObject:
+			{
+				var b strings.Builder
+				fmt.Fprint(&b, "{ ")
+				l := len(obj.Members)
+				c := 0
+				for k, v := range obj.Members {
+					c++
+					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
+					if l != c {
+						fmt.Fprint(&b, ", ")
+					}
+				}
+				fmt.Fprint(&b, " }")
+
+				return b.String()
+			}
 		case *native.ObjError:
 			{
-				return String(obj.Hash["message"].Value)
+				var b strings.Builder
+				fmt.Fprint(&b, "Error { ")
+				l := len(obj.Members)
+				c := 0
+				for k, v := range obj.Members {
+					c++
+					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
+					if l != c {
+						fmt.Fprint(&b, ",")
+					}
+				}
+				fmt.Fprint(&b, " }")
+
+				return b.String()
 			}
 		case *native.ObjString:
 			{

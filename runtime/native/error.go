@@ -10,7 +10,7 @@ type ObjError struct {
 
 func NewError() *ObjError {
 	objError := &ObjError{}
-	objError.Hash = map[string]ObjectValueEntry{}
+	objError.Members = map[string]ObjectValueEntry{}
 
 	return objError
 }

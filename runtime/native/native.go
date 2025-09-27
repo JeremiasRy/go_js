@@ -16,3 +16,11 @@ func (ObjNativeFn) Type() object.ObjType {
 func (onf *ObjNativeFn) String() string {
 	return fmt.Sprintf("<native fn %s()>", onf.name)
 }
+
+func Init() {
+	createCommonHandles()
+	initObjectPrototype()
+
+	initArrayPrototype()
+	initStringPrototype()
+}

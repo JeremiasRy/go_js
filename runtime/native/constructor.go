@@ -20,7 +20,7 @@ type ErrorConstructor struct {
 
 func NewErrorConstructor() *ErrorConstructor {
 	ec := &ErrorConstructor{}
-	ec.Hash = map[string]ObjectValueEntry{}
+	ec.Members = map[string]ObjectValueEntry{}
 	return ec
 }
 
@@ -46,7 +46,7 @@ func (ec *ErrorConstructor) New(params ...any) (object.Object, error) {
 
 	if _, ok := arg.(*ObjString); ok {
 		errorObject := NewError()
-		errorObject.Hash["message"] = ec.NewValueEntry(value.EncodeHandle(argHandle))
+		errorObject.Members["message"] = ec.NewValueEntry(value.EncodeHandle(argHandle))
 		return errorObject, nil
 	}
 
@@ -59,10 +59,10 @@ type ObjectConstructor struct {
 
 func NewObjectConstructor() *ObjectConstructor {
 	oc := &ObjectConstructor{}
-	oc.Hash = map[string]ObjectValueEntry{}
+	oc.Members = map[string]ObjectValueEntry{}
 
-	oc.Hash["values"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewObjectValues())))
-	oc.Hash["keys"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewObjectKeys())))
+	oc.Members["values"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewObjectValues())))
+	oc.Members["keys"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewObjectKeys())))
 
 	return oc
 }
@@ -80,7 +80,9 @@ func (*ObjectConstructor) New() object.Object {
 }
 
 func NewObject() *ObjObject {
-	obj := &ObjObject{Hash: map[string]ObjectValueEntry{}}
+	obj := &ObjObject{Members: map[string]ObjectValueEntry{}}
+
+	obj.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 	return obj
 }
 
@@ -105,39 +107,11 @@ func (ac *ArrayConstructor) New(params ...any) *ObjArr {
 	}
 
 	arr := NewObjArr(length)
-
-	filter := allocator.Allocate(NewArrayFilter(arr))
-	push := allocator.Allocate(NewArrayPush(arr))
-	forEach := allocator.Allocate(NewArrayForEach(arr))
-	map_ := allocator.Allocate(NewArrayMap(arr))
-	reduce := allocator.Allocate(NewArrayReduce(arr))
-
-	arr.Hash["filter"] = arr.NewValueEntry(value.EncodeHandle(filter))
-	arr.Hash["push"] = arr.NewValueEntry(value.EncodeHandle(push))
-	arr.Hash["forEach"] = arr.NewValueEntry(value.EncodeHandle(forEach))
-	arr.Hash["map"] = arr.NewValueEntry(value.EncodeHandle(map_))
-	arr.Hash["reduce"] = arr.NewValueEntry(value.EncodeHandle(reduce))
-	arr.Hash["length"] = arr.NewValueEntry(value.ValueFromFloat64(float64(length)))
-
 	return arr
 }
 
 func NewArray(length int) *ObjArr {
 	arr := NewObjArr(length)
-
-	filter := allocator.Allocate(NewArrayFilter(arr))
-	push := allocator.Allocate(NewArrayPush(arr))
-	forEach := allocator.Allocate(NewArrayForEach(arr))
-	map_ := allocator.Allocate(NewArrayMap(arr))
-	reduce := allocator.Allocate(NewArrayReduce(arr))
-
-	arr.Hash["filter"] = arr.NewValueEntry(value.EncodeHandle(filter))
-	arr.Hash["push"] = arr.NewValueEntry(value.EncodeHandle(push))
-	arr.Hash["forEach"] = arr.NewValueEntry(value.EncodeHandle(forEach))
-	arr.Hash["map"] = arr.NewValueEntry(value.EncodeHandle(map_))
-	arr.Hash["reduce"] = arr.NewValueEntry(value.EncodeHandle(reduce))
-	arr.Hash["length"] = arr.NewValueEntry(value.ValueFromFloat64(float64(length)))
-
 	return arr
 }
 
@@ -153,9 +127,8 @@ func (*StringConstructor) Type() object.ObjType {
 
 func NewString(str string) *ObjString {
 	objStr := NewObjString(str)
-	objStr.Hash["toUpperCase"] = objStr.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewStringToUpperCase(objStr))))
-	objStr.Hash["includes"] = objStr.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewStringIncludes(objStr))))
-
+	objStr.Members = map[string]ObjectValueEntry{}
+	objStr.SetMember(KEY_PROTO, PROTOTYPE_STRING)
 	return objStr
 }
 
@@ -178,6 +151,7 @@ func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func())
 }
 
 type Log struct {
+	InstanceMethod
 	ObjNativeFn
 }
 
