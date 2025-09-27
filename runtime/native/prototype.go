@@ -123,17 +123,3 @@ func initStringPrototype() {
 
 	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
 }
-
-func initDatePrototype() {
-	if PROTOTYPE_OBJECT == 0 {
-		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_STRING")
-	}
-
-	p := &Prototype{
-		name: DATE_CONSTRUCTOR_NAME,
-	}
-
-	p.Members = map[string]ObjectValueEntry{}
-
-	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
-}

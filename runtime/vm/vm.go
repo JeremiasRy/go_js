@@ -100,8 +100,8 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(bHandle)
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			res := aObj.(*native.ObjString).Value + bObj.(*native.ObjString).Value
-			return value.EncodeHandle(allocator.Allocate(native.NewObjString(res)))
+			res := aObj.String() + bObj.String()
+			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
 		} else {
 			// runtime error?
 		}
@@ -111,9 +111,9 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		aObj, _ := allocator.GetObject(aHandle)
 
 		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.(*native.ObjString).Value + stringer.String(b)
+			res := aObj.String() + stringer.String(b)
 
-			return value.EncodeHandle(allocator.Allocate(native.NewObjString(res)))
+			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
 		}
 	}
 
@@ -121,9 +121,9 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(bHandle)
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := native.NewObjString(stringer.String(a) + bObj.(*native.ObjString).Value)
+			res := (stringer.String(a) + bObj.String())
 
-			return value.EncodeHandle(allocator.Allocate(res))
+			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
 		}
 	}
 
@@ -599,6 +599,25 @@ func (vm *VM) run() (value.Value, error) {
 
 				if arr, ok := objObject.(*native.ObjArr); ok && member.IsInteger() {
 					value := arr.GetElementAt(int(member.AsNumber()))
+					vm.push(value)
+					continue
+				}
+				if str, ok := objObject.(native.LightString); ok {
+
+					boxed := native.NewObjString(str.String())
+					value := boxed.GetMember(member)
+
+					if value.IsObject() {
+						member, err := allocator.GetObject(value.GetHandle())
+
+						if err != nil {
+							continue
+						}
+
+						if _, ok := member.(native.Instancer); ok {
+							value = native.NewMethodHandle(boxed, member)
+						}
+					}
 					vm.push(value)
 					continue
 				}

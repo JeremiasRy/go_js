@@ -649,7 +649,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Computed {
 					generateByteCode(current.Property, symbolTable, fn)
 				} else {
-					handle := allocator.Allocate(native.NewObjString(current.Property.Name))
+					handle := allocator.Allocate(native.LightString(current.Property.Name))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case parser.NODE_UNARY_EXPRESSION:
@@ -752,8 +752,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					objStr := native.NewString(string(v))
-					handle := allocator.Allocate(objStr)
+					handle := allocator.Allocate(native.LightString(v))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case bool:
@@ -983,7 +982,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			prevPopstack := popStack
 			popStack = false
 			for _, property := range current.Properties {
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewObjString(property.Key.Name))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(property.Key.Name))))
 				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 			}
@@ -1002,7 +1001,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if len(quasi.Raw) > 0 {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewObjString(quasi.Raw))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
 					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
 				}
 
