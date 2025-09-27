@@ -92,38 +92,30 @@ func (vm *VM) getGlobal(global int) value.Value {
 }
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
-	aIsObject, aHandle := object.IsValueObject(a)
-	bIsObject, bHandle := object.IsValueObject(b)
-
-	if aIsObject && bIsObject {
-		aObj, _ := allocator.GetObject(aHandle)
-		bObj, _ := allocator.GetObject(bHandle)
+	if a.IsObject() && b.IsObject() {
+		aObj, _ := allocator.GetObject(a.GetHandle())
+		bObj, _ := allocator.GetObject(b.GetHandle())
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			res := aObj.String() + bObj.String()
-			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
+			return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + bObj.String())))
 		} else {
 			// runtime error?
 		}
 	}
 
-	if aIsObject && !bIsObject {
-		aObj, _ := allocator.GetObject(aHandle)
+	if a.IsObject() && !b.IsObject() {
+		aObj, _ := allocator.GetObject(a.GetHandle())
 
 		if aObj.Type() == object.OBJ_STRING {
 			res := aObj.String() + stringer.String(b)
 
 			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
 		}
-	}
-
-	if !aIsObject && bIsObject {
-		bObj, _ := allocator.GetObject(bHandle)
+	} else if b.IsObject() {
+		bObj, _ := allocator.GetObject(b.GetHandle())
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := (stringer.String(a) + bObj.String())
-
-			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
+			return value.EncodeHandle(allocator.Allocate(native.LightString(stringer.String(a) + bObj.String())))
 		}
 	}
 
