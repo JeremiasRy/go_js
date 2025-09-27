@@ -6,7 +6,6 @@ import (
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
-	"math"
 	"time"
 )
 
@@ -159,20 +158,6 @@ func NewLog() *Log {
 	log := &Log{}
 	log.name = "log"
 	return log
-}
-
-type Clock struct {
-	ObjNativeFn
-}
-
-func NewClock() *Clock {
-	clock := &Clock{}
-	clock.name = "Clock"
-	return clock
-}
-
-func (*Clock) Clock() value.Value {
-	return value.Value(math.Float64bits(float64(time.Now().UnixMilli())))
 }
 
 type SetTimeout struct {

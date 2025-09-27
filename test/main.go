@@ -9,19 +9,19 @@ import (
 	"strings"
 )
 
-const DIR_NAME_EXPECTED = "expected"
-const DIR_NAME_TEST_SCRIPTS = "test-scripts"
+const DIR_NAME_TEST_SCRIPTS string = "test-scripts"
+const DIR_NAME_BENCMARKS string = "benchmark-scripts"
 
-const PREFIX_TEST_SCIPT = "mission"
+const PREFIX_TEST_SCIPT string = "mission"
 
 const EXPECTED_TEST_RESULT_RUNNER = "node"
 const RUNTIME_BINARY_NAME = "go_js"
 
 func main() {
-	err := os.Mkdir(DIR_NAME_EXPECTED, 0755)
+	benchmarks, err := os.ReadDir(DIR_NAME_BENCMARKS)
 
 	if err != nil {
-		log.Fatalf("Failed to create %s folder %s", DIR_NAME_EXPECTED, err)
+		log.Fatalf("failed to read benchmark scripts %s", err)
 	}
 
 	scripts, err := os.ReadDir(DIR_NAME_TEST_SCRIPTS)
@@ -40,11 +40,7 @@ func main() {
 		}
 		name := script.Name()
 
-		if err != nil {
-			log.Fatalf("failed to read script order number %s", err)
-		}
-
-		cmd := exec.Command("node", "test-scripts/"+name)
+		cmd := exec.Command(EXPECTED_TEST_RESULT_RUNNER, DIR_NAME_TEST_SCRIPTS+"/"+name)
 		out, err := cmd.CombinedOutput()
 
 		if err != nil {
@@ -70,10 +66,6 @@ func main() {
 		}
 		name := script.Name()
 		fmt.Printf("%-50s %2d/%d... ", name, nth+1, len(expected))
-
-		if err != nil {
-			log.Fatalf("failed to read script order number %s", err)
-		}
 
 		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, "test-scripts/"+name)
 		out, err := cmd.CombinedOutput()
@@ -113,11 +105,51 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n", len(scripts)-len(fails), len(scripts))
+	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n\n\n", len(scripts)-len(fails), len(scripts))
 
-	err = os.RemoveAll(DIR_NAME_EXPECTED)
+	fmt.Print("RUNNING BENCHMARKS")
 
-	if err != nil {
-		log.Fatalf("Failed to delete %s folder %s", DIR_NAME_EXPECTED, err)
+	results := []struct {
+		test     string
+		expected string
+		got      string
+	}{}
+
+	for _, bench := range benchmarks {
+		name := bench.Name()
+		path := DIR_NAME_BENCMARKS + "/" + name
+
+		nodeCmd := exec.Command(EXPECTED_TEST_RESULT_RUNNER, path)
+		standardOut, err := nodeCmd.CombinedOutput()
+
+		if err != nil {
+			log.Fatalf("failed to run benchmark script %s %s", name, err)
+		}
+
+		goJsCmd := exec.Command("./"+RUNTIME_BINARY_NAME, path)
+
+		attemptOut, err := goJsCmd.CombinedOutput()
+
+		if err != nil {
+			log.Fatalf("failed to run benchmark script %s %s", name, err)
+		}
+
+		results = append(results, struct {
+			test     string
+			expected string
+			got      string
+		}{test: name, expected: string(standardOut), got: string(attemptOut)})
+		fmt.Print(".")
+	}
+	fmt.Println("Done!")
+	fmt.Println()
+	fmt.Println()
+
+	for _, result := range results {
+		fmt.Printf("Benchmark: '%s'\n\n", result.test)
+		fmt.Printf("-- NodeJS performance --\n%s", result.expected)
+		fmt.Printf("-- Got --\n%s", result.got)
+		fmt.Println()
+		fmt.Printf("%s\n", strings.Repeat("-", 34))
 	}
 }

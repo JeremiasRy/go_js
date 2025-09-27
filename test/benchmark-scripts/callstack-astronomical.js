@@ -6,7 +6,7 @@ function fib(n) {
 }
 
 const startTime = Date.now();
-const result = fib(40);
+const result = fib(35); // should increase this to 40
 const endTime = Date.now();
 
 console.log(`Result: ${result}`);

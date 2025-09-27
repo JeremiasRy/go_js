@@ -226,9 +226,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Test, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_STATEMENT:
-		prePass(current.BodyNode, symbolTable)
+		BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Initializer, symbolTable)
+		prePass(current.BodyNode, symbolTable)
 		prePass(current.Test, symbolTable)
 		prePass(current.Update, symbolTable)
 		symbolTable.exitBlockScope()
