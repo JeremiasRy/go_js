@@ -149,19 +149,23 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 	case parser.NODE_VARIABLE_DECLARATION:
-		var kind VariableType
-
-		switch current.Kind {
-		case parser.KIND_DECLARATION_CONST:
-			kind = CONST
-		case parser.KIND_DECLARATION_LET:
-			kind = LET
-		}
-
 		for _, declaration := range current.Declarations {
-			name := declaration.Identifier.Name
-			symbolTable.addVariable(name, kind, false, nil)
-			prePass(declaration.Initializer, symbolTable)
+			switch declaration.Identifier.Type {
+			case parser.NODE_ARRAY_PATTERN:
+				for _, node := range declaration.Identifier.Elements {
+					symbolTable.addVariable(node.Name, LET, false, nil)
+				}
+			case parser.NODE_OBJECT_PATTERN:
+				for _, node := range declaration.Identifier.Properties {
+					symbolTable.addVariable(node.Value.(*parser.Node).Name, LET, false, nil)
+				}
+			default:
+				for _, declaration := range current.Declarations {
+					name := declaration.Identifier.Name
+					symbolTable.addVariable(name, LET, false, nil)
+					prePass(declaration.Initializer, symbolTable)
+				}
+			}
 		}
 
 	case parser.NODE_RETURN_STATEMENT:
@@ -180,13 +184,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		variable, table := symbolTable.findVariable(current.Name)
 
-		if catchScope && variable == nil {
+		// maybe a combined flag? Or something not so ugly?
+		if (catchScope || classCompiler) && variable == nil {
 			symbolTable.addVariable(current.Name, LET, true, nil)
-			return
-		}
-
-		if classCompiler && variable == nil {
-			symbolTable.addVariable(current.Name, LET, false, nil)
 			return
 		}
 
