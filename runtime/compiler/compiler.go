@@ -1000,6 +1000,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			for i < len(current.Quasis) {
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
+				if len(quasi.Raw) == 0 {
+					break
+				}
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
 				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 

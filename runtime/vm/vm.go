@@ -92,6 +92,10 @@ func (vm *VM) getGlobal(global int) value.Value {
 }
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
+	if !a.IsObject() && b.IsObject() {
+		a = value.EncodeHandle(allocator.Allocate(native.LightString(stringer.String(a))))
+	}
+
 	if a.IsObject() {
 		var bObj object.Object
 		if !b.IsObject() {
@@ -658,6 +662,16 @@ func (vm *VM) run() (value.Value, error) {
 
 				obj, _ := allocator.GetObject(handle)
 
+				if k.IsObject() {
+					keyObj, _ := allocator.GetObject(k.GetHandle())
+
+					if b, ok := keyObj.(*native.ObjStringBuilder); ok {
+						key := b.Flush()
+						k = value.EncodeHandle(allocator.Allocate(key))
+					}
+
+				}
+
 				if obj, ok := obj.(object.Hashable); ok {
 					obj.SetMember(k, v)
 				} else {
@@ -677,9 +691,11 @@ func (vm *VM) run() (value.Value, error) {
 				switch obj := objObject.(type) {
 				case *native.ObjArr:
 					{
-						value := obj.GetElementAt(int(member.AsNumber()))
-						vm.push(value)
-						continue
+						if member.IsInteger() {
+							value := obj.GetElementAt(int(member.AsNumber()))
+							vm.push(value)
+							continue
+						}
 					}
 				case native.LightString:
 					{
