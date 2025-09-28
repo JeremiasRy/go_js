@@ -1,8 +1,8 @@
 const users = [
-    { id: 1, name: "Alice" },
+    { id: 1, name: "Alice", food: "spaghetti" },
     { id: 2, name: "Bob" }
 ];
 
-for (const { name } of users) {
-    console.log(name);
+for (const { name, food } of users) {
+    console.log(`${name} favorite food ${food}`);
 }
