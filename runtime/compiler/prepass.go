@@ -8,7 +8,6 @@ import (
 
 var catchScope = false
 var classCompiler = false
-var declarator = false
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	if current == nil {
@@ -150,24 +149,22 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 	case parser.NODE_VARIABLE_DECLARATION:
-		prevDeclarator := declarator
-		declarator = true
 		for _, declaration := range current.Declarations {
-			prePass(declaration.Identifier, symbolTable)
-			prePass(declaration.Initializer, symbolTable)
-		}
-		declarator = prevDeclarator
-	case parser.NODE_ARRAY_PATTERN:
-		{
-			for _, node := range current.Elements {
-				prePass(node, symbolTable)
-			}
-		}
-
-	case parser.NODE_OBJECT_PATTERN:
-		{
-			for _, node := range current.Properties {
-				prePass(node, symbolTable)
+			switch declaration.Identifier.Type {
+			case parser.NODE_ARRAY_PATTERN:
+				for _, node := range declaration.Identifier.Elements {
+					symbolTable.addVariable(node.Name, LET, false, nil)
+				}
+			case parser.NODE_OBJECT_PATTERN:
+				for _, node := range declaration.Identifier.Properties {
+					symbolTable.addVariable(node.Value.(*parser.Node).Name, LET, false, nil)
+				}
+			default:
+				for _, declaration := range current.Declarations {
+					name := declaration.Identifier.Name
+					symbolTable.addVariable(name, LET, false, nil)
+					prePass(declaration.Initializer, symbolTable)
+				}
 			}
 		}
 
@@ -188,7 +185,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		variable, table := symbolTable.findVariable(current.Name)
 
 		// maybe a combined flag? Or something not so ugly?
-		if (catchScope || classCompiler || declarator) && variable == nil {
+		if (catchScope || classCompiler) && variable == nil {
 			symbolTable.addVariable(current.Name, LET, true, nil)
 			return
 		}
