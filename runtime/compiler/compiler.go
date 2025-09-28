@@ -990,32 +990,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
-			prevPopStack := popStack
-			popStack = false
-			need := len(current.Quasis) + len(current.Expressions) - 1
-			adds := 0
 			for i := range len(current.Quasis) {
-				if i > 0 && i%2 == 0 {
-					adds++
-					fn.ValueChunk().EmitByte(chunk.OP_ADD)
-				}
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
-
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
 
 				if i < len(current.Expressions) {
 					generateByteCode(current.Expressions[i], symbolTable, fn)
 				}
-
-				fn.ValueChunk().EmitByte(chunk.OP_ADD)
-				adds++
 			}
-			popStack = prevPopStack
 
-			if need > adds {
+			for range len(current.Quasis) + len(current.Expressions) - 1 {
 				fn.ValueChunk().EmitByte(chunk.OP_ADD)
-
 			}
+
 		}
 	case parser.NODE_TRY_STATEMENT:
 		{
