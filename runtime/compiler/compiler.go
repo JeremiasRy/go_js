@@ -602,6 +602,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				popStack = true
 			}
 		}
+
 	case parser.NODE_ARRAY_EXPRESSION:
 		{
 			popStack = false
@@ -665,6 +666,97 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_VARIABLE_DECLARATOR:
 		{
+			if current.Identifier.Type == parser.NODE_ARRAY_PATTERN {
+				pattern := current.Identifier
+				var arr *Variable
+				if current.Initializer.Type == parser.NODE_IDENTIFIER {
+					arr, _ = symbolTable.findVariable(current.Initializer.Name)
+				} else {
+					generateByteCode(current.Initializer, symbolTable, fn)
+				}
+
+				var getOp uint8
+
+				switch arr.scope {
+				case LOCAL:
+					getOp = chunk.OP_GET_LOCAL
+				case GLOBAL:
+					getOp = chunk.OP_GET_GLOBAL
+				case HEAP:
+					getOp = chunk.OP_GET_HEAP_VAR
+				}
+
+				for i, element := range pattern.Elements {
+					var defineOp uint8
+
+					el, _ := symbolTable.findVariable(element.Name)
+
+					switch el.scope {
+					case LOCAL:
+						defineOp = chunk.OP_DEFINE_LOCAL
+					case GLOBAL:
+						defineOp = chunk.OP_DEFINE_GLOBAL
+					case HEAP:
+						defineOp = chunk.OP_DEFINE_HEAP_VAR
+					}
+
+					fn.ValueChunk().EmitBytes(getOp, uint8(arr.slot))
+					fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(i)))
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
+				}
+				return
+			}
+
+			if current.Identifier.Type == parser.NODE_OBJECT_PATTERN {
+				pattern := current.Identifier
+				var obj *Variable
+
+				if current.Initializer.Type == parser.NODE_IDENTIFIER {
+					obj, _ = symbolTable.findVariable(current.Initializer.Name)
+				} else {
+					generateByteCode(current.Initializer, symbolTable, fn)
+				}
+
+				var getOp uint8
+
+				switch obj.scope {
+				case LOCAL:
+					getOp = chunk.OP_GET_LOCAL
+				case GLOBAL:
+					getOp = chunk.OP_GET_GLOBAL
+				case HEAP:
+					getOp = chunk.OP_GET_HEAP_VAR
+				}
+
+				for _, prop := range pattern.Properties {
+					var defineOp uint8
+					k := prop.Key.Name
+					v := prop.Value.(*parser.Node).Name
+
+					property, _ := symbolTable.findVariable(v)
+
+					switch property.scope {
+					case LOCAL:
+						defineOp = chunk.OP_DEFINE_LOCAL
+					case GLOBAL:
+						defineOp = chunk.OP_DEFINE_GLOBAL
+					case HEAP:
+						defineOp = chunk.OP_DEFINE_HEAP_VAR
+					}
+
+					fn.ValueChunk().EmitBytes(getOp, uint8(obj.slot))
+
+					if prop.Shorthand {
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
+					} else {
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(k))))
+
+					}
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
+				}
+				return
+			}
+
 			name := current.Identifier.Name
 			variable, _ := symbolTable.findVariable(name)
 
