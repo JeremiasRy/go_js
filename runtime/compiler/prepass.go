@@ -140,7 +140,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_BLOCK_STATEMENT:
 		{
-			BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
+			if _, found := BLOCK_SCOPES[current]; !found {
+				BLOCK_SCOPES[current] = newBlockScope(symbolTable.block)
+			}
 			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
 				prePass(node, symbolTable)
@@ -230,10 +232,12 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Initializer, symbolTable)
 		prePass(current.BodyNode, symbolTable)
+		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Test, symbolTable)
 		prePass(current.Update, symbolTable)
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_OF_STATEMENT:
+		BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
 		prePass(current.BodyNode, symbolTable)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
