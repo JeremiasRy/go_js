@@ -1,4 +1,4 @@
-const numIterations = 10000;
+const numIterations = 100000;
 let longString = "";
 const startTime = Date.now();
 
