@@ -736,6 +736,25 @@ func (vm *VM) run() (value.Value, error) {
 						continue
 					}
 				}
+				if str, ok := objObject.(native.LightString); ok {
+
+					boxed := native.NewObjString(str.String())
+					value := boxed.GetMember(member)
+
+					if value.IsObject() {
+						member, err := allocator.GetObject(value.GetHandle())
+
+						if err != nil {
+							continue
+						}
+
+						if _, ok := member.(native.Instancer); ok {
+							value = native.NewMethodHandle(boxed, member)
+						}
+					}
+					vm.push(value)
+					continue
+				}
 
 				if object, ok := objObject.(object.Hashable); ok {
 					value := object.GetMember(member)
