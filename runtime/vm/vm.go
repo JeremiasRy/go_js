@@ -92,30 +92,62 @@ func (vm *VM) getGlobal(global int) value.Value {
 }
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
-	if a.IsObject() && b.IsObject() {
-		aObj, _ := allocator.GetObject(a.GetHandle())
-		bObj, _ := allocator.GetObject(b.GetHandle())
-
-		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			return value.EncodeHandle(allocator.Allocate(native.LightString((aObj.String() + bObj.String()))))
-		} else {
-			// runtime error?
+	if a.IsObject() {
+		var bObj object.Object
+		if !b.IsObject() {
+			bObj = native.LightString(stringer.String(b))
 		}
-	}
-
-	if a.IsObject() && !b.IsObject() {
 		aObj, _ := allocator.GetObject(a.GetHandle())
 
-		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.String() + stringer.String(b)
-
-			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
+		if bObj == nil {
+			bObj, _ = allocator.GetObject(b.GetHandle())
 		}
-	} else if b.IsObject() {
-		bObj, _ := allocator.GetObject(b.GetHandle())
 
-		if bObj.Type() == object.OBJ_STRING {
-			return value.EncodeHandle(allocator.Allocate(native.LightString(stringer.String(a) + bObj.String())))
+		switch aObj := aObj.(type) {
+		case *native.ObjStringBuilder:
+			{
+				switch str := bObj.(type) {
+				case *native.ObjStringBuilder:
+					{
+						aObj.Concatenate(string(str.Flush()))
+					}
+				default:
+					{
+						aObj.Concatenate(bObj.String())
+					}
+				}
+				return a
+			}
+		case native.LightString:
+			{
+				builder := native.NewStringBuilder(aObj)
+				switch str := bObj.(type) {
+				case *native.ObjStringBuilder:
+					{
+						builder.Concatenate(string(str.Flush()))
+					}
+				default:
+					{
+						builder.Concatenate(bObj.String())
+					}
+				}
+
+				return value.EncodeHandle(allocator.Allocate(builder))
+			}
+		case *native.ObjString:
+			{
+				switch str := bObj.(type) {
+				case *native.ObjStringBuilder:
+					{
+						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + string(str.Flush()))))
+
+					}
+				default:
+					{
+						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + bObj.String())))
+					}
+				}
+			}
 		}
 	}
 
@@ -485,10 +517,22 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				v := vm.pop()
 				if v.IsObject() {
-					obj, _ := allocator.GetObject(v.GetHandle())
-					// check if we have a closure in hand
-					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
+					obj, err := allocator.GetObject(v.GetHandle())
+
+					if err != nil {
+						return value.EncodedUndefined(), fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
+					}
+					switch obj := obj.(type) {
+					case *object.ObjFunction:
+						{
+							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+								v = value.EncodeHandle(allocator.Allocate(obj.Clone()))
+							}
+						}
+					case *native.ObjStringBuilder:
+						{
+							v = value.EncodeHandle(allocator.Allocate(obj.Flush()))
+						}
 					}
 				}
 				vm.addGlobal(v)
@@ -504,10 +548,18 @@ func (vm *VM) run() (value.Value, error) {
 				global := valueChunk.Code[ip]
 				v := vm.pop()
 				if v.IsObject() {
-					obj, _ := allocator.GetObject(v.GetHandle())
-					// check if we have a closure in hand
-					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
+					obj, err := allocator.GetObject(v.GetHandle())
+
+					if err != nil {
+						return value.EncodedUndefined(), fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
+					}
+					switch obj := obj.(type) {
+					case *object.ObjFunction:
+						{
+							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+								v = value.EncodeHandle(allocator.Allocate(obj.Clone()))
+							}
+						}
 					}
 				}
 				globals[global] = v
@@ -522,10 +574,22 @@ func (vm *VM) run() (value.Value, error) {
 				v := vm.pop()
 
 				if v.IsObject() {
-					handle := v.GetHandle()
-					if obj, err := allocator.GetObject(handle); err == nil {
-						if promise, ok := obj.(*native.ObjPromise); ok {
-							vm.push(promise.Value)
+					obj, err := allocator.GetObject(v.GetHandle())
+
+					if err != nil {
+						return value.EncodedUndefined(), fmt.Errorf("failed to receive object at OP_DEFINE_LOCAL %s", err)
+					}
+					switch obj := obj.(type) {
+					case *object.ObjFunction:
+						{
+							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+								vm.push(value.EncodeHandle(allocator.Allocate(obj.Clone())))
+								vm.pop()
+							}
+						}
+					case *native.ObjPromise:
+						{
+							vm.push(obj.Value)
 							vm.pop()
 						}
 					}
@@ -539,8 +603,29 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_SET_LOCAL:
 			{
-				vm.stack[frame.localStart+int(valueChunk.Code[ip])] = vm.pop()
+				slot := int(valueChunk.Code[ip])
 				ip++
+				v := vm.pop()
+				if v.IsObject() {
+					obj, err := allocator.GetObject(v.GetHandle())
+
+					if err != nil {
+						return value.EncodedUndefined(), fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
+					}
+					switch obj := obj.(type) {
+					case *object.ObjFunction:
+						{
+							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+								v = value.EncodeHandle(allocator.Allocate(obj.Clone()))
+							}
+						}
+					case *native.ObjStringBuilder:
+						{
+							v = value.EncodeHandle(allocator.Allocate(obj.Flush()))
+						}
+					}
+				}
+				vm.stack[frame.localStart+slot] = v
 			}
 		case chunk.OP_CREATE_OBJECT:
 			{
@@ -586,32 +671,54 @@ func (vm *VM) run() (value.Value, error) {
 				objObject, err := allocator.GetObject(hash.GetHandle())
 
 				if err != nil {
-					return value.EncodedUndefined(), err
+					return value.EncodedUndefined(), fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", stringer.String(hash), err)
 				}
 
-				if arr, ok := objObject.(*native.ObjArr); ok && member.IsInteger() {
-					value := arr.GetElementAt(int(member.AsNumber()))
-					vm.push(value)
-					continue
-				}
-				if str, ok := objObject.(native.LightString); ok {
-
-					boxed := native.NewObjString(str.String())
-					value := boxed.GetMember(member)
-
-					if value.IsObject() {
-						member, err := allocator.GetObject(value.GetHandle())
-
-						if err != nil {
-							continue
-						}
-
-						if _, ok := member.(native.Instancer); ok {
-							value = native.NewMethodHandle(boxed, member)
-						}
+				switch obj := objObject.(type) {
+				case *native.ObjArr:
+					{
+						value := obj.GetElementAt(int(member.AsNumber()))
+						vm.push(value)
+						continue
 					}
-					vm.push(value)
-					continue
+				case native.LightString:
+					{
+						boxed := native.NewObjString(obj.String())
+						v := boxed.GetMember(member)
+
+						if v.IsObject() {
+							member, err := allocator.GetObject(v.GetHandle())
+
+							if err != nil {
+								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %s", err)
+							}
+
+							if _, ok := member.(native.Instancer); ok {
+								v = native.NewMethodHandle(boxed, member)
+							}
+						}
+						vm.push(v)
+						continue
+					}
+				case *native.ObjStringBuilder:
+					{
+						boxed := native.NewObjString(string(obj.Flush()))
+						v := boxed.GetMember(member)
+
+						if v.IsObject() {
+							member, err := allocator.GetObject(v.GetHandle())
+
+							if err != nil {
+								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %s", err)
+							}
+
+							if _, ok := member.(native.Instancer); ok {
+								v = native.NewMethodHandle(boxed, member)
+							}
+						}
+						vm.push(v)
+						continue
+					}
 				}
 
 				if object, ok := objObject.(object.Hashable); ok {
@@ -836,6 +943,18 @@ func (vm *VM) run() (value.Value, error) {
 							case *native.Log:
 								{
 									arg := vm.pop()
+
+									if arg.IsObject() {
+										obj, err := allocator.GetObject(arg.GetHandle())
+
+										if err != nil {
+											return value.EncodedUndefined(), fmt.Errorf("couldn't receive argument at native.Log %s", err)
+										}
+
+										if b, ok := obj.(*native.ObjStringBuilder); ok {
+											arg = value.EncodeHandle(allocator.Allocate(b.Flush()))
+										}
+									}
 
 									vm.log(arg)
 									vm.push(value.EncodedUndefined())

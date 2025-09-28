@@ -1,15 +1,11 @@
 package native
 
 import (
+	"fmt"
 	"go_js/object"
 	"go_js/value"
 	"strings"
 )
-
-type ObjString struct {
-	ObjObject
-	Value string
-}
 
 type LightString string
 
@@ -19,6 +15,42 @@ func (LightString) Type() object.ObjType {
 
 func (str LightString) String() string {
 	return string(str)
+}
+
+type ObjStringBuilder struct {
+	b *strings.Builder
+}
+
+func (*ObjStringBuilder) Type() object.ObjType {
+	return object.OBJ_STRING_BUILDER
+}
+
+func (osb *ObjStringBuilder) String() string {
+	return fmt.Sprintf("ObjStringBuilder { %s }", osb.b.String())
+}
+
+func (osb *ObjStringBuilder) Concatenate(s string) {
+	osb.b.WriteString(s)
+}
+
+func (osb *ObjStringBuilder) Flush() LightString {
+	str := LightString(osb.b.String())
+	return str
+}
+
+func NewStringBuilder(init LightString) *ObjStringBuilder {
+	b := &strings.Builder{}
+
+	b.WriteString(string(init))
+	b.Grow(len(init) + 10)
+	return &ObjStringBuilder{
+		b: b,
+	}
+}
+
+type ObjString struct {
+	ObjObject
+	Value string
 }
 
 func NewObjString(str string) *ObjString {
@@ -39,6 +71,8 @@ func (*ObjString) Type() object.ObjType {
 func (str *ObjString) String() string {
 	return string(str.Value)
 }
+
+// prototype methods
 
 type StringToUpperCase struct {
 	InstanceMethod

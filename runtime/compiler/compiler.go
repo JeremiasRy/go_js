@@ -752,8 +752,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					handle := allocator.Allocate(native.LightString(string(v)))
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
 				}
 			case bool:
 				{
@@ -761,7 +760,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().WriteConstant(value.EncodeTrue())
 					} else {
 						fn.ValueChunk().WriteConstant(value.EncodeFalse())
-
 					}
 				}
 			case nil:
@@ -990,19 +988,27 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
-			for i := range len(current.Quasis) {
+			start := native.LightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Raw)
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(start)))
+
+			if len(current.Expressions) > 0 {
+				generateByteCode(current.Expressions[0], symbolTable, fn)
+			}
+
+			fn.ValueChunk().EmitByte(chunk.OP_ADD)
+			i := 1
+
+			for i < len(current.Quasis) {
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
+				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 
 				if i < len(current.Expressions) {
 					generateByteCode(current.Expressions[i], symbolTable, fn)
+					fn.ValueChunk().EmitByte(chunk.OP_ADD)
 				}
+				i++
 			}
-
-			for range len(current.Quasis) + len(current.Expressions) - 1 {
-				fn.ValueChunk().EmitByte(chunk.OP_ADD)
-			}
-
 		}
 	case parser.NODE_TRY_STATEMENT:
 		{
