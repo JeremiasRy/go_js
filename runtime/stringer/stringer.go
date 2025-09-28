@@ -111,6 +111,10 @@ func TypeDecoratedString(v value.Value) string {
 			{
 				return fmt.Sprintf("'%s'", obj.Value)
 			}
+		case native.LightString:
+			{
+				return fmt.Sprintf("'%s'", obj)
+			}
 		case *native.ObjArr:
 			{
 				var b strings.Builder

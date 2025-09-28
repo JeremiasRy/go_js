@@ -30,6 +30,9 @@ var (
 
 	// common class syntax
 	KEY_CTOR value.Value
+
+	// error
+	KEY_MESSAGE value.Value
 )
 
 func createCommonHandles() {
@@ -49,4 +52,6 @@ func createCommonHandles() {
 	KEY_TOUPPERCASE = value.EncodeHandle(allocator.Allocate(LightString("toUpperCase")))
 
 	KEY_CTOR = value.EncodeHandle(allocator.Allocate(LightString("constructor")))
+
+	KEY_MESSAGE = value.EncodeHandle(allocator.Allocate(LightString("message")))
 }

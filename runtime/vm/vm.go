@@ -92,38 +92,30 @@ func (vm *VM) getGlobal(global int) value.Value {
 }
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
-	aIsObject, aHandle := object.IsValueObject(a)
-	bIsObject, bHandle := object.IsValueObject(b)
-
-	if aIsObject && bIsObject {
-		aObj, _ := allocator.GetObject(aHandle)
-		bObj, _ := allocator.GetObject(bHandle)
+	if a.IsObject() && b.IsObject() {
+		aObj, _ := allocator.GetObject(a.GetHandle())
+		bObj, _ := allocator.GetObject(b.GetHandle())
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			res := aObj.(*native.ObjString).Value + bObj.(*native.ObjString).Value
-			return value.EncodeHandle(allocator.Allocate(native.NewObjString(res)))
+			return value.EncodeHandle(allocator.Allocate(native.LightString((aObj.String() + bObj.String()))))
 		} else {
 			// runtime error?
 		}
 	}
 
-	if aIsObject && !bIsObject {
-		aObj, _ := allocator.GetObject(aHandle)
+	if a.IsObject() && !b.IsObject() {
+		aObj, _ := allocator.GetObject(a.GetHandle())
 
 		if aObj.Type() == object.OBJ_STRING {
-			res := aObj.(*native.ObjString).Value + stringer.String(b)
+			res := aObj.String() + stringer.String(b)
 
-			return value.EncodeHandle(allocator.Allocate(native.NewObjString(res)))
+			return value.EncodeHandle(allocator.Allocate(native.LightString(res)))
 		}
-	}
-
-	if !aIsObject && bIsObject {
-		bObj, _ := allocator.GetObject(bHandle)
+	} else if b.IsObject() {
+		bObj, _ := allocator.GetObject(b.GetHandle())
 
 		if bObj.Type() == object.OBJ_STRING {
-			res := native.NewObjString(stringer.String(a) + bObj.(*native.ObjString).Value)
-
-			return value.EncodeHandle(allocator.Allocate(res))
+			return value.EncodeHandle(allocator.Allocate(native.LightString(stringer.String(a) + bObj.String())))
 		}
 	}
 
@@ -599,6 +591,25 @@ func (vm *VM) run() (value.Value, error) {
 
 				if arr, ok := objObject.(*native.ObjArr); ok && member.IsInteger() {
 					value := arr.GetElementAt(int(member.AsNumber()))
+					vm.push(value)
+					continue
+				}
+				if str, ok := objObject.(native.LightString); ok {
+
+					boxed := native.NewObjString(str.String())
+					value := boxed.GetMember(member)
+
+					if value.IsObject() {
+						member, err := allocator.GetObject(value.GetHandle())
+
+						if err != nil {
+							continue
+						}
+
+						if _, ok := member.(native.Instancer); ok {
+							value = native.NewMethodHandle(boxed, member)
+						}
+					}
 					vm.push(value)
 					continue
 				}
@@ -1088,47 +1099,6 @@ func (vm *VM) run() (value.Value, error) {
 				heapVars[heapScopesCount] = []value.Value{}
 				setHeapScopes(frame.fn.ValueChunk(), heapScopesCount)
 				frame.fn.SetHeapScope(heapScopesCount)
-			}
-		case chunk.OP_TEMPLATE_LITERAL_START:
-			{
-				builder := value.EncodeHandle(allocator.Allocate(object.NewObjTemplateLiteral()))
-				vm.push(builder)
-			}
-		case chunk.OP_TEMPLATE_PUSH_STRING:
-			{
-				v := vm.pop()
-				builder := vm.peek()
-
-				obj, err := allocator.GetObject(builder.GetHandle())
-
-				if err != nil {
-					return value.EncodedUndefined(), err
-				}
-
-				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
-					b.PushString(stringer.String(v))
-				} else {
-					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
-				}
-
-			}
-		case chunk.OP_TEMPLATE_LITERAL_END:
-			{
-				builder := vm.pop()
-
-				obj, err := allocator.GetObject(builder.GetHandle())
-
-				if err != nil {
-					return value.EncodedUndefined(), err
-				}
-
-				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
-					str := b.CreateString()
-					handle := allocator.Allocate(native.NewObjString(str))
-					vm.push(value.EncodeHandle(handle))
-				} else {
-					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
-				}
 			}
 		case chunk.OP_TRY_BLOCK_START:
 			{

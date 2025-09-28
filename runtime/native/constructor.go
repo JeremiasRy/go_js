@@ -36,16 +36,21 @@ func (ec *ErrorConstructor) New(params ...any) (object.Object, error) {
 		return nil, errors.New("not enough params for new Error()")
 	}
 
-	argHandle := params[0].(value.Value).GetHandle()
-	arg, err := allocator.GetObject(argHandle)
+	var arg object.Object
+	var handle value.Value
 
-	if err != nil {
-		return nil, err
+	if argHandle, ok := params[0].(value.Value); ok {
+		a, err := allocator.GetObject(argHandle.GetHandle())
+		handle = argHandle
+		if err != nil {
+			return nil, err
+		}
+		arg = a
 	}
 
-	if _, ok := arg.(*ObjString); ok {
+	if arg.Type() == object.OBJ_STRING {
 		errorObject := NewError()
-		errorObject.Members["message"] = ec.NewValueEntry(value.EncodeHandle(argHandle))
+		errorObject.SetMember(KEY_MESSAGE, handle)
 		return errorObject, nil
 	}
 
