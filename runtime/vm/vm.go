@@ -37,12 +37,18 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 	cf.thisCtx = this
 }
 
+type ExceptionState struct {
+	stackTop int
+	jumpTo   int
+	frame    int
+}
+
 type VM struct {
 	frames         []CallFrame
 	frameCount     int
 	stack          []value.Value
 	stackTop       int
-	exceptionStack []int
+	exceptionStack []ExceptionState
 
 	debug bool
 }
@@ -50,7 +56,7 @@ type VM struct {
 func NewVM(debug bool) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []int{}, debug: debug}
+	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []ExceptionState{}, debug: debug}
 }
 
 func (vm *VM) Call(fn object.Callable, returnIp int, this value.Value) error {
@@ -1258,7 +1264,7 @@ func (vm *VM) run() (value.Value, error) {
 			{
 				catchStart := int(valueChunk.Code[ip+3]) | int(valueChunk.Code[ip+2])<<8 | int(valueChunk.Code[ip+1])<<16 | int(valueChunk.Code[ip])<<24
 				ip += 4
-				vm.exceptionStack = append(vm.exceptionStack, catchStart)
+				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: catchStart, stackTop: vm.stackTop, frame: vm.frameCount})
 			}
 		case chunk.OP_TRY_BLOCK_END:
 			{
@@ -1352,10 +1358,16 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_THROW:
 			{
-				to := vm.exceptionStack[len(vm.exceptionStack)-1]
+				err := vm.pop()
+				exceptionState := vm.exceptionStack[len(vm.exceptionStack)-1]
 				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
 
-				ip = to
+				vm.frameCount = exceptionState.frame
+				frame = vm.currentFrame()
+				valueChunk = *frame.fn.ValueChunk()
+				ip = exceptionState.jumpTo
+				vm.stackTop = exceptionState.stackTop
+				vm.push(err)
 			}
 		case chunk.OP_ADD_ARGUMENTS_TO_LOCALS:
 			{
