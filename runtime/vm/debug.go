@@ -55,9 +55,6 @@ var opNames = map[uint8]string{
 	chunk.OP_GET_ITERATOR:                    "OP_GET_ITERATOR",
 	chunk.OP_ITERATOR_NEXT:                   "OP_ITERATOR_NEXT",
 	chunk.OP_ITERATOR_CURRENT:                "OP_ITERATOR_CURRENT",
-	chunk.OP_TEMPLATE_LITERAL_START:          "OP_TEMPLATE_LITERAL_START",
-	chunk.OP_TEMPLATE_PUSH_STRING:            "OP_TEMPLATE_PUSH_STRING",
-	chunk.OP_TEMPLATE_LITERAL_END:            "OP_TEMPLATE_LITERAL_END",
 	chunk.OP_TRY_BLOCK_START:                 "OP_TRY_BLOCK_START",
 	chunk.OP_TRY_BLOCK_END:                   "OP_TRY_BLOCK_END",
 	chunk.OP_THROW:                           "OP_THROW",
@@ -171,18 +168,6 @@ func printFunction(c value.ValueChunk) {
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 				ip++
 				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_TEMPLATE_LITERAL_START:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_TEMPLATE_LITERAL_END:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_TEMPLATE_PUSH_STRING:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			}
 		case chunk.OP_PUSH_CURRENT:
 			{

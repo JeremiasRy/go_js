@@ -752,7 +752,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					handle := allocator.Allocate(native.LightString(v))
+					handle := allocator.Allocate(native.LightString(string(v)))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case bool:
@@ -990,33 +990,31 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
-			fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_LITERAL_START)
+			prevPopStack := popStack
+			popStack = false
+			need := len(current.Quasis) + len(current.Expressions) - 1
+			adds := 0
 			for i := range len(current.Quasis) {
+				if i > 0 && i%2 == 0 {
+					adds++
+					fn.ValueChunk().EmitByte(chunk.OP_ADD)
+				}
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
-				tail := current.Quasis[i].Tail
-				var expr *parser.Node
+
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
 
 				if i < len(current.Expressions) {
-					expr = current.Expressions[i]
+					generateByteCode(current.Expressions[i], symbolTable, fn)
 				}
 
-				if len(quasi.Raw) > 0 {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
-					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
-				}
+				fn.ValueChunk().EmitByte(chunk.OP_ADD)
+				adds++
+			}
+			popStack = prevPopStack
 
-				if tail {
-					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_LITERAL_END)
-					break
-				}
+			if need > adds {
+				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 
-				if expr != nil {
-					generateByteCode(expr, symbolTable, fn)
-					if expr.IsExpression {
-						fn.ValueChunk().EmitByte(chunk.OP_CALL)
-					}
-					fn.ValueChunk().EmitByte(chunk.OP_TEMPLATE_PUSH_STRING)
-				}
 			}
 		}
 	case parser.NODE_TRY_STATEMENT:

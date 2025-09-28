@@ -97,7 +97,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		bObj, _ := allocator.GetObject(b.GetHandle())
 
 		if aObj.Type() == object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
-			return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + bObj.String())))
+			return value.EncodeHandle(allocator.Allocate(native.LightString((aObj.String() + bObj.String()))))
 		} else {
 			// runtime error?
 		}
@@ -1099,47 +1099,6 @@ func (vm *VM) run() (value.Value, error) {
 				heapVars[heapScopesCount] = []value.Value{}
 				setHeapScopes(frame.fn.ValueChunk(), heapScopesCount)
 				frame.fn.SetHeapScope(heapScopesCount)
-			}
-		case chunk.OP_TEMPLATE_LITERAL_START:
-			{
-				builder := value.EncodeHandle(allocator.Allocate(object.NewObjTemplateLiteral()))
-				vm.push(builder)
-			}
-		case chunk.OP_TEMPLATE_PUSH_STRING:
-			{
-				v := vm.pop()
-				builder := vm.peek()
-
-				obj, err := allocator.GetObject(builder.GetHandle())
-
-				if err != nil {
-					return value.EncodedUndefined(), err
-				}
-
-				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
-					b.PushString(stringer.String(v))
-				} else {
-					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
-				}
-
-			}
-		case chunk.OP_TEMPLATE_LITERAL_END:
-			{
-				builder := vm.pop()
-
-				obj, err := allocator.GetObject(builder.GetHandle())
-
-				if err != nil {
-					return value.EncodedUndefined(), err
-				}
-
-				if b, ok := obj.(*object.ObjTemplateLiteral); ok {
-					str := b.CreateString()
-					handle := allocator.Allocate(native.NewObjString(str))
-					vm.push(value.EncodeHandle(handle))
-				} else {
-					return value.EncodedUndefined(), fmt.Errorf("%s is not an template literal", stringer.String(builder))
-				}
 			}
 		case chunk.OP_TRY_BLOCK_START:
 			{
