@@ -700,7 +700,21 @@ func (vm *VM) run() (value.Value, error) {
 						if member.IsInteger() {
 							value := obj.GetElementAt(int(member.AsNumber()))
 							vm.push(value)
-							continue
+						} else {
+							v := obj.GetMember(member)
+
+							if v.IsObject() {
+								member, err := allocator.GetObject(v.GetHandle())
+
+								if err != nil {
+									return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
+								}
+
+								if _, ok := member.(native.Instancer); ok {
+									v = native.NewMethodHandle(objObject, member)
+								}
+							}
+							vm.push(v)
 						}
 					}
 				case native.LightString:
@@ -712,7 +726,7 @@ func (vm *VM) run() (value.Value, error) {
 							member, err := allocator.GetObject(v.GetHandle())
 
 							if err != nil {
-								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %s", err)
+								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 
 							if _, ok := member.(native.Instancer); ok {
@@ -720,7 +734,6 @@ func (vm *VM) run() (value.Value, error) {
 							}
 						}
 						vm.push(v)
-						continue
 					}
 				case *native.ObjStringBuilder:
 					{
@@ -731,7 +744,7 @@ func (vm *VM) run() (value.Value, error) {
 							member, err := allocator.GetObject(v.GetHandle())
 
 							if err != nil {
-								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %s", err)
+								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 
 							if _, ok := member.(native.Instancer); ok {
@@ -739,46 +752,26 @@ func (vm *VM) run() (value.Value, error) {
 							}
 						}
 						vm.push(v)
-						continue
 					}
-				}
-				if str, ok := objObject.(native.LightString); ok {
+				case object.Hashable:
+					{
+						v := obj.GetMember(member)
 
-					boxed := native.NewObjString(str.String())
-					value := boxed.GetMember(member)
+						if v.IsObject() {
+							member, err := allocator.GetObject(v.GetHandle())
 
-					if value.IsObject() {
-						member, err := allocator.GetObject(value.GetHandle())
+							if err != nil {
+								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
+							}
 
-						if err != nil {
-							continue
+							if _, ok := member.(native.Instancer); ok {
+								v = native.NewMethodHandle(objObject, member)
+							}
 						}
-
-						if _, ok := member.(native.Instancer); ok {
-							value = native.NewMethodHandle(boxed, member)
-						}
+						vm.push(v)
 					}
-					vm.push(value)
-					continue
-				}
-
-				if object, ok := objObject.(object.Hashable); ok {
-					value := object.GetMember(member)
-
-					if value.IsObject() {
-						member, err := allocator.GetObject(value.GetHandle())
-
-						if err != nil {
-							continue
-						}
-
-						if _, ok := member.(native.Instancer); ok {
-							value = native.NewMethodHandle(objObject, member)
-						}
-					}
-					vm.push(value)
-				} else {
-					return value.EncodedUndefined(), fmt.Errorf("cant get property: %s from: %v", stringer.String(member), hash)
+				default:
+					return value.EncodedUndefined(), fmt.Errorf("can't get %s from %s", stringer.String(member), stringer.String(hash))
 				}
 			}
 		case chunk.OP_PUSH_UNDEFINED:
@@ -787,10 +780,10 @@ func (vm *VM) run() (value.Value, error) {
 			}
 		case chunk.OP_CALL:
 			{
-				callee := vm.pop()
+				calleeHandle := vm.pop()
 
-				if callee.IsObject() {
-					callee, err := allocator.GetObject(callee.GetHandle())
+				if calleeHandle.IsObject() {
+					callee, err := allocator.GetObject(calleeHandle.GetHandle())
 
 					if err != nil {
 						return value.EncodedUndefined(), err
@@ -975,7 +968,6 @@ func (vm *VM) run() (value.Value, error) {
 									arg := vm.pop()
 									vm.push(method.Includes(thisCtx.(*native.ObjString), stringer.String(arg)))
 								}
-
 							case *native.ToString:
 								{
 									handle := allocator.Allocate(native.NewObjString(method.ToString(thisCtx)))
@@ -999,6 +991,32 @@ func (vm *VM) run() (value.Value, error) {
 
 									vm.log(arg)
 									vm.push(value.EncodedUndefined())
+								}
+							case *native.Next:
+								{
+									generator := thisCtx.(*native.ObjGenerator)
+									// need to fix the -2, it's because OP_PUSH_UNDEFINED and OP_RETURN are currently added automatically
+									if generator.Ip == len(generator.ValueChunk().Code)-2 {
+										d := native.NewObjectHash()
+										d.SetMember(native.KEY_DONE, value.EncodeTrue())
+										vm.push(value.EncodeHandle(allocator.Allocate(d)))
+										continue
+									}
+
+									vm.Call(generator, ip, value.EncodedUndefined())
+
+									frame = vm.currentFrame()
+									valueChunk = *frame.fn.ValueChunk()
+
+									ip = generator.Ip
+
+									if len(generator.Locals) > 0 {
+										for _, v := range generator.Locals {
+											vm.push(v)
+											vm.pop()
+											vm.stackTop++
+										}
+									}
 								}
 							}
 						}
@@ -1075,6 +1093,11 @@ func (vm *VM) run() (value.Value, error) {
 							ip = 0
 							frame.localStart -= int(argCount)
 						}
+					case *native.ObjGenerator:
+						{
+							gen := fn.Clone()
+							vm.push(value.EncodeHandle(allocator.Allocate(gen)))
+						}
 					case object.Callable:
 						{
 							vm.Call(fn, ip, value.EncodedUndefined())
@@ -1089,7 +1112,7 @@ func (vm *VM) run() (value.Value, error) {
 						}
 					}
 				} else {
-					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(callee))
+					return value.EncodedUndefined(), fmt.Errorf("%s is not a function", stringer.String(calleeHandle))
 				}
 			}
 		case chunk.OP_RETURN:
@@ -1521,12 +1544,39 @@ func (vm *VM) run() (value.Value, error) {
 					c.PushProperty(k, v)
 				} else {
 					return value.EncodedUndefined(), fmt.Errorf("%s was not an class object", stringer.String(class))
-
 				}
 			}
 		case chunk.OP_THIS:
 			{
 				vm.push(frame.thisCtx)
+			}
+		case chunk.OP_YIELD:
+			{
+				v := native.NewObjectHash()
+				v.SetMember(native.KEY_VALUE, vm.pop())
+				d := value.EncodeFalse()
+
+				if ip >= len(frame.fn.ValueChunk().Code) {
+					d = value.EncodeTrue()
+				}
+
+				locals := make([]value.Value, vm.stackTop-frame.localStart)
+				for i, v := range vm.stack[frame.localStart:vm.stackTop] {
+					locals[i] = v
+					vm.pop()
+				}
+
+				frame.fn.(*native.ObjGenerator).Ip = ip
+				frame.fn.(*native.ObjGenerator).Locals = locals
+
+				v.SetMember(native.KEY_DONE, d)
+
+				ip = frame.returnIp
+				vm.frameCount--
+				frame = vm.currentFrame()
+				valueChunk = *frame.fn.ValueChunk()
+				vm.push(value.EncodeHandle(allocator.Allocate(v)))
+
 			}
 		}
 	}

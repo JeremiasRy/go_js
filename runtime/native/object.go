@@ -37,11 +37,12 @@ type ObjObject struct {
 }
 
 func NewObjectHash() *ObjObject {
-	return &ObjObject{
+	o := &ObjObject{
 		init:    0,
 		Members: map[string]ObjectValueEntry{},
 	}
-
+	o.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	return o
 }
 
 func (*ObjObject) Type() object.ObjType {
@@ -187,10 +188,14 @@ func (*ObjectValues) Values(o value.Value) []value.Value {
 		case *ObjObject:
 			{
 				r := make([]value.Value, len(obj.Members))
-				for _, v := range obj.Members {
+				for k, v := range obj.Members {
+					if k == PROTOTYPE_KEY {
+						continue
+					}
 					r[v.init-1] = v.Value
 				}
-				return r
+				// remove __proto__
+				return r[1:]
 			}
 		}
 	}
@@ -221,10 +226,14 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 			{
 				r := make([]value.Value, len(obj.Members))
 				for k, v := range obj.Members {
+					if k == PROTOTYPE_KEY {
+						continue
+					}
 					val := value.EncodeHandle(allocator.Allocate(NewString(k)))
 					r[v.init-1] = val
 				}
-				return r
+				// remove __proto__
+				return r[1:]
 			}
 		}
 	}

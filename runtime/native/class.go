@@ -2,6 +2,7 @@ package native
 
 import (
 	"fmt"
+
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"

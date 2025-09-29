@@ -25,6 +25,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				var fn object.Callable
 				if node.IsAsync {
 					fn = native.NewAsyncFunction(name, arity, nil)
+				} else if node.IsGenerator {
+					fn = native.NewGenerator(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
 				}
@@ -53,10 +55,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				var fn object.Callable
 				if node.IsAsync {
 					fn = native.NewAsyncFunction(name, arity, nil)
+				} else if node.IsGenerator {
+					fn = native.NewGenerator(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
 				}
-
 				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
 		}

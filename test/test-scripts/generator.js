@@ -1,9 +1,29 @@
 function* numberGenerator() {
+    let state = 100
+    console.log(`travelling ${state}`)
     yield 1;
+    state += state
+    console.log(`travelling ${state}`)
     yield 2;
+    state += state
+    console.log(`travelling ${state}`)
     yield 3;
 }
 
 const gen = numberGenerator();
-console.log(gen.next().value);
-console.log(gen.next().value);
+let n = gen.next()
+console.log(n.value);
+console.log(n.done);
+
+n = gen.next()
+console.log(n.value);
+console.log(n.done);
+
+n = gen.next()
+console.log(n.value);
+console.log(n.done);
+
+n = gen.next()
+console.log(n.value);
+console.log(n.done);
+

@@ -23,4 +23,5 @@ func Init() {
 
 	initArrayPrototype()
 	initStringPrototype()
+	initGeneratorPrototype()
 }
