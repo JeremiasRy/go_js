@@ -403,7 +403,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				switch current.AssignmentOperator {
 				case parser.ASSIGN:
 					{
+						prevPopStack := popStack
+						popStack = false
 						generateByteCode(current.Right, symbolTable, fn)
+						popStack = prevPopStack
 
 						if variable.undeclared {
 							fn.ValueChunk().EmitByte(defineOp)
@@ -886,11 +889,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
-				key := value.EncodeHandle(allocator.Allocate(native.LightString("message")))
 				msg := value.EncodeHandle(allocator.Allocate(native.LightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
 
 				err := native.NewError()
-				err.SetMember(key, msg)
+				err.SetMember(native.KEY_MESSAGE, msg)
 
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(err)))
 				fn.ValueChunk().EmitByte(chunk.OP_THROW)
@@ -1260,6 +1262,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Value.(*parser.Node), symbolTable, fn)
 
 			fn.ValueChunk().EmitByte(chunk.OP_PUSH_PROPERTY)
+		}
+	case parser.NODE_YIELD_EXPRESSION:
+		{
+			generateByteCode(current.Argument, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_YIELD)
 		}
 	}
 }

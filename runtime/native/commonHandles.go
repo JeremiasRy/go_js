@@ -33,6 +33,13 @@ var (
 
 	// error
 	KEY_MESSAGE value.Value
+
+	// generator
+	KEY_THROW  value.Value
+	KEY_NEXT   value.Value
+	KEY_RETURN value.Value
+	KEY_VALUE  value.Value
+	KEY_DONE   value.Value
 )
 
 func createCommonHandles() {
@@ -54,4 +61,10 @@ func createCommonHandles() {
 	KEY_CTOR = value.EncodeHandle(allocator.Allocate(LightString("constructor")))
 
 	KEY_MESSAGE = value.EncodeHandle(allocator.Allocate(LightString("message")))
+
+	KEY_THROW = value.EncodeHandle(allocator.Allocate(LightString("throw")))
+	KEY_NEXT = value.EncodeHandle(allocator.Allocate(LightString("next")))
+	KEY_RETURN = value.EncodeHandle(allocator.Allocate(LightString("return")))
+	KEY_VALUE = value.EncodeHandle(allocator.Allocate(LightString("value")))
+	KEY_DONE = value.EncodeHandle(allocator.Allocate(LightString("done")))
 }

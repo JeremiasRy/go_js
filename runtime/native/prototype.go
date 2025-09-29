@@ -15,13 +15,15 @@ const (
 	PROMISE_CONSTRUCTOR_NAME string = "Promise"
 	ERROR_CONSTRUCTOR_NAME   string = "Error"
 	DATE_CONSTRUCTOR_NAME    string = "Date"
+	GENERATOR_NAME           string = "Generator"
 )
 
 var (
-	PROTOTYPE_OBJECT value.Value
-	PROTOTYPE_ARRAY  value.Value
-	PROTOTYPE_STRING value.Value
-	PROTOTYPE_DATE   value.Value
+	PROTOTYPE_OBJECT    value.Value
+	PROTOTYPE_ARRAY     value.Value
+	PROTOTYPE_STRING    value.Value
+	PROTOTYPE_DATE      value.Value
+	PROTOTYPE_GENERATOR value.Value
 )
 
 type Prototype struct {
@@ -122,4 +124,29 @@ func initStringPrototype() {
 	p.SetMember(KEY_TOUPPERCASE, toUpperCase)
 
 	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
+}
+
+func initGeneratorPrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_GENERATOR")
+	}
+
+	p := &Prototype{
+		name: GENERATOR_NAME,
+	}
+
+	p.Members = map[string]ObjectValueEntry{}
+
+	next := value.EncodeHandle(allocator.Allocate(NewNext()))
+	throw := value.EncodeHandle(allocator.Allocate(NewThrow()))
+	return_ := value.EncodeHandle(allocator.Allocate(NewReturn()))
+
+	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+
+	p.SetMember(KEY_NEXT, next)
+	p.SetMember(KEY_THROW, throw)
+	p.SetMember(KEY_RETURN, return_)
+
+	PROTOTYPE_GENERATOR = value.EncodeHandle(allocator.Allocate(p))
+
 }
