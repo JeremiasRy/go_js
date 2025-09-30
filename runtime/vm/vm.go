@@ -503,6 +503,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_DEFINE_HEAP_VAR:
 			{
 				variable := vm.pop()
+				if variable == value.TAG_METHOD_HANDLE {
+					variable = vm.pop()
+					vm.pop() // pop this context
+				}
 				if scope, found := heapVars[f.fn.GetHeapScope()]; found {
 					scope = append(scope, variable)
 					heapVars[f.fn.GetHeapScope()] = scope
@@ -540,6 +544,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_DEFINE_GLOBAL:
 			{
 				v := vm.pop()
+				if v == value.TAG_METHOD_HANDLE {
+					v = vm.pop()
+					vm.pop() // pop this context
+				}
 				if v.IsObject() {
 					obj, err := allocator.GetObject(v.GetHandle())
 
@@ -612,6 +620,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_DEFINE_LOCAL:
 			{
 				v := vm.pop()
+				if v == value.TAG_METHOD_HANDLE {
+					v = vm.pop()
+					vm.pop() // pop this context
+				}
 
 				if v.IsObject() {
 					obj, err := allocator.GetObject(v.GetHandle())
