@@ -6,6 +6,7 @@ import (
 )
 
 type ObjNativeFn struct {
+	object.Ctx
 	name string
 }
 

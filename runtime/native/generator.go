@@ -63,7 +63,6 @@ func (*ObjGenerator) ReturnsPromise(v bool) {
 }
 
 type Next struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -74,7 +73,6 @@ func NewNext() *Next {
 }
 
 type Return struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -85,7 +83,6 @@ func NewReturn() *Return {
 }
 
 type Throw struct {
-	InstanceMethod
 	ObjNativeFn
 }
 

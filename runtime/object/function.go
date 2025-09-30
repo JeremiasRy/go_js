@@ -4,7 +4,15 @@ import (
 	"go_js/value"
 )
 
+type Ctx struct{}
+type NeedsContext interface {
+	Context()
+}
+
+func (Ctx) Context() {}
+
 type ObjFunction struct {
+	Ctx
 	Name      string
 	Chunk     *value.ValueChunk
 	Arity     int

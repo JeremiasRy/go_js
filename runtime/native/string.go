@@ -75,7 +75,6 @@ func (str *ObjString) String() string {
 // prototype methods
 
 type StringToUpperCase struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -85,12 +84,11 @@ func NewStringToUpperCase() *StringToUpperCase {
 	return toUpperCase
 }
 
-func (toUpperCase *StringToUpperCase) ToUpperCase(owner *ObjString) *ObjString {
-	return NewObjString(strings.ToUpper(owner.Value))
+func (toUpperCase *StringToUpperCase) ToUpperCase(owner string) *ObjString {
+	return NewObjString(strings.ToUpper(owner))
 }
 
 type StringIncludes struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -101,14 +99,13 @@ func NewStringIncludes() *StringIncludes {
 	return fn
 }
 
-func (*StringIncludes) Includes(owner *ObjString, str string) value.Value {
-	if strings.Contains(owner.Value, str) {
+func (*StringIncludes) Includes(owner string, str string) value.Value {
+	if strings.Contains(owner, str) {
 		return value.EncodeTrue()
 	}
 	return value.EncodeFalse()
 }
 
 type StringLength struct {
-	InstanceMethod
 	ObjNativeFn
 }

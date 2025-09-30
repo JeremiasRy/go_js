@@ -83,7 +83,6 @@ func TypeDecoratedString(v value.Value) string {
 				l := len(obj.Members)
 				c := 0
 				for k, v := range obj.Members {
-					fmt.Println(k)
 					c++
 					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
 					if l != c {
@@ -140,6 +139,8 @@ func TypeDecoratedString(v value.Value) string {
 		return "undefined"
 	} else if v.IsType(value.TAG_NIL) {
 		return "null"
+	} else if v.IsType(value.TAG_METHOD_HANDLE) {
+		return "METHOD_HANDLE"
 	} else {
 		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 	}

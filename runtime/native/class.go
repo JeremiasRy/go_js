@@ -59,20 +59,3 @@ func (oc *ObjClass) NewInstance() *Instance {
 
 	return i
 }
-
-type Method struct {
-	InstanceMethod
-	Fn object.Callable
-}
-
-func (m *Method) String() string {
-	return "Method"
-}
-
-func (m *Method) Type() object.ObjType {
-	return object.OBJ_CLASS_METHOD
-}
-
-func NewMethod(fn object.Callable) *Method {
-	return &Method{Fn: fn}
-}

@@ -155,7 +155,6 @@ func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func())
 }
 
 type Log struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
