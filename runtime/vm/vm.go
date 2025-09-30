@@ -207,10 +207,8 @@ func (vm *VM) Run(wg *sync.WaitGroup) {
 Run:
 	fn := queue.Dequeue()
 	for fn != nil {
-
 		f, c := vm.Call(fn, nil, value.EncodedUndefined(), 0)
 		vm.run(f, c)
-
 		fn = queue.Dequeue()
 	}
 
@@ -525,7 +523,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
-						v = native.NewMethodHandle(vm.currentFrame().thisCtx, obj)
+						vm.push(vm.currentFrame().thisCtx)
+						vm.push(v)
+						vm.push(value.TAG_METHOD_HANDLE)
+						continue
 					}
 				}
 				vm.push(v)
@@ -563,6 +564,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_GET_GLOBAL:
 			{
 				global := c.Code[ip]
+				ip++
 				v := vm.getGlobal(int(global))
 
 				if v.IsObject() {
@@ -573,15 +575,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
-						v = native.NewMethodHandle(vm.currentFrame().thisCtx, obj)
+						vm.push(vm.currentFrame().thisCtx)
+						vm.push(v)
+						vm.push(value.TAG_METHOD_HANDLE)
+						continue
 					}
 				}
 				vm.push(v)
-				ip++
 			}
 		case chunk.OP_SET_GLOBAL:
 			{
 				global := c.Code[ip]
+				ip++
 				v := vm.pop()
 				if v.IsObject() {
 					obj, err := allocator.GetObject(v.GetHandle())
@@ -599,7 +604,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 				globals[global] = v
-				ip++
 			}
 		case chunk.OP_POP_LOCAL:
 			{
@@ -635,7 +639,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_GET_LOCAL:
 			{
 				slot := int(c.Code[ip])
+				ip++
 				v := vm.stack[f.localStart+slot]
+
 				if v.IsObject() {
 					obj, err := allocator.GetObject(v.GetHandle())
 
@@ -644,11 +650,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
-						v = native.NewMethodHandle(vm.currentFrame().thisCtx, obj)
+						vm.push(vm.currentFrame().thisCtx)
+						vm.push(v)
+						vm.push(value.TAG_METHOD_HANDLE)
+						continue
 					}
 				}
 				vm.push(v)
-				ip++
 			}
 		case chunk.OP_SET_LOCAL:
 			{
@@ -727,15 +735,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				member := vm.pop()
 				objValue := vm.pop()
+
+				if objValue == value.TAG_METHOD_HANDLE {
+					objValue = vm.pop()
+					vm.pop() // pop this context
+				}
+
 				obj, err := allocator.GetObject(objValue.GetHandle())
 
 				if err != nil {
 					return value.EncodedUndefined(), fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", stringer.String(objValue), err)
-				}
-
-				if methodHandle, ok := obj.(*native.MethodHandle); ok {
-					obj = methodHandle.Function
-					objValue = value.EncodeHandle(allocator.Allocate(obj))
 				}
 
 				switch obj := obj.(type) {
@@ -755,7 +764,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								}
 
 								if _, ok := member.(object.NeedsContext); ok {
-									v = native.NewMethodHandle(objValue, member)
+									vm.push(objValue)
+									vm.push(v)
+									vm.push(value.TAG_METHOD_HANDLE)
+									continue
 								}
 							}
 							vm.push(v)
@@ -773,7 +785,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 							if _, ok := member.(object.NeedsContext); ok {
-								v = native.NewMethodHandle(value.EncodeHandle(allocator.Allocate(boxed)), member)
+								vm.push(objValue)
+								vm.push(value.EncodeHandle(allocator.Allocate(member)))
+								vm.push(value.TAG_METHOD_HANDLE)
+								continue
 							}
 						}
 						vm.push(v)
@@ -791,7 +806,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 
 							if _, ok := member.(object.NeedsContext); ok {
-								v = native.NewMethodHandle(value.EncodeHandle(allocator.Allocate(boxed)), member)
+								vm.push(objValue)
+								vm.push(v)
+								vm.push(value.TAG_METHOD_HANDLE)
+								continue
 							}
 						}
 						vm.push(v)
@@ -807,7 +825,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								return value.EncodedUndefined(), fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 							if _, ok := member.(object.NeedsContext); ok {
-								v = native.NewMethodHandle(objValue, member)
+								vm.push(objValue)
+								vm.push(v)
+								vm.push(value.TAG_METHOD_HANDLE)
+								continue
 							}
 						}
 						vm.push(v)
@@ -823,18 +844,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_CALL:
 			{
 				handle := vm.pop()
-				mHandle, err := allocator.GetObject(handle.GetHandle())
+
+				if handle != value.TAG_METHOD_HANDLE {
+					panic("should always have a handle")
+				}
+
+				callee := vm.pop()
+				thisCtx := vm.pop()
+
+				fn, err := allocator.GetObject(callee.GetHandle())
 
 				if err != nil {
 					return value.EncodedUndefined(), err
 				}
 
-				methodHandle := mHandle.(*native.MethodHandle)
-
-				thisCtx := methodHandle.ThisContext
-				callee := methodHandle.Function
-
-				switch fn := callee.(type) {
+				switch fn := fn.(type) {
 				case *native.ObjAsyncFunction:
 					{
 						if !fn.ReturnArgumentIsPromise {
@@ -1346,7 +1370,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								builder.push(v)
 							}
 
-							builder.push(native.NewMethodHandle(instance, constructor))
+							builder.push(instance)
+							builder.push(ctor)
+							builder.push(value.TAG_METHOD_HANDLE)
 							f, c := builder.Call(fn, nil, value.EncodedUndefined(), argCount)
 							builder.run(f, c)
 

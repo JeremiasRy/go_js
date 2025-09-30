@@ -14,7 +14,7 @@ import (
 	"sync"
 )
 
-var PROFILE = true
+var PROFILE = false
 
 func main() {
 	var debug bool = false

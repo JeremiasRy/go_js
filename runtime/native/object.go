@@ -1,31 +1,11 @@
 package native
 
 import (
-	"fmt"
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
 	"strconv"
 )
-
-type MethodHandle struct {
-	ThisContext value.Value
-	Function    object.Object
-}
-
-func (m *MethodHandle) String() string {
-	this, _ := allocator.GetObject(m.ThisContext.GetHandle())
-	return fmt.Sprintf("Method handle { ThisContext: %s, Function: %s }", this, m.Function)
-}
-
-func (m *MethodHandle) Type() object.ObjType {
-	return object.OBJ_METHOD_HANDLE
-}
-
-func NewMethodHandle(thisContext value.Value, fn object.Object) value.Value {
-	h := &MethodHandle{ThisContext: thisContext, Function: fn}
-	return value.EncodeHandle(allocator.Allocate(h))
-}
 
 type ObjectValueEntry struct {
 	Value value.Value

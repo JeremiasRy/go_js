@@ -8,15 +8,16 @@ import (
 type Value uint64
 
 const (
-	STANDARD_NAN  Value = 0x7ff8000000000000
-	QNAN          Value = 0x7ffc000000000000
-	SIGN          Value = 0x8000000000000000
-	ENCODE_MASK   Value = math.MaxUint64 ^ (QNAN | SIGN)
-	TAG_OBJ       Value = QNAN | SIGN
-	TAG_NIL       Value = QNAN | 0x0000000000000001
-	TAG_UNDEFINED Value = QNAN | 0x0000000000000002
-	TAG_TRUE      Value = QNAN | 0x2000000000000
-	TAG_FALSE     Value = QNAN | 0x1000000000000
+	STANDARD_NAN      Value = 0x7ff8000000000000
+	QNAN              Value = 0x7ffc000000000000
+	SIGN              Value = 0x8000000000000000
+	ENCODE_MASK       Value = math.MaxUint64 ^ (QNAN | SIGN)
+	TAG_OBJ           Value = QNAN | SIGN
+	TAG_NIL           Value = QNAN | 0x0000000000000001
+	TAG_UNDEFINED     Value = QNAN | 0x0000000000000002
+	TAG_TRUE          Value = QNAN | 0x2000000000000
+	TAG_FALSE         Value = QNAN | 0x1000000000000
+	TAG_METHOD_HANDLE Value = QNAN | 0x0000000000010
 )
 
 type ValueChunk struct {
@@ -91,7 +92,7 @@ func (v Value) IsObject() bool {
 
 func (v Value) IsNaN() bool {
 	return (v&STANDARD_NAN == STANDARD_NAN) &&
-		(v&TAG_OBJ != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE)
+		(v&TAG_OBJ != TAG_OBJ) && (v != TAG_NIL) && (v != TAG_UNDEFINED) && (v != TAG_FALSE) && (v != TAG_TRUE) && (v != TAG_METHOD_HANDLE)
 }
 
 func (v Value) AsNumber() float64 {
@@ -130,6 +131,10 @@ func EncodeFalse() Value {
 	return TAG_FALSE
 }
 
+func EncodeMethodHandle() Value {
+	return TAG_METHOD_HANDLE
+}
+
 func (v Value) IsBoolean() bool {
 	return (TAG_TRUE&v == TAG_TRUE) || (TAG_FALSE&v == TAG_FALSE)
 }
@@ -142,7 +147,7 @@ func (v Value) IsType(tag Value) bool {
 }
 
 func (v Value) IsNumber() bool {
-	return !v.IsObject() && !v.IsBoolean() && !v.IsType(TAG_NIL) && !v.IsType(TAG_UNDEFINED)
+	return !v.IsObject() && !v.IsBoolean() && !v.IsType(TAG_NIL) && !v.IsType(TAG_UNDEFINED) && !v.IsType(TAG_METHOD_HANDLE)
 }
 
 func (v Value) IsInteger() bool {
