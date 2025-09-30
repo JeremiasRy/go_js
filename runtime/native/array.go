@@ -55,7 +55,6 @@ func (oa *ObjArr) Keys() []value.Value {
 }
 
 type ArrayForEach struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -66,7 +65,6 @@ func NewArrayForEach() *ArrayForEach {
 }
 
 type ArrayPush struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -82,7 +80,6 @@ func (p *ArrayPush) Push(owner *ObjArr, v value.Value) value.Value {
 }
 
 type ArrayFilter struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -93,7 +90,6 @@ func NewArrayFilter() *ArrayFilter {
 }
 
 type ArrayMap struct {
-	InstanceMethod
 	ObjNativeFn
 }
 
@@ -104,7 +100,6 @@ func NewArrayMap() *ArrayMap {
 }
 
 type ArrayReduce struct {
-	InstanceMethod
 	ObjNativeFn
 }
 

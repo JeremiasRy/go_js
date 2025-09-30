@@ -9,19 +9,20 @@ import (
 )
 
 type MethodHandle struct {
-	ThisContext object.Object
+	ThisContext value.Value
 	Function    object.Object
 }
 
 func (m *MethodHandle) String() string {
-	return fmt.Sprintf("Method handle { ThisContext: %s, Function: %s }", m.ThisContext, m.Function)
+	this, _ := allocator.GetObject(m.ThisContext.GetHandle())
+	return fmt.Sprintf("Method handle { ThisContext: %s, Function: %s }", this, m.Function)
 }
 
 func (m *MethodHandle) Type() object.ObjType {
 	return object.OBJ_METHOD_HANDLE
 }
 
-func NewMethodHandle(thisContext, fn object.Object) value.Value {
+func NewMethodHandle(thisContext value.Value, fn object.Object) value.Value {
 	h := &MethodHandle{ThisContext: thisContext, Function: fn}
 	return value.EncodeHandle(allocator.Allocate(h))
 }
@@ -54,7 +55,6 @@ func (oh *ObjObject) String() string {
 }
 
 type ToString struct {
-	InstanceMethod
 	ObjNativeFn
 }
 

@@ -31,6 +31,26 @@ func NewChunk() *ValueChunk {
 	}
 }
 
+// reads an uint32 and incerements ip
+func (c ValueChunk) ReadInt(ip *int) int {
+	start := *ip
+
+	fourth := int(c.Code[start]) << 24
+	third := int(c.Code[start+1]) << 16
+	second := int(c.Code[start+2]) << 8
+	first := int(c.Code[start+3])
+
+	result := first | second | third | fourth
+
+	if result >= math.MaxUint32 {
+		panic("we cap at uint32 with operands")
+	}
+
+	*ip = start + 4
+
+	return result
+}
+
 func (c *ValueChunk) WriteConstant(v Value) uint8 {
 	arg := c.AddConstant(v)
 	c.EmitBytes(chunk.OP_CONSTANT, arg)

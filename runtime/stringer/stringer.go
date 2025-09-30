@@ -83,7 +83,6 @@ func TypeDecoratedString(v value.Value) string {
 				l := len(obj.Members)
 				c := 0
 				for k, v := range obj.Members {
-					fmt.Println(k)
 					c++
 					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
 					if l != c {

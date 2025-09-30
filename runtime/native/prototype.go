@@ -31,17 +31,6 @@ type Prototype struct {
 	name string
 }
 
-// somewhat ugly empty struct to recognize instance methods
-type InstanceMethod struct{}
-
-func (InstanceMethod) Instance() {}
-
-type Instancer interface {
-	Instance()
-}
-
-// end of ugly
-
 func (p *Prototype) Name() string {
 	return p.name
 }

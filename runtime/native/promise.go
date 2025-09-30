@@ -21,6 +21,7 @@ var statusToString = map[PromiseStatus]string{
 }
 
 type ObjPromise struct {
+	object.Ctx
 	Status PromiseStatus
 	Value  value.Value
 
@@ -79,6 +80,7 @@ func (pCtor *PromiseConstructor) String() string {
 }
 
 type ResolveFunc struct {
+	object.Ctx
 	owner *ObjPromise
 }
 
