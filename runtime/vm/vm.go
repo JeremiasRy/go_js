@@ -561,7 +561,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				jump := c.ReadInt(&ip)
 
-				if valueAsBoolean(v) {
+				if !valueAsBoolean(v) {
 					ip = jump
 				}
 			}
