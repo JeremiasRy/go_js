@@ -98,11 +98,9 @@ func GetOptions(opts *Options) *Options {
 		}
 	}
 
-	/*
-		if array, ok := options.OnComment.([]*Comment); ok {
-			options.OnComment = pushComment(options, array)
-		}
-	*/
+	if array, ok := options.OnComment.([]*Comment); ok {
+		options.OnComment = pushComment(*options, array)
+	}
 
 	return options
 }

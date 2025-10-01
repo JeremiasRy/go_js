@@ -11,7 +11,9 @@ import (
 	"go_js/queue"
 	"go_js/stringer"
 	"go_js/value"
+	"log"
 	"math"
+	"strings"
 	"sync"
 	"time"
 )
@@ -19,7 +21,9 @@ import (
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
 
+var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
+var imports = make(map[string]value.Value)
 var heapVars = make(map[int][]value.Value)
 var heapScopesCount int
 
@@ -28,6 +32,10 @@ type CallFrame struct {
 	thisCtx    value.Value
 	localStart int
 	returnIp   int
+}
+
+func InitFileRoot(path string) {
+	ROOT_SCRIPT_LOCATION = path
 }
 
 func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp int, this value.Value) {
@@ -50,13 +58,23 @@ type VM struct {
 	stackTop       int
 	exceptionStack []ExceptionState
 
+	exports *native.ObjObject
+
 	debug bool
 }
 
 func NewVM(debug bool) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
-	return &VM{frames: frames, frameCount: 0, stack: stack, stackTop: 0, exceptionStack: []ExceptionState{}, debug: debug}
+
+	return &VM{
+		frames:         frames,
+		frameCount:     0,
+		stack:          stack,
+		stackTop:       0,
+		exceptionStack: []ExceptionState{},
+		debug:          debug,
+	}
 }
 
 func (vm *VM) currentFrame() CallFrame {
@@ -208,7 +226,11 @@ Run:
 	fn := queue.Dequeue()
 	for fn != nil {
 		f, c := vm.Call(fn, nil, value.EncodedUndefined(), 0)
-		vm.run(f, c)
+		_, err := vm.run(f, c)
+
+		if err != nil {
+			log.Fatalf("runtime error: %s", err.Error())
+		}
 		fn = queue.Dequeue()
 	}
 
@@ -568,6 +590,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 				vm.addGlobal(v)
+
+				if vm.debug {
+					fmt.Println("--globals--")
+					fmt.Println()
+					for slot, v := range globals {
+						fmt.Printf("%d: %s |", slot, stringer.String(v))
+					}
+					fmt.Println()
+					fmt.Println("--end globals--")
+				}
+
 			}
 		case chunk.OP_GET_GLOBAL:
 			{
@@ -658,7 +691,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.EncodedUndefined(), fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
+						return value.EncodedUndefined(), fmt.Errorf("failed to fetch object in OP_GET_LOCAL %e", err)
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
@@ -1636,6 +1669,49 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				f = vm.currentFrame()
 				c = *f.fn.ValueChunk()
 				vm.push(value.EncodeHandle(allocator.Allocate(v)))
+			}
+		case chunk.OP_IMPORT:
+			{
+				source := vm.pop()
+				src, _ := allocator.GetObject(source.GetHandle())
+
+				str := src.String()
+				prev := ROOT_SCRIPT_LOCATION
+
+				if str[0] == '.' {
+					str = ROOT_SCRIPT_LOCATION + str[1:]
+					ROOT_SCRIPT_LOCATION = strings.Join(strings.Split(str, "/")[:len(strings.Split(str, "/"))-1], "/")
+				}
+
+				module, err := compiler.CompileModule(str)
+
+				if err != nil {
+					return value.EncodedUndefined(), fmt.Errorf("failed to parser module %e", err)
+				}
+
+				importer := NewVM(vm.debug)
+
+				f, c := importer.Call(module, nil, value.EncodedUndefined(), 0)
+				importer.run(f, c)
+
+				imports[str] = value.EncodeHandle(allocator.Allocate(importer.exports))
+				ROOT_SCRIPT_LOCATION = prev
+			}
+		case chunk.OP_EXPORT:
+			{
+				k := vm.pop()
+				v := vm.pop()
+
+				if v == value.TAG_METHOD_HANDLE {
+					v = vm.pop()
+					vm.pop() // pop this context
+				}
+
+				if vm.exports == nil {
+					vm.exports = native.NewObjectHash()
+				}
+
+				vm.exports.SetMember(k, v)
 			}
 		}
 	}

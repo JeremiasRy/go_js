@@ -11,10 +11,12 @@ import (
 	"log"
 	"os"
 	"runtime/pprof"
+	"strings"
 	"sync"
 )
 
 var PROFILE = false
+var ROOT_FILE_OCATION string
 
 func main() {
 	var debug bool = false
@@ -43,12 +45,19 @@ func main() {
 	}
 
 	b, err := os.ReadFile(os.Args[1])
+	split := strings.Split(os.Args[1], "/")
+
+	rootFileLocation := strings.Join(split[:len(split)-1], "/")
+
+	vm.InitFileRoot(rootFileLocation)
+	compiler.InitRootScriptLocation(rootFileLocation)
+
 	if err != nil {
 		println("Can't read file: ", os.Args[1])
 		os.Exit(1)
 	}
 
-	ast, err := parser.GetAst(b, nil, 0)
+	ast, err := parser.GetAst(b, &parser.Options{SourceType: "module"}, 0)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
