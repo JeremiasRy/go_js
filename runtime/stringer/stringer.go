@@ -11,28 +11,24 @@ import (
 )
 
 func DebugString(v value.Value) string {
-	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsObject() {
+	if v.IsObject() {
 		handle := v.GetHandle()
 		obj, _ := allocator.GetObject(handle)
 		return obj.String()
 
-	} else if v.IsNaN() {
-		return "NaN"
-	} else if v.IsType(value.TAG_UNDEFINED) {
-		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
-		return "null"
-	} else {
-		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 	}
+	if v.IsBoolean() {
+		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+	} else if v.IsType(value.UNDEFINED) {
+		return "undefined"
+	} else if v.IsType(value.NULL) {
+		return "null"
+	}
+	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 }
 
 func String(v value.Value) string {
-	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsObject() {
+	if v.IsObject() {
 		obj, _ := allocator.GetObject(v.GetHandle())
 
 		switch obj := obj.(type) {
@@ -58,21 +54,22 @@ func String(v value.Value) string {
 			}
 		}
 		return obj.String()
-	} else if v.IsNaN() {
-		return "NaN"
-	} else if v.IsType(value.TAG_UNDEFINED) {
-		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
-		return "null"
-	} else {
-		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 	}
+
+	if v.IsBoolean() {
+		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+	} else if v.IsType(value.UNDEFINED) {
+		return "undefined"
+	} else if v.IsType(value.NULL) {
+		return "null"
+	}
+
+	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+
 }
 
 func TypeDecoratedString(v value.Value) string {
-	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsObject() {
+	if v.IsObject() {
 		obj, _ := allocator.GetObject(v.GetHandle())
 
 		switch obj := obj.(type) {
@@ -133,15 +130,17 @@ func TypeDecoratedString(v value.Value) string {
 			}
 		}
 		return obj.String()
-	} else if v.IsNaN() {
-		return "NaN"
-	} else if v.IsType(value.TAG_UNDEFINED) {
+	}
+
+	if v.IsBoolean() {
+		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
+	} else if v.IsType(value.NULL) {
 		return "null"
 	} else if v.IsType(value.TAG_METHOD_HANDLE) {
 		return "METHOD_HANDLE"
-	} else {
-		return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 	}
+	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+
 }

@@ -56,7 +56,7 @@ func (o *ObjObject) Keys() []value.Value {
 
 	p := o.Members[PROTOTYPE_PROPERTY_STRING].Value
 
-	for p != value.TAG_NIL {
+	for p != value.NULL {
 		obj, _ := allocator.GetObject(p.GetHandle())
 		if proto, ok := obj.(*ObjObject); ok {
 			for k := range proto.Members {
@@ -154,8 +154,8 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 
 			proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
 
-			if proto.IsType(value.TAG_NIL) {
-				return value.EncodedUndefined()
+			if proto.IsType(value.NULL) {
+				return value.UNDEFINED
 			}
 
 			protoObj, err := allocator.GetObject(proto.GetHandle())
@@ -179,8 +179,8 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 
 		proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
 
-		if proto.IsType(value.TAG_NIL) {
-			return value.EncodedUndefined()
+		if proto.IsType(value.NULL) {
+			return value.UNDEFINED
 		}
 
 		protoObj, err := allocator.GetObject(proto.GetHandle())
@@ -195,7 +195,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 	}
 
 	// todo: should string intern everything to our Hash
-	return value.EncodedUndefined()
+	return value.UNDEFINED
 }
 
 func (obj *ObjObject) SetMember(k, v value.Value) {

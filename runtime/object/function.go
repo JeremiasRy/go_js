@@ -1,8 +1,6 @@
 package object
 
-import (
-	"go_js/value"
-)
+import "go_js/value"
 
 type Ctx struct{}
 type NeedsContext interface {

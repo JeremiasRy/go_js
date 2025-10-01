@@ -101,9 +101,9 @@ func NewStringIncludes() *StringIncludes {
 
 func (*StringIncludes) Includes(owner string, str string) value.Value {
 	if strings.Contains(owner, str) {
-		return value.EncodeTrue()
+		return value.TRUE
 	}
-	return value.EncodeFalse()
+	return value.FALSE
 }
 
 type StringLength struct {
