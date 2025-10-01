@@ -4,6 +4,9 @@ import (
 	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
+	"log"
+	"os"
+	"strings"
 )
 
 var catchScope = false
@@ -18,6 +21,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		// hoist function declarations
 		for _, node := range current.Body {
+			if node.Type == parser.NODE_EXPORT_NAMED_DECLARATION {
+				node = node.Declaration
+			}
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
 				arity := len(node.Params)
@@ -336,6 +342,40 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				prePass(node, symbolTable)
 			}
 		}
+	case parser.NODE_IMPORT_DECLARATION:
+		{
+			src := string(current.Source.Value.([]byte))
+
+			prev := ROOT_SCRIPT_LOCATION
+			if src[0] == '.' {
+				src = ROOT_SCRIPT_LOCATION + src[1:]
+				ROOT_SCRIPT_LOCATION = strings.Join(strings.Split(src, "/")[:len(strings.Split(src, "/"))-1], "/")
+			}
+
+			b, err := os.ReadFile(src)
+
+			if err != nil {
+				log.Fatalf("failed to read module source %s", err)
+			}
+
+			node, err := parser.GetAst(b, nil, 0)
+
+			if err != nil {
+				log.Fatalf("failed to create ast %s", err)
+			}
+
+			imports[src] = node
+			prePass(node, global)
+			ROOT_SCRIPT_LOCATION = prev
+
+			for _, node := range current.Specifiers {
+				prePass(node, symbolTable)
+			}
+		}
+	case parser.NODE_IMPORT_SPECIFIER:
+		prePass(current.Local, symbolTable)
+	case parser.NODE_EXPORT_NAMED_DECLARATION:
+		prePass(current.Declaration, symbolTable)
 	}
 
 }

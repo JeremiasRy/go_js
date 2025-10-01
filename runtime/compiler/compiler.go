@@ -93,6 +93,12 @@ var unaryOperatorMap = map[parser.UnaryOperator]uint8{
 	parser.UNARY_NEGATE: chunk.OP_NEGATE,
 }
 
+var ROOT_SCRIPT_LOCATION string
+var imports = make(map[string]*parser.Node)
+
+func InitRootScriptLocation(src string) {
+	ROOT_SCRIPT_LOCATION = src
+}
 func newBlockScope(parent *BlockScope) *BlockScope {
 	return &BlockScope{vars: Variables{}, parent: parent}
 }
@@ -282,22 +288,36 @@ func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope)
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+var global *FunctionScope = newFunctionScope(nil, GLOBAL)
+
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
-	var symbolTable *FunctionScope = newFunctionScope(nil, GLOBAL)
 
-	defineObjectConstructor(main, symbolTable)
-	defineConsole(main, symbolTable)
-	defineSetTimeout(main, symbolTable)
-	defineErrorConstructor(main, symbolTable)
-	defineArrayConstructor(main, symbolTable)
-	definePromiseConstructor(main, symbolTable)
-	defineDateConstructor(main, symbolTable)
+	defineObjectConstructor(main, global)
+	defineConsole(main, global)
+	defineSetTimeout(main, global)
+	defineErrorConstructor(main, global)
+	defineArrayConstructor(main, global)
+	definePromiseConstructor(main, global)
+	defineDateConstructor(main, global)
 
-	prePass(ast, symbolTable)
-	generateByteCode(ast, symbolTable, main)
+	prePass(ast, global)
+	generateByteCode(ast, global, main)
 
 	main.ValueChunk().EmitByte(chunk.OP_RETURN)
+
+	return main, nil
+}
+
+var module = false
+
+func CompileModule(src string) (*object.ObjFunction, error) {
+	module = true
+	main := object.NewFunction(fmt.Sprintf("MODULE %s", src), 0, nil)
+	generateByteCode(imports[src], global, main)
+
+	main.ValueChunk().EmitByte(chunk.OP_RETURN)
+	module = false
 	return main, nil
 }
 
@@ -322,7 +342,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fnValue := allocator.Allocate(variable.fn)
 
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-				fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+				if module {
+					fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+				}
 			}
 
 			for _, node := range current.Body {
@@ -1267,6 +1291,35 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			generateByteCode(current.Argument, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_YIELD)
+		}
+	case parser.NODE_IMPORT_DECLARATION:
+		{
+			generateByteCode(current.Source, symbolTable, fn)
+			fn.ValueChunk().EmitBytes(chunk.OP_IMPORT)
+		}
+	case parser.NODE_EXPORT_NAMED_DECLARATION:
+		{
+			generateByteCode(current.Declaration, symbolTable, fn)
+			declaration := current.Declaration
+
+			switch declaration.Type {
+			case parser.NODE_VARIABLE_DECLARATION:
+				{
+					declarator := declaration.Declarations[0]
+					v, _ := symbolTable.findVariable(declarator.Identifier.Name)
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(declarator.Identifier.Name))))
+					fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
+				}
+			case parser.NODE_FUNCTION_DECLARATION:
+				{
+					v, _ := symbolTable.findVariable(declaration.Identifier.Name)
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(declaration.Identifier.Name))))
+					fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
+
+				}
+			}
 		}
 	}
 }

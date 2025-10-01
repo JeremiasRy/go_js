@@ -70,6 +70,8 @@ var opNames = map[uint8]string{
 	chunk.OP_PUSH_PROPERTY:                   "OP_PUSH_PROPERTY",
 	chunk.OP_THIS:                            "OP_THIS",
 	chunk.OP_YIELD:                           "OP_YIELD",
+	chunk.OP_IMPORT:                          "OP_IMPORT",
+	chunk.OP_EXPORT:                          "OP_EXPORT",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -88,6 +90,16 @@ func printFunction(c value.ValueChunk) {
 		}
 		code := opCode[ip]
 		switch code {
+		case chunk.OP_EXPORT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			}
+		case chunk.OP_IMPORT:
+			{
+				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+				ip++
+				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			}
 		case chunk.OP_YIELD:
 			{
 				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
