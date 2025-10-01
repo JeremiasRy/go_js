@@ -836,8 +836,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_IF_STATEMENT:
 		{
+			prevPopStack := popStack
+			popStack = false
 			generateByteCode(current.Test, symbolTable, fn)
-
+			popStack = prevPopStack
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := len(fn.ValueChunk().Code) - 4
 

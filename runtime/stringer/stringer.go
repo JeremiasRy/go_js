@@ -49,7 +49,7 @@ func String(v value.Value) string {
 				var b strings.Builder
 				fmt.Fprint(&b, "{")
 				for k, v := range obj.Members {
-					if k == native.PROTOTYPE_KEY {
+					if k == native.PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
 					fmt.Fprintf(&b, " %s: %s,", k, TypeDecoratedString(v.Value))

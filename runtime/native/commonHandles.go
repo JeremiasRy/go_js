@@ -26,7 +26,11 @@ var (
 	KEY_TOUPPERCASE value.Value
 
 	// object
-	KEY_TOSTRING value.Value
+	KEY_TOSTRING       value.Value
+	KEY_CREATE         value.Value
+	KEY_KEYS           value.Value
+	KEY_VALUES         value.Value
+	KEY_HASOWNPROPERTY value.Value
 
 	// common class syntax
 	KEY_CTOR value.Value
@@ -43,7 +47,7 @@ var (
 )
 
 func createCommonHandles() {
-	KEY_PROTO = value.EncodeHandle(allocator.Allocate(LightString(PROTOTYPE_KEY)))
+	KEY_PROTO = value.EncodeHandle(allocator.Allocate(LightString(PROTOTYPE_PROPERTY_STRING)))
 	KEY_LOG = value.EncodeHandle(allocator.Allocate(LightString("log")))
 
 	KEY_FILTER = value.EncodeHandle(allocator.Allocate(LightString("filter")))
@@ -54,6 +58,10 @@ func createCommonHandles() {
 	KEY_LENGTH = value.EncodeHandle(allocator.Allocate(LightString("length")))
 
 	KEY_TOSTRING = value.EncodeHandle(allocator.Allocate(LightString("toString")))
+	KEY_CREATE = value.EncodeHandle(allocator.Allocate(LightString("create")))
+	KEY_KEYS = value.EncodeHandle(allocator.Allocate(LightString("keys")))
+	KEY_VALUES = value.EncodeHandle(allocator.Allocate(LightString("values")))
+	KEY_HASOWNPROPERTY = value.EncodeHandle(allocator.Allocate(LightString("hasOwnProperty")))
 
 	KEY_INCLUDES = value.EncodeHandle(allocator.Allocate(LightString("includes")))
 	KEY_TOUPPERCASE = value.EncodeHandle(allocator.Allocate(LightString("toUpperCase")))

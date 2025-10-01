@@ -8,14 +8,14 @@ import (
 )
 
 const (
-	PROTOTYPE_KEY            string = "__proto__"
-	OBJECT_CONSTRUCTOR_NAME  string = "Object"
-	ARRAY_CONSTRUCTOR_NAME   string = "Array"
-	STRING_CONSTRUCTOR_NAME  string = "String"
-	PROMISE_CONSTRUCTOR_NAME string = "Promise"
-	ERROR_CONSTRUCTOR_NAME   string = "Error"
-	DATE_CONSTRUCTOR_NAME    string = "Date"
-	GENERATOR_NAME           string = "Generator"
+	PROTOTYPE_PROPERTY_STRING string = "prototype"
+	OBJECT_CONSTRUCTOR_NAME   string = "Object"
+	ARRAY_CONSTRUCTOR_NAME    string = "Array"
+	STRING_CONSTRUCTOR_NAME   string = "String"
+	PROMISE_CONSTRUCTOR_NAME  string = "Promise"
+	ERROR_CONSTRUCTOR_NAME    string = "Error"
+	DATE_CONSTRUCTOR_NAME     string = "Date"
+	GENERATOR_NAME            string = "Generator"
 )
 
 var (
@@ -62,6 +62,7 @@ func initObjectPrototype() {
 	p.SetMember(KEY_PROTO, value.EncodeNil())
 
 	p.SetMember(KEY_TOSTRING, handle)
+	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(allocator.Allocate(NewHasOwnProperty())))
 
 	PROTOTYPE_OBJECT = value.EncodeHandle(allocator.Allocate(p))
 }

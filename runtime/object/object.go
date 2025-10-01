@@ -60,6 +60,7 @@ type Object interface {
 type Hashable interface {
 	GetMember(k value.Value) value.Value
 	SetMember(k, v value.Value)
+	HasOwn(prop value.Value) bool
 }
 
 type Callable interface {

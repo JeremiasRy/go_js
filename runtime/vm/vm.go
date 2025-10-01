@@ -590,17 +590,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 				vm.addGlobal(v)
-
-				if vm.debug {
-					fmt.Println("--globals--")
-					fmt.Println()
-					for slot, v := range globals {
-						fmt.Printf("%d: %s |", slot, stringer.String(v))
-					}
-					fmt.Println()
-					fmt.Println("--end globals--")
-				}
-
 			}
 		case chunk.OP_GET_GLOBAL:
 			{
@@ -1202,6 +1191,22 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.Now:
 					vm.push(fn.Now())
+				case *native.Create:
+					{
+						arg := vm.pop()
+						o := native.NewObjectFromObject(arg)
+						vm.push(value.EncodeHandle(allocator.Allocate(o)))
+					}
+				case *native.HasOwnProperty:
+					{
+						arg := vm.pop()
+
+						if fn.HasOwn(thisCtx, arg) {
+							vm.push(value.TAG_TRUE)
+						} else {
+							vm.push(value.TAG_FALSE)
+						}
+					}
 				}
 
 			}
