@@ -87,6 +87,7 @@ var operatorMap = map[parser.BinaryOperator]uint8{
 	parser.STRICT_NOT_EQUALS:  chunk.OP_STRICT_NOT_EQUALS,
 	"||":                      chunk.OP_LOGICAL_OR,
 	"&&":                      chunk.OP_LOGICAL_AND,
+	parser.IN:                 chunk.OP_IN,
 }
 
 var unaryOperatorMap = map[parser.UnaryOperator]uint8{

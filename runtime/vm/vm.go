@@ -489,6 +489,23 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(value.EncodeFalse())
 				}
 			}
+		case chunk.OP_IN:
+			{
+				obj := vm.pop()
+				prop := vm.pop()
+
+				has := value.TAG_FALSE
+
+				if obj, err := allocator.GetObject(obj.GetHandle()); err == nil {
+					v := obj.(object.Hashable).GetMember(prop)
+
+					if v != value.TAG_UNDEFINED {
+						has = value.TAG_TRUE
+					}
+				}
+
+				vm.push(has)
+			}
 		case chunk.OP_NEGATE:
 			{
 				v := vm.pop()
