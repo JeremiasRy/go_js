@@ -63,4 +63,5 @@ const (
 	OP_YIELD
 	OP_IMPORT
 	OP_EXPORT
+	OP_IN
 )

@@ -634,33 +634,37 @@ func (p *Parser) parseExprOp(left *Node, leftStartPos int, leftStartLoc *Locatio
 				// In other words, `node.right` shouldn't contain logical expressions in order to check the mixed error.
 				prec = tokenTypes[TOKEN_LOGICALAND].binop.prec
 			}
-			if op, ok := p.Value.([]byte); ok {
-				p.next(false)
-				startPos, startLoc := p.start, p.startLoc
-				unary, err := p.parseMaybeUnary(nil, false, false, forInit)
-				if err != nil {
-					return nil, err
-				}
-				right, err := p.parseExprOp(unary, startPos, startLoc, prec, forInit)
 
-				if err != nil {
-					return nil, err
-				}
-				node, err := p.buildBinary(leftStartPos, leftStartLoc, left, right, BinaryOperator(op), logical || coalesce)
-				if err != nil {
-					return nil, err
-				}
-				if (logical && p.Type.identifier == TOKEN_COALESCE) || (coalesce && (p.Type.identifier == TOKEN_LOGICALOR || p.Type.identifier == TOKEN_LOGICALAND)) {
-					return nil, p.raiseRecoverable(p.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
-				}
-				expr, err := p.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
-				if err != nil {
-					return nil, err
-				}
-				return expr, nil
+			op := ""
+			if b, ok := p.Value.([]byte); ok {
+				op = string(b)
 			} else {
-				panic("Node had invalid operator as Value, expected []byte")
+				op = p.Value.(string)
 			}
+
+			p.next(false)
+			startPos, startLoc := p.start, p.startLoc
+			unary, err := p.parseMaybeUnary(nil, false, false, forInit)
+			if err != nil {
+				return nil, err
+			}
+			right, err := p.parseExprOp(unary, startPos, startLoc, prec, forInit)
+
+			if err != nil {
+				return nil, err
+			}
+			node, err := p.buildBinary(leftStartPos, leftStartLoc, left, right, BinaryOperator(op), logical || coalesce)
+			if err != nil {
+				return nil, err
+			}
+			if (logical && p.Type.identifier == TOKEN_COALESCE) || (coalesce && (p.Type.identifier == TOKEN_LOGICALOR || p.Type.identifier == TOKEN_LOGICALAND)) {
+				return nil, p.raiseRecoverable(p.start, "Logical expressions and coalesce expressions cannot be mixed. Wrap either by parentheses")
+			}
+			expr, err := p.parseExprOp(node, leftStartPos, leftStartLoc, minPrec, forInit)
+			if err != nil {
+				return nil, err
+			}
+			return expr, nil
 
 		}
 	}

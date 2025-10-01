@@ -72,6 +72,7 @@ var opNames = map[uint8]string{
 	chunk.OP_YIELD:                           "OP_YIELD",
 	chunk.OP_IMPORT:                          "OP_IMPORT",
 	chunk.OP_EXPORT:                          "OP_EXPORT",
+	chunk.OP_IN:                              "OP_IN",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -370,6 +371,10 @@ func printFunction(c value.ValueChunk) {
 					ip++
 					fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 				}
+			}
+		case chunk.OP_IN:
+			{
+				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
 			}
 		}
 		ip++
