@@ -92,6 +92,7 @@ var operatorMap = map[parser.BinaryOperator]uint8{
 
 var unaryOperatorMap = map[parser.UnaryOperator]uint8{
 	parser.UNARY_NEGATE: chunk.OP_NEGATE,
+	parser.UNARY_NOT:    chunk.OP_NOT,
 }
 
 var ROOT_SCRIPT_LOCATION string

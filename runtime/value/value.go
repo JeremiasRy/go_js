@@ -107,7 +107,7 @@ func ValueFromFloat64(number float64) Value {
 }
 
 func (v Value) IsBoolean() bool {
-	return (TRUE&v == TRUE) || (FALSE&v == FALSE)
+	return v == TRUE || v == FALSE
 }
 
 func (v Value) IsType(tag Value) bool {

@@ -64,4 +64,5 @@ const (
 	OP_IMPORT
 	OP_EXPORT
 	OP_IN
+	OP_NOT
 )

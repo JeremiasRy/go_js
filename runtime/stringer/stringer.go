@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/native"
+	"go_js/object"
 
 	"go_js/value"
 	"strconv"
@@ -142,5 +143,25 @@ func TypeDecoratedString(v value.Value) string {
 		return "METHOD_HANDLE"
 	}
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+}
+
+func ObjToPrimitive(o object.Object) string {
+	switch obj := o.(type) {
+	case *native.ObjArr:
+		{
+			if len(obj.Values()) == 0 {
+				return ""
+			}
+			arr := []string{}
+
+			for _, i := range obj.Values() {
+				arr = append(arr, String(i))
+			}
+
+			return strings.Join(arr, ",")
+		}
+	default:
+		return "[Object object]"
+	}
 
 }

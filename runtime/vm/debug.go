@@ -73,6 +73,7 @@ var opNames = map[uint8]string{
 	chunk.OP_IMPORT:                          "OP_IMPORT",
 	chunk.OP_EXPORT:                          "OP_EXPORT",
 	chunk.OP_IN:                              "OP_IN",
+	chunk.OP_NOT:                             "OP_NOT",
 }
 
 func PrintChunk(c value.ValueChunk) {

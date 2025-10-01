@@ -183,6 +183,95 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
 }
 
+// ORDER IS IMPORTANT! thanks.
+func compBoolToNum(boolean value.Value, number value.Value) bool {
+	cmpTo := 0.0
+
+	if valueAsBoolean(boolean) {
+		cmpTo = 1.0
+	}
+
+	return number.AsNumber() == cmpTo
+}
+
+func compNumToObject(num value.Value, obj object.Object) bool {
+	return true
+	panic("unimplemeneted")
+}
+
+func compBoolToObject(boolean value.Value, obj object.Object) bool {
+	fmt.Println("We should hit here?")
+	panic("unimplemeneted")
+}
+
+func compStringToObject(str object.Object, obj object.Object) bool {
+	return true
+	panic("unimplemeneted")
+}
+
+func looseComparison(a, b value.Value) bool {
+
+	if a.IsBoolean() && b.IsBoolean() {
+		return a == b
+	}
+
+	if a.IsNumber() && b.IsBoolean() {
+		return compBoolToNum(b, a)
+	}
+
+	if a.IsBoolean() && b.IsNumber() {
+		return compBoolToNum(a, b)
+	}
+
+	if a.IsObject() && b.IsObject() {
+		aObj, _ := allocator.GetObject(a.GetHandle())
+		bObj, _ := allocator.GetObject(b.GetHandle())
+
+		if (aObj.Type() == object.OBJ_STRING) && bObj.Type() == object.OBJ_STRING {
+			return aObj.String() == bObj.String()
+		}
+
+		if aObj.Type() == object.OBJ_STRING && bObj.Type() != object.OBJ_STRING {
+			return compStringToObject(aObj, bObj)
+		}
+
+		if aObj.Type() != object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
+			return compStringToObject(bObj, aObj)
+		}
+
+		return allocator.GetPointer(a.GetHandle()) == allocator.GetPointer(b.GetHandle())
+	}
+
+	if (a == value.NULL || a == value.UNDEFINED) && (b == value.NULL || b == value.UNDEFINED) {
+		return true
+	}
+
+	if a.IsObject() == !b.IsObject() {
+		obj, _ := allocator.GetObject(a.GetHandle())
+		if b.IsNumber() {
+			return compNumToObject(b, obj)
+		}
+
+		if b.IsBoolean() {
+			return compBoolToObject(b, obj)
+		}
+	}
+
+	if !a.IsObject() == b.IsObject() {
+		bObj, _ := allocator.GetObject(b.GetHandle())
+
+		if a.IsNumber() {
+			return compNumToObject(a, bObj)
+		}
+
+		if a.IsBoolean() {
+			return compBoolToObject(a, bObj)
+		}
+	}
+
+	return valueAsBoolean(a) == valueAsBoolean(b)
+}
+
 func valueAsBoolean(v value.Value) bool {
 	if v.IsObject() {
 		obj, _ := allocator.GetObject(v.GetHandle())
@@ -431,7 +520,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				b := vm.pop()
 				a := vm.pop()
 
-				if stringer.String(a) == stringer.String(b) {
+				if looseComparison(a, b) {
 					vm.push(value.TRUE)
 				} else {
 					vm.push(value.FALSE)
@@ -1774,6 +1863,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				vm.exports.SetMember(k, v)
+			}
+		case chunk.OP_NOT:
+			{
+				arg := vm.pop()
+				if valueAsBoolean(arg) {
+					vm.push(value.FALSE)
+				} else {
+					vm.push(value.TRUE)
+				}
 			}
 		}
 	}
