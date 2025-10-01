@@ -26,12 +26,53 @@ func NewObjectHash() *ObjObject {
 	return o
 }
 
+func NewObjectFromObject(parent value.Value) *ObjObject {
+	o := &ObjObject{
+		init:    0,
+		Members: map[string]ObjectValueEntry{},
+	}
+
+	o.SetMember(KEY_PROTO, parent)
+	return o
+}
+
 func (*ObjObject) Type() object.ObjType {
 	return object.OBJ_OBJECT
 }
 
 func (oh *ObjObject) String() string {
 	return "[Object object]"
+}
+
+func (o *ObjObject) Keys() []value.Value {
+	keys := []value.Value{}
+
+	for k := range o.Members {
+		if k == PROTOTYPE_PROPERTY_STRING {
+			continue
+		}
+		keys = append(keys, value.EncodeHandle(allocator.Allocate(LightString(k))))
+	}
+
+	p := o.Members[PROTOTYPE_PROPERTY_STRING].Value
+
+	for p != value.TAG_NIL {
+		obj, _ := allocator.GetObject(p.GetHandle())
+		if proto, ok := obj.(*ObjObject); ok {
+			for k := range proto.Members {
+				if k == PROTOTYPE_PROPERTY_STRING {
+					continue
+				}
+				keys = append(keys, value.EncodeHandle(allocator.Allocate(LightString(k))))
+			}
+		}
+		p = obj.(object.Hashable).GetMember(KEY_PROTO)
+	}
+	return keys
+}
+
+func (o *ObjObject) Values() []value.Value {
+	panic("sorry not implemented yet")
 }
 
 type ToString struct {
@@ -45,8 +86,55 @@ func NewToString() *ToString {
 	return ts
 }
 
+type Create struct {
+	ObjNativeFn
+}
+
+func NewCreate() *Create {
+	c := &Create{}
+	c.name = "create"
+
+	return c
+}
+
+type HasOwnProperty struct {
+	ObjNativeFn
+}
+
+func NewHasOwnProperty() *HasOwnProperty {
+	c := &HasOwnProperty{}
+	c.name = "hasOwnProperty"
+
+	return c
+}
+
+func (*HasOwnProperty) HasOwn(obj value.Value, prop value.Value) bool {
+	o, err := allocator.GetObject(obj.GetHandle())
+	if err != nil {
+		return false
+	}
+	return o.(object.Hashable).HasOwn(prop)
+}
+
 func (ts *ToString) ToString(obj object.Object) string {
 	return obj.String()
+}
+
+func (obj *ObjObject) HasOwn(prop value.Value) bool {
+	property, err := allocator.GetObject(prop.GetHandle())
+
+	if err != nil || property.Type() != object.OBJ_STRING {
+		return false
+	}
+
+	key := property.String()
+
+	for k := range obj.Members {
+		if k == key {
+			return true
+		}
+	}
+	return false
 }
 
 func (obj *ObjObject) GetMember(k value.Value) value.Value {
@@ -64,18 +152,19 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 				return v.Value
 			}
 
-			proto := obj.Members[PROTOTYPE_KEY].Value
+			proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
 
 			if proto.IsType(value.TAG_NIL) {
 				return value.EncodedUndefined()
 			}
+
 			protoObj, err := allocator.GetObject(proto.GetHandle())
 
 			if err != nil {
 				panic("couldnt get prototype from object")
 			}
 
-			if protoObj, ok := protoObj.(*Prototype); ok {
+			if protoObj, ok := protoObj.(object.Hashable); ok {
 				return protoObj.GetMember(k)
 			}
 		}
@@ -88,7 +177,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 			return v.Value
 		}
 
-		proto := obj.Members[PROTOTYPE_KEY].Value
+		proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
 
 		if proto.IsType(value.TAG_NIL) {
 			return value.EncodedUndefined()
@@ -169,7 +258,7 @@ func (*ObjectValues) Values(o value.Value) []value.Value {
 			{
 				r := make([]value.Value, len(obj.Members))
 				for k, v := range obj.Members {
-					if k == PROTOTYPE_KEY {
+					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
 					r[v.init-1] = v.Value
@@ -206,7 +295,7 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 			{
 				r := make([]value.Value, len(obj.Members))
 				for k, v := range obj.Members {
-					if k == PROTOTYPE_KEY {
+					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
 					val := value.EncodeHandle(allocator.Allocate(NewString(k)))

@@ -1,10 +1,15 @@
-function Animal(name) {
-    this.name = name;
+class Animal {
+    constructor(name) {
+        this.name = name;
+    }
 }
 
-Animal.prototype.speak = function () {
-    console.log(this.name + ' makes a noise.');
-};
-
 const dog = new Animal('dog');
+
+console.log(dog.speak)
+
+Animal.prototype.speak = function () {
+    console.log(`${this.name} makes noise`)
+}
+
 dog.speak();

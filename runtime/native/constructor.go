@@ -65,8 +65,9 @@ func NewObjectConstructor() *ObjectConstructor {
 	oc := &ObjectConstructor{}
 	oc.Members = map[string]ObjectValueEntry{}
 
-	oc.Members["values"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewObjectValues())))
-	oc.Members["keys"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewObjectKeys())))
+	oc.SetMember(KEY_VALUES, value.EncodeHandle(allocator.Allocate(NewObjectValues())))
+	oc.SetMember(KEY_KEYS, value.EncodeHandle(allocator.Allocate(NewObjectKeys())))
+	oc.SetMember(KEY_CREATE, value.EncodeHandle(allocator.Allocate(NewCreate())))
 
 	return oc
 }
