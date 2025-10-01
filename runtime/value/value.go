@@ -13,10 +13,10 @@ const (
 	SIGN              Value = 0x8000000000000000
 	ENCODE_MASK       Value = math.MaxUint64 ^ TAG_OBJ
 	TAG_OBJ           Value = QNAN | SIGN
-	TAG_NIL           Value = QNAN | 1
-	TAG_UNDEFINED     Value = QNAN | (1 << 1)
-	TAG_TRUE          Value = QNAN | (1 << 2)
-	TAG_FALSE         Value = QNAN | (1 << 3)
+	NULL              Value = QNAN | 1
+	UNDEFINED         Value = QNAN | (1 << 1)
+	TRUE              Value = QNAN | (1 << 2)
+	FALSE             Value = QNAN | (1 << 3)
 	TAG_METHOD_HANDLE Value = QNAN | (1 << 4)
 )
 
@@ -32,7 +32,7 @@ func NewChunk() *ValueChunk {
 	}
 }
 
-// reads an uint32 and incerements ip
+// read uint32 and incerement ip
 func (c ValueChunk) ReadInt(ip *int) int {
 	start := *ip
 
@@ -107,7 +107,7 @@ func ValueFromFloat64(number float64) Value {
 }
 
 func (v Value) IsBoolean() bool {
-	return (TAG_TRUE&v == TAG_TRUE) || (TAG_FALSE&v == TAG_FALSE)
+	return (TRUE&v == TRUE) || (FALSE&v == FALSE)
 }
 
 func (v Value) IsType(tag Value) bool {
@@ -118,7 +118,7 @@ func (v Value) IsType(tag Value) bool {
 }
 
 func (v Value) IsNumber() bool {
-	return !v.IsObject() && !v.IsBoolean() && !v.IsType(TAG_NIL) && !v.IsType(TAG_UNDEFINED) && !v.IsType(TAG_METHOD_HANDLE)
+	return !v.IsObject() && !v.IsBoolean() && !v.IsType(NULL) && !v.IsType(UNDEFINED) && !v.IsType(TAG_METHOD_HANDLE)
 }
 
 func (v Value) IsInteger() bool {
@@ -129,9 +129,4 @@ func (v Value) IsInteger() bool {
 		return frac == 0.0
 	}
 	return false
-}
-
-// TODO extend this to handle 'falsy' values: nill, undefined, "", 0, 1, etc...
-func (v Value) AsBoolean() bool {
-	return TAG_TRUE&v == TAG_TRUE
 }

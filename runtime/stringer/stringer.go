@@ -18,10 +18,10 @@ func DebugString(v value.Value) string {
 
 	}
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsType(value.TAG_UNDEFINED) {
+		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
+	} else if v.IsType(value.NULL) {
 		return "null"
 	}
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
@@ -57,10 +57,10 @@ func String(v value.Value) string {
 	}
 
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsType(value.TAG_UNDEFINED) {
+		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
+	} else if v.IsType(value.NULL) {
 		return "null"
 	}
 
@@ -133,10 +133,10 @@ func TypeDecoratedString(v value.Value) string {
 	}
 
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v.AsBoolean())
-	} else if v.IsType(value.TAG_UNDEFINED) {
+		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
-	} else if v.IsType(value.TAG_NIL) {
+	} else if v.IsType(value.NULL) {
 		return "null"
 	} else if v.IsType(value.TAG_METHOD_HANDLE) {
 		return "METHOD_HANDLE"

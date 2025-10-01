@@ -156,7 +156,6 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				case *native.ObjStringBuilder:
 					{
 						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + string(str.Flush()))))
-
 					}
 				default:
 					{
@@ -182,6 +181,33 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	}
 
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
+}
+
+func valueAsBoolean(v value.Value) bool {
+	if v.IsObject() {
+		obj, _ := allocator.GetObject(v.GetHandle())
+
+		switch obj := obj.(type) {
+		case *native.ObjString:
+			return len(obj.Value) > 0
+		case native.LightString:
+			return len(string(obj)) > 0
+		case *native.StringConstructor:
+			return len(obj.String()) > 0
+		default:
+			return true
+		}
+	}
+
+	if v.IsType(value.NULL) || v.IsType(value.UNDEFINED) {
+		return false
+	}
+
+	if v.IsNumber() {
+		return v.AsNumber() > 0
+	}
+
+	return value.TRUE&v == value.TRUE
 }
 
 func (vm *VM) popN(n int) []value.Value {
@@ -225,7 +251,7 @@ func (vm *VM) Run(wg *sync.WaitGroup) {
 Run:
 	fn := queue.Dequeue()
 	for fn != nil {
-		f, c := vm.Call(fn, nil, value.TAG_UNDEFINED, 0)
+		f, c := vm.Call(fn, nil, value.UNDEFINED, 0)
 		_, err := vm.run(f, c)
 
 		if err != nil {
@@ -362,9 +388,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if a.AsNumber() < b.AsNumber() {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_LESS_THAN_EQUAL:
@@ -373,9 +399,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if a.AsNumber() <= b.AsNumber() {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_GREATER_THAN:
@@ -384,9 +410,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if a.AsNumber() > b.AsNumber() {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_GREATER_THAN_EQUAL:
@@ -395,9 +421,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if a.AsNumber() >= b.AsNumber() {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_EQUALS:
@@ -406,9 +432,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if stringer.String(a) == stringer.String(b) {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_STRICT_EQUALS:
@@ -425,21 +451,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 					if bObj.Type() == aObj.Type() {
 						if bObj.String() == aObj.String() {
-							vm.push(value.TAG_TRUE)
+							vm.push(value.TRUE)
 						} else {
-							vm.push(value.TAG_FALSE)
+							vm.push(value.FALSE)
 						}
 
 					} else {
-						vm.push(value.TAG_FALSE)
+						vm.push(value.FALSE)
 					}
 					continue
 				}
 
 				if a == b {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_STRICT_NOT_EQUALS:
@@ -457,14 +483,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if bObj.Type() == aObj.Type() {
 
 					} else {
-						vm.push(value.TAG_TRUE)
+						vm.push(value.TRUE)
 					}
 				}
 
 				if a == b {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				} else {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				}
 			}
 		case chunk.OP_LOGICAL_OR:
@@ -472,10 +498,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				right := vm.pop()
 				left := vm.pop()
 
-				if left.AsBoolean() {
-					vm.push(left)
-				} else {
-					vm.push(right)
+				if right.IsBoolean() && left.IsBoolean() {
+					if valueAsBoolean(left) {
+						vm.push(value.TRUE)
+					} else {
+						vm.push(right)
+					}
+					continue
 				}
 			}
 		case chunk.OP_LOGICAL_AND:
@@ -483,10 +512,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				right := vm.pop()
 				left := vm.pop()
 
-				if left.AsBoolean() && right.AsBoolean() {
-					vm.push(value.TAG_TRUE)
+				if right.IsBoolean() && left.IsBoolean() {
+					if valueAsBoolean(left) && valueAsBoolean(right) {
+						vm.push(value.TRUE)
+					} else {
+						vm.push(value.FALSE)
+					}
+					continue
+				}
+
+				if valueAsBoolean(left) {
+					if valueAsBoolean(right) {
+						vm.push(right)
+					}
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(left)
 				}
 			}
 		case chunk.OP_IN:
@@ -494,13 +534,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				obj := vm.pop()
 				prop := vm.pop()
 
-				has := value.TAG_FALSE
+				has := value.FALSE
 
 				if obj, err := allocator.GetObject(obj.GetHandle()); err == nil {
 					v := obj.(object.Hashable).GetMember(prop)
 
-					if v != value.TAG_UNDEFINED {
-						has = value.TAG_TRUE
+					if v != value.UNDEFINED {
+						has = value.TRUE
 					}
 				}
 
@@ -513,7 +553,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v.IsNumber() {
 					vm.push(value.ValueFromFloat64(-(v.AsNumber())))
 				} else {
-					return value.TAG_UNDEFINED, fmt.Errorf("no support for negating %s yet", stringer.String(v))
+					return value.UNDEFINED, fmt.Errorf("no support for negating %s yet", stringer.String(v))
 				}
 			}
 		case chunk.OP_JUMP_IF_FALSE:
@@ -521,7 +561,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				jump := c.ReadInt(&ip)
 
-				if !v.AsBoolean() {
+				if valueAsBoolean(v) {
 					ip = jump
 				}
 			}
@@ -530,7 +570,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				jump := c.ReadInt(&ip)
 
-				if v.AsBoolean() {
+				if valueAsBoolean(v) {
 					ip = jump
 				}
 			}
@@ -562,7 +602,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
+						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
@@ -591,7 +631,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
+						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
 					}
 					switch obj := obj.(type) {
 					case *object.ObjFunction:
@@ -618,7 +658,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
+						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
@@ -639,7 +679,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
+						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
 					}
 					switch obj := obj.(type) {
 					case *object.ObjFunction:
@@ -668,7 +708,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_LOCAL %s", err)
+						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_LOCAL %s", err)
 					}
 					switch obj := obj.(type) {
 					case *object.ObjFunction:
@@ -697,7 +737,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_LOCAL %e", err)
+						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_LOCAL %e", err)
 					}
 
 					if _, ok := obj.(object.NeedsContext); ok {
@@ -718,7 +758,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, err := allocator.GetObject(v.GetHandle())
 
 					if err != nil {
-						return value.TAG_UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
+						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
 					}
 					switch obj := obj.(type) {
 					case *object.ObjFunction:
@@ -752,7 +792,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				isObject, handle := object.IsValueObject(hash)
 
 				if !isObject {
-					return value.TAG_UNDEFINED, fmt.Errorf("%v is not an object", hash)
+					return value.UNDEFINED, fmt.Errorf("%v is not an object", hash)
 				}
 
 				if v.IsObject() {
@@ -779,7 +819,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if obj, ok := obj.(object.Hashable); ok {
 					obj.SetMember(k, v)
 				} else {
-					return value.TAG_UNDEFINED, fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(hash))
+					return value.UNDEFINED, fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(hash))
 				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
@@ -795,7 +835,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				obj, err := allocator.GetObject(objValue.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", stringer.String(objValue), err)
+					return value.UNDEFINED, fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", stringer.String(objValue), err)
 				}
 
 				switch obj := obj.(type) {
@@ -811,7 +851,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								member, err := allocator.GetObject(v.GetHandle())
 
 								if err != nil {
-									return value.TAG_UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
+									return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 								}
 
 								if _, ok := member.(object.NeedsContext); ok {
@@ -833,7 +873,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							member, err := allocator.GetObject(v.GetHandle())
 
 							if err != nil {
-								return value.TAG_UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
+								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 							if _, ok := member.(object.NeedsContext); ok {
 								vm.push(objValue)
@@ -853,7 +893,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							member, err := allocator.GetObject(v.GetHandle())
 
 							if err != nil {
-								return value.TAG_UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
+								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 
 							if _, ok := member.(object.NeedsContext); ok {
@@ -873,7 +913,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							member, err := allocator.GetObject(v.GetHandle())
 
 							if err != nil {
-								return value.TAG_UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
+								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
 							}
 							if _, ok := member.(object.NeedsContext); ok {
 								vm.push(objValue)
@@ -885,12 +925,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						vm.push(v)
 					}
 				default:
-					return value.TAG_UNDEFINED, fmt.Errorf("can't get %s from %s", stringer.String(member), stringer.String(objValue))
+					return value.UNDEFINED, fmt.Errorf("can't get %s from %s", stringer.String(member), stringer.String(objValue))
 				}
 			}
 		case chunk.OP_PUSH_UNDEFINED:
 			{
-				vm.push(value.TAG_UNDEFINED)
+				vm.push(value.UNDEFINED)
 			}
 		case chunk.OP_CALL:
 			{
@@ -906,7 +946,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				fn, err := allocator.GetObject(callee.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, err
+					return value.UNDEFINED, err
 				}
 
 				switch fn := fn.(type) {
@@ -919,7 +959,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(value.EncodeHandle(handle))
 						}
 
-						f, c = vm.Call(fn.Clone(), &ip, value.TAG_UNDEFINED, argCount)
+						f, c = vm.Call(fn.Clone(), &ip, value.UNDEFINED, argCount)
 						f.localStart -= int(argCount)
 					}
 				case *native.ObjGenerator:
@@ -947,7 +987,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(callback.GetHandle())
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 						runner := NewVM(vm.debug)
 						if fn, ok := obj.(*object.ObjFunction); ok {
@@ -955,15 +995,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 								item := iterator.Current()
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.TAG_UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
 								runner.run(f, c)
 								done = iterator.Next()
 							}
 						} else {
-							return value.TAG_UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
 						}
 
-						vm.push(value.TAG_UNDEFINED)
+						vm.push(value.UNDEFINED)
 					}
 				case *native.ArrayFilter:
 					{
@@ -975,7 +1015,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(callback.GetHandle())
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 
 						arr := []value.Value{}
@@ -985,21 +1025,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 								item := iterator.Current()
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.TAG_UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
 								result, err := runner.run(f, c)
 
 								if err != nil {
-									return value.TAG_UNDEFINED, err
+									return value.UNDEFINED, err
 								}
 
-								if result.AsBoolean() {
+								if valueAsBoolean(result) {
 									arr = append(arr, item)
 								}
 
 								done = iterator.Next()
 							}
 						} else {
-							return value.TAG_UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
 						}
 						length := len(arr)
 						objArr := native.NewArray(length)
@@ -1021,7 +1061,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(callback.GetHandle())
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 
 						arr := []value.Value{}
@@ -1031,18 +1071,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 								item := iterator.Current()
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.TAG_UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
 								result, err := runner.run(f, c)
 
 								if err != nil {
-									return value.TAG_UNDEFINED, err
+									return value.UNDEFINED, err
 								}
 
 								arr = append(arr, result)
 								done = iterator.Next()
 							}
 						} else {
-							return value.TAG_UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
 						}
 						length := len(arr)
 						objArr := native.NewArray(length)
@@ -1065,7 +1105,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(callback.GetHandle())
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 
 						runner := NewVM(vm.debug)
@@ -1074,18 +1114,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								item := iterator.Current()
 								runner.push(initialValue)
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.TAG_UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
 								result, err := runner.run(f, c)
 
 								if err != nil {
-									return value.TAG_UNDEFINED, err
+									return value.UNDEFINED, err
 								}
 
 								initialValue = result
 								done = iterator.Next()
 							}
 						} else {
-							return value.TAG_UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
 						}
 						vm.push(initialValue)
 					}
@@ -1114,7 +1154,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							obj, err := allocator.GetObject(arg.GetHandle())
 
 							if err != nil {
-								return value.TAG_UNDEFINED, fmt.Errorf("couldn't receive argument at native.Log %s", err)
+								return value.UNDEFINED, fmt.Errorf("couldn't receive argument at native.Log %s", err)
 							}
 
 							if b, ok := obj.(*native.ObjStringBuilder); ok {
@@ -1123,7 +1163,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						vm.log(arg)
-						vm.push(value.TAG_UNDEFINED)
+						vm.push(value.UNDEFINED)
 					}
 				case *native.Next:
 					{
@@ -1132,12 +1172,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						// need to fix the -2, it's because OP_PUSH_UNDEFINED and OP_RETURN are currently added automatically to functions (if they are missing)
 						if generator.Ip == len(generator.ValueChunk().Code)-2 {
 							d := native.NewObjectHash()
-							d.SetMember(native.KEY_DONE, value.TAG_TRUE)
+							d.SetMember(native.KEY_DONE, value.TRUE)
 							vm.push(value.EncodeHandle(allocator.Allocate(d)))
 							continue
 						}
 
-						f, c = vm.Call(generator, &ip, value.TAG_UNDEFINED, argCount)
+						f, c = vm.Call(generator, &ip, value.UNDEFINED, argCount)
 
 						ip = generator.Ip
 
@@ -1182,7 +1222,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.ResolveFunc:
 					{
 						if vm.stackTop == 0 {
-							vm.push(value.TAG_UNDEFINED)
+							vm.push(value.UNDEFINED)
 						}
 
 						v := vm.pop()
@@ -1197,13 +1237,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(handle)
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 
 						if callback, ok := obj.(*object.ObjFunction); ok {
 							fn.Set(int(ms), callback)
 							eventloop.Dispatch(fn.Clone())
-							vm.push(value.TAG_UNDEFINED)
+							vm.push(value.UNDEFINED)
 						}
 					}
 				case *native.Now:
@@ -1219,9 +1259,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arg := vm.pop()
 
 						if fn.HasOwn(thisCtx, arg) {
-							vm.push(value.TAG_TRUE)
+							vm.push(value.TRUE)
 						} else {
-							vm.push(value.TAG_FALSE)
+							vm.push(value.FALSE)
 						}
 					}
 				}
@@ -1231,7 +1271,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				if promise, ok := f.fn.(*native.ObjAsyncFunction); ok {
 					ip = f.returnIp
-					value := value.TAG_UNDEFINED
+					value := value.UNDEFINED
 					vm.frameCount--
 
 					if vm.stackTop > 0 {
@@ -1256,7 +1296,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					c = *f.fn.ValueChunk()
 				} else {
 					ip = f.returnIp
-					value := value.TAG_UNDEFINED
+					value := value.UNDEFINED
 					vm.frameCount--
 
 					if vm.stackTop > 0 {
@@ -1294,13 +1334,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				obj, err := allocator.GetObject(arr.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, err
+					return value.UNDEFINED, err
 				}
 
 				arrOBj, ok := obj.(*native.ObjArr)
 
 				if !ok {
-					return value.TAG_UNDEFINED, fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
+					return value.UNDEFINED, fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
 				}
 
 				arrOBj.PushElement(v)
@@ -1312,19 +1352,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 
 				if !iteratee.IsObject() {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iteratee))
+					return value.UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iteratee))
 				}
 
 				obj, err := allocator.GetObject(iteratee.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, err
+					return value.UNDEFINED, err
 				}
 
 				iteratorObj, ok := obj.(object.Iterable)
 
 				if !ok {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iteratee))
+					return value.UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iteratee))
 				}
 
 				var iterator *object.Iterator
@@ -1342,27 +1382,27 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, err
+					return value.UNDEFINED, err
 				}
 
 				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iterator))
 				}
 
 				done := iteratorObj.Next()
 
 				if done {
-					vm.push(value.TAG_TRUE)
+					vm.push(value.TRUE)
 				} else {
-					vm.push(value.TAG_FALSE)
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_ITERATOR_CURRENT:
@@ -1370,19 +1410,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, err
+					return value.UNDEFINED, err
 				}
 
 				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iterator))
 				}
 
 				vm.push(iteratorObj.Current())
@@ -1412,7 +1452,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				obj, err := allocator.GetObject(callee.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, err
+					return value.UNDEFINED, err
 				}
 
 				switch ctor := obj.(type) {
@@ -1424,7 +1464,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(ctor.GetHandle())
 
 						if err != nil {
-							return value.TAG_UNDEFINED, fmt.Errorf("contructor was not an object %s", stringer.String(ctor))
+							return value.UNDEFINED, fmt.Errorf("contructor was not an object %s", stringer.String(ctor))
 						}
 
 						if constructor, ok := obj.(object.Callable); ok {
@@ -1440,12 +1480,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							builder.push(instance)
 							builder.push(ctor)
 							builder.push(value.TAG_METHOD_HANDLE)
-							f, c := builder.Call(fn, nil, value.TAG_UNDEFINED, argCount)
+							f, c := builder.Call(fn, nil, value.UNDEFINED, argCount)
 							builder.run(f, c)
 
 							vm.push(instance)
 						} else {
-							return value.TAG_UNDEFINED, fmt.Errorf("contructor was not an function %s", stringer.String(ctor))
+							return value.UNDEFINED, fmt.Errorf("contructor was not an function %s", stringer.String(ctor))
 						}
 
 					}
@@ -1461,7 +1501,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						newObj, err := ctor.New(params...)
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 
 						objHandle := allocator.Allocate(newObj)
@@ -1474,7 +1514,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						executor, err := allocator.GetObject(handle)
 
 						if err != nil {
-							return value.TAG_UNDEFINED, err
+							return value.UNDEFINED, err
 						}
 
 						promise := native.NewPromise()
@@ -1483,7 +1523,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						if executor, ok := executor.(object.Callable); ok {
 							runner := NewVM(vm.debug)
-							f, c := runner.Call(executor, nil, value.TAG_UNDEFINED, argCount)
+							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount)
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run(f, c)
 						}
@@ -1530,7 +1570,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				awaiteeObj, err := allocator.GetObject(awaitee.GetHandle())
 
 				if err != nil {
-					return value.TAG_FALSE, err
+					return value.FALSE, err
 				}
 
 				if promise, ok := awaiteeObj.(*native.ObjPromise); ok {
@@ -1594,7 +1634,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(value.EncodeHandle(allocator.Allocate(class)))
 					vm.push(value.EncodeHandle(allocator.Allocate(proto)))
 				} else {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s is not a string", stringer.String(name))
+					return value.UNDEFINED, fmt.Errorf("%s is not a string", stringer.String(name))
 				}
 			}
 		case chunk.OP_CREATE_CLASS_END:
@@ -1614,7 +1654,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				methodObj, err := allocator.GetObject(method.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(method))
+					return value.UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(method))
 				}
 
 				if m, ok := methodObj.(object.Callable); ok {
@@ -1623,7 +1663,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 					method = value.EncodeHandle(allocator.Allocate(m))
 				} else {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s was not an function", stringer.String(method))
+					return value.UNDEFINED, fmt.Errorf("%s was not an function", stringer.String(method))
 				}
 
 				key := vm.pop()
@@ -1633,13 +1673,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				protoObj, err := allocator.GetObject(prototype.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(prototype))
+					return value.UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(prototype))
 				}
 
 				if p, ok := protoObj.(*native.Prototype); ok {
 					p.SetMember(key, method)
 				} else {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s was not an prototype", stringer.String(prototype))
+					return value.UNDEFINED, fmt.Errorf("%s was not an prototype", stringer.String(prototype))
 				}
 			}
 		case chunk.OP_PUSH_PROPERTY:
@@ -1652,13 +1692,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				classObj, err := allocator.GetObject(class.GetHandle())
 
 				if err != nil {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(class))
+					return value.UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(class))
 				}
 
 				if c, ok := classObj.(*native.ObjClass); ok {
 					c.PushProperty(k, v)
 				} else {
-					return value.TAG_UNDEFINED, fmt.Errorf("%s was not an class object", stringer.String(class))
+					return value.UNDEFINED, fmt.Errorf("%s was not an class object", stringer.String(class))
 				}
 			}
 		case chunk.OP_THIS:
@@ -1669,10 +1709,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				v := native.NewObjectHash()
 				v.SetMember(native.KEY_VALUE, vm.pop())
-				d := value.TAG_FALSE
+				d := value.FALSE
 
 				if ip >= len(f.fn.ValueChunk().Code) {
-					d = value.TAG_TRUE
+					d = value.TRUE
 				}
 
 				locals := make([]value.Value, vm.stackTop-f.localStart)
@@ -1708,12 +1748,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				module, err := compiler.CompileModule(str)
 
 				if err != nil {
-					return value.TAG_UNDEFINED, fmt.Errorf("failed to parser module %e", err)
+					return value.UNDEFINED, fmt.Errorf("failed to parser module %e", err)
 				}
 
 				importer := NewVM(vm.debug)
 
-				f, c := importer.Call(module, nil, value.TAG_UNDEFINED, 0)
+				f, c := importer.Call(module, nil, value.UNDEFINED, 0)
 				importer.run(f, c)
 
 				imports[str] = value.EncodeHandle(allocator.Allocate(importer.exports))
