@@ -59,7 +59,7 @@ func initObjectPrototype() {
 	p.Members = map[string]ObjectValueEntry{}
 
 	handle := value.EncodeHandle(allocator.Allocate(NewToString()))
-	p.SetMember(KEY_PROTO, value.EncodeNil())
+	p.SetMember(KEY_PROTO, value.TAG_NIL)
 
 	p.SetMember(KEY_TOSTRING, handle)
 	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(allocator.Allocate(NewHasOwnProperty())))

@@ -31,7 +31,7 @@ type ObjPromise struct {
 func NewPromise() *ObjPromise {
 	return &ObjPromise{
 		Status: PENDING,
-		Value:  value.EncodedUndefined(),
+		Value:  value.TAG_UNDEFINED,
 
 		c: make(chan struct{}, 1),
 	}

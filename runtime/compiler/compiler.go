@@ -880,15 +880,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			case bool:
 				{
 					if v {
-						fn.ValueChunk().WriteConstant(value.EncodeTrue())
+						fn.ValueChunk().WriteConstant(value.TAG_TRUE)
 					} else {
-						fn.ValueChunk().WriteConstant(value.EncodeFalse())
+						fn.ValueChunk().WriteConstant(value.TAG_FALSE)
 					}
 				}
 			case nil:
 				{
 					if current.Raw == "null" {
-						fn.ValueChunk().WriteConstant(value.EncodeNil())
+						fn.ValueChunk().WriteConstant(value.TAG_NIL)
 					}
 				}
 			}
@@ -910,7 +910,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_IDENTIFIER:
 		{
 			if current.Name == UNDEFINED_IDENTIFIER {
-				fn.ValueChunk().WriteConstant(value.EncodedUndefined())
+				fn.ValueChunk().WriteConstant(value.TAG_UNDEFINED)
 				return
 			}
 			variable, _ := symbolTable.findVariable(current.Name)

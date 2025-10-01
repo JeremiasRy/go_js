@@ -155,7 +155,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 			proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
 
 			if proto.IsType(value.TAG_NIL) {
-				return value.EncodedUndefined()
+				return value.TAG_UNDEFINED
 			}
 
 			protoObj, err := allocator.GetObject(proto.GetHandle())
@@ -180,7 +180,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 		proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
 
 		if proto.IsType(value.TAG_NIL) {
-			return value.EncodedUndefined()
+			return value.TAG_UNDEFINED
 		}
 
 		protoObj, err := allocator.GetObject(proto.GetHandle())
@@ -195,7 +195,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 	}
 
 	// todo: should string intern everything to our Hash
-	return value.EncodedUndefined()
+	return value.TAG_UNDEFINED
 }
 
 func (obj *ObjObject) SetMember(k, v value.Value) {
