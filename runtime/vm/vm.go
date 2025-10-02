@@ -644,10 +644,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				} else {
 					if truthyValue(right) {
 						vm.push(right)
-						continue
+					} else {
+						vm.push(value.FALSE)
 					}
 				}
-				vm.push(value.FALSE)
 			}
 		case chunk.OP_LOGICAL_AND:
 			{
