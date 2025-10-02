@@ -19,7 +19,7 @@ func DebugString(v value.Value) string {
 
 	}
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+		return fmt.Sprintf("%v", v == value.TRUE)
 	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
@@ -58,7 +58,7 @@ func String(v value.Value) string {
 	}
 
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+		return fmt.Sprintf("%v", v == value.TRUE)
 	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
@@ -134,7 +134,7 @@ func TypeDecoratedString(v value.Value) string {
 	}
 
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+		return fmt.Sprintf("%v", v == value.TRUE)
 	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
@@ -157,11 +157,10 @@ func ObjToPrimitive(o object.Object) string {
 			for _, i := range obj.Values() {
 				arr = append(arr, String(i))
 			}
-
 			return strings.Join(arr, ",")
 		}
 	default:
-		return "[Object object]"
+		return "[object Object]"
 	}
 
 }

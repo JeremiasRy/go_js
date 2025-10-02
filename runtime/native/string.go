@@ -33,6 +33,7 @@ func (osb *ObjStringBuilder) Concatenate(s string) {
 	osb.b.WriteString(s)
 }
 
+// maybe a bit misleading name since we don't reset or set the builder to nil, I'm thinking letting GC to collect these
 func (osb *ObjStringBuilder) Flush() LightString {
 	str := LightString(osb.b.String())
 	return str
