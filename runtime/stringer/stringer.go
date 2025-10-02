@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/allocator"
 	"go_js/native"
+	"go_js/object"
 
 	"go_js/value"
 	"strconv"
@@ -18,7 +19,7 @@ func DebugString(v value.Value) string {
 
 	}
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+		return fmt.Sprintf("%v", v == value.TRUE)
 	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
@@ -57,7 +58,7 @@ func String(v value.Value) string {
 	}
 
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+		return fmt.Sprintf("%v", v == value.TRUE)
 	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
@@ -133,7 +134,7 @@ func TypeDecoratedString(v value.Value) string {
 	}
 
 	if v.IsBoolean() {
-		return fmt.Sprintf("%v", v&value.TRUE == value.TRUE)
+		return fmt.Sprintf("%v", v == value.TRUE)
 	} else if v.IsType(value.UNDEFINED) {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
@@ -142,5 +143,24 @@ func TypeDecoratedString(v value.Value) string {
 		return "METHOD_HANDLE"
 	}
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+}
+
+func ObjToPrimitive(o object.Object) string {
+	switch obj := o.(type) {
+	case *native.ObjArr:
+		{
+			if len(obj.Values()) == 0 {
+				return ""
+			}
+			arr := []string{}
+
+			for _, i := range obj.Values() {
+				arr = append(arr, String(i))
+			}
+			return strings.Join(arr, ",")
+		}
+	default:
+		return "[object Object]"
+	}
 
 }

@@ -13,6 +13,7 @@ import (
 	"go_js/value"
 	"log"
 	"math"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -183,7 +184,139 @@ func (vm *VM) subtract(a, b value.Value) value.Value {
 	return value.ValueFromFloat64(a.AsNumber() - b.AsNumber())
 }
 
-func valueAsBoolean(v value.Value) bool {
+// ORDER IS IMPORTANT! thanks.
+func compBoolToNum(boolean value.Value, number value.Value) bool {
+	if !boolean.IsBoolean() {
+		panic("you didnt listen")
+	}
+	cmpTo := 0.0
+
+	if truthyValue(boolean) {
+		cmpTo = 1.0
+	}
+
+	return number.AsNumber() == cmpTo
+}
+
+func compNumToObject(num value.Value, obj object.Object) bool {
+	numString := strconv.FormatFloat(num.AsNumber(), 'f', -1, 64)
+	switch obj := obj.(type) {
+	case native.LightString:
+		return numString == obj.String()
+	case *native.ObjString:
+		return numString == obj.String()
+	case *native.ObjStringBuilder:
+		return numString == obj.Flush().String()
+	default:
+		return numString == stringer.ObjToPrimitive(obj)
+	}
+}
+
+func compBoolToObject(boolean value.Value, obj object.Object) bool {
+	cmpTo := 0.0
+
+	if truthyValue(boolean) {
+		cmpTo = 1.0
+	}
+
+	str := ""
+
+	switch obj := obj.(type) {
+	case native.LightString:
+		str = obj.String()
+	case *native.ObjString:
+		str = obj.String()
+	case *native.ObjStringBuilder:
+		str = obj.Flush().String()
+	default:
+		str = stringer.ObjToPrimitive(obj)
+	}
+
+	if len(str) == 0 {
+		str = "0"
+	}
+
+	res, err := strconv.ParseFloat(str, 64)
+
+	if err != nil {
+		fmt.Println(err)
+		return false
+	}
+
+	return res == cmpTo
+}
+
+func compStringToObject(str object.Object, obj object.Object) bool {
+	if obj.Type() == object.OBJ_STRING_BUILDER {
+		return str.String() == obj.(*native.ObjStringBuilder).Flush().String()
+	}
+
+	return str.String() == stringer.ObjToPrimitive(obj)
+}
+
+func looseComparison(a, b value.Value) bool {
+	if a.IsBoolean() && b.IsBoolean() {
+		return a == b
+	}
+
+	if a.IsNumber() && b.IsBoolean() {
+		return compBoolToNum(b, a)
+	}
+
+	if a.IsBoolean() && b.IsNumber() {
+		return compBoolToNum(a, b)
+	}
+
+	if a.IsObject() && b.IsObject() {
+		aObj, _ := allocator.GetObject(a.GetHandle())
+		bObj, _ := allocator.GetObject(b.GetHandle())
+
+		if (aObj.Type() == object.OBJ_STRING) && bObj.Type() == object.OBJ_STRING {
+			return aObj.String() == bObj.String()
+		}
+
+		if aObj.Type() == object.OBJ_STRING && bObj.Type() != object.OBJ_STRING {
+			return compStringToObject(aObj, bObj)
+		}
+
+		if aObj.Type() != object.OBJ_STRING && bObj.Type() == object.OBJ_STRING {
+			return compStringToObject(bObj, aObj)
+		}
+
+		return allocator.GetPointer(a.GetHandle()) == allocator.GetPointer(b.GetHandle())
+	}
+
+	if (a == value.NULL || a == value.UNDEFINED) && (b == value.NULL || b == value.UNDEFINED) {
+		return true
+	}
+
+	if a.IsObject() == !b.IsObject() {
+		obj, _ := allocator.GetObject(a.GetHandle())
+		if b.IsNumber() {
+			return compNumToObject(b, obj)
+		}
+
+		if b.IsBoolean() {
+			return compBoolToObject(b, obj)
+		}
+	}
+
+	if !a.IsObject() == b.IsObject() {
+		bObj, _ := allocator.GetObject(b.GetHandle())
+
+		if a.IsNumber() {
+			return compNumToObject(a, bObj)
+		}
+
+		if a.IsBoolean() {
+			return compBoolToObject(a, bObj)
+		}
+	}
+
+	return truthyValue(a) == truthyValue(b)
+}
+
+func truthyValue(v value.Value) bool {
 	if v.IsObject() {
 		obj, _ := allocator.GetObject(v.GetHandle())
 
@@ -207,7 +340,7 @@ func valueAsBoolean(v value.Value) bool {
 		return v.AsNumber() > 0
 	}
 
-	return value.TRUE&v == value.TRUE
+	return value.TRUE == v
 }
 
 func (vm *VM) popN(n int) []value.Value {
@@ -431,7 +564,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				b := vm.pop()
 				a := vm.pop()
 
-				if stringer.String(a) == stringer.String(b) {
+				if looseComparison(a, b) {
 					vm.push(value.TRUE)
 				} else {
 					vm.push(value.FALSE)
@@ -499,7 +632,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				left := vm.pop()
 
 				if right.IsBoolean() && left.IsBoolean() {
-					if valueAsBoolean(left) {
+					if truthyValue(left) {
 						vm.push(value.TRUE)
 					} else {
 						vm.push(right)
@@ -513,7 +646,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				left := vm.pop()
 
 				if right.IsBoolean() && left.IsBoolean() {
-					if valueAsBoolean(left) && valueAsBoolean(right) {
+					if truthyValue(left) && truthyValue(right) {
 						vm.push(value.TRUE)
 					} else {
 						vm.push(value.FALSE)
@@ -521,8 +654,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					continue
 				}
 
-				if valueAsBoolean(left) {
-					if valueAsBoolean(right) {
+				if truthyValue(left) {
+					if truthyValue(right) {
 						vm.push(right)
 					}
 				} else {
@@ -561,7 +694,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				jump := c.ReadInt(&ip)
 
-				if !valueAsBoolean(v) {
+				if !truthyValue(v) {
 					ip = jump
 				}
 			}
@@ -570,7 +703,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				jump := c.ReadInt(&ip)
 
-				if valueAsBoolean(v) {
+				if truthyValue(v) {
 					ip = jump
 				}
 			}
@@ -1032,7 +1165,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 									return value.UNDEFINED, err
 								}
 
-								if valueAsBoolean(result) {
+								if truthyValue(result) {
 									arr = append(arr, item)
 								}
 
@@ -1774,6 +1907,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				vm.exports.SetMember(k, v)
+			}
+		case chunk.OP_NOT:
+			{
+				arg := vm.pop()
+				if truthyValue(arg) {
+
+					vm.push(value.FALSE)
+				} else {
+					vm.push(value.TRUE)
+				}
 			}
 		}
 	}

@@ -42,3 +42,8 @@ func GetObject(handle uint32) (object.Object, error) {
 	}
 	return nil, fmt.Errorf("no pointer found for handle %d", handle)
 }
+
+// for loose comparison shenanigans
+func GetPointer(handle uint32) uint32 {
+	return allocator[handle]
+}
