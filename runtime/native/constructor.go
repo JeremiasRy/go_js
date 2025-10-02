@@ -205,3 +205,21 @@ func (st *SetTimeout) Clone() *SetTimeout {
 	clone := *st
 	return &clone
 }
+
+type MapConstructor struct{}
+
+func NewMapConstructor() *MapConstructor {
+	return &MapConstructor{}
+}
+
+func (*MapConstructor) String() string {
+	return "Function Map"
+}
+
+func (*MapConstructor) Type() object.ObjType {
+	return object.OBJ_MAP_CONSTRUCTOR
+}
+
+func (*MapConstructor) New(params ...any) (object.Object, error) {
+	return NewMap(), nil
+}
