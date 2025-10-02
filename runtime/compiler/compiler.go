@@ -190,7 +190,6 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	if fs.block != nil {
 		variable.scope = LOCAL
 	}
-
 	variable.slot = fs.getCurrentSlot()
 }
 
@@ -367,18 +366,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
-
 			var variable *Variable
 			isMember := false
 
 			switch current.Left.Type {
 			case parser.NODE_MEMBER_EXPRESSION:
+				current := current.Left
 				isMember = true
-				if current.Left.Object.Type == parser.NODE_THIS_EXPRESSION {
+				if current.Object.Type == parser.NODE_THIS_EXPRESSION {
 					variable = ThisVariable
 					break
 				}
-				variable, _ = symbolTable.findVariable(current.Left.Object.Name)
+				for current.Object.Type == parser.NODE_MEMBER_EXPRESSION {
+					current = current.Object
+				}
+				variable, _ = symbolTable.findVariable(current.Object.Name)
 			default:
 				variable, _ = symbolTable.findVariable(current.Left.Name)
 
