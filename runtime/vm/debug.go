@@ -74,6 +74,7 @@ var opNames = map[uint8]string{
 	chunk.OP_EXPORT:                          "OP_EXPORT",
 	chunk.OP_IN:                              "OP_IN",
 	chunk.OP_NOT:                             "OP_NOT",
+	chunk.OP_NULL_COALESHING:                 "OP_NULL_COALESHING",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -92,290 +93,71 @@ func printFunction(c value.ValueChunk) {
 		}
 		code := opCode[ip]
 		switch code {
-		case chunk.OP_EXPORT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+		case chunk.OP_EXPORT, chunk.OP_YIELD, chunk.OP_THIS, chunk.OP_PUSH_PROPERTY,
+			chunk.OP_PUSH_METHOD, chunk.OP_CREATE_CLASS_START, chunk.OP_CREATE_CLASS_END,
+			chunk.OP_NEGATE, chunk.OP_DEFINE_HEAP_VAR, chunk.OP_POP_LOCAL,
+			chunk.OP_EQUALS, chunk.OP_AWAIT, chunk.OP_STRICT_EQUALS,
+			chunk.OP_STRICT_NOT_EQUALS, chunk.OP_THROW, chunk.OP_EXPONENTIATION,
+			chunk.OP_LOGICAL_OR, chunk.OP_MODULO, chunk.OP_PUSH_CURRENT,
+			chunk.OP_CREATE_OBJECT, chunk.OP_SET_OBJECT_MEMBER, chunk.OP_CREATE_HEAP_SCOPE,
+			chunk.OP_ITERATOR_NEXT, chunk.OP_ITERATOR_CURRENT, chunk.OP_PUSH_ELEMENT,
+			chunk.OP_POP, chunk.OP_LESS_THAN_EQUAL, chunk.OP_LESS_THAN,
+			chunk.OP_GREATER_THAN_EQUAL, chunk.OP_GREATER_THAN, chunk.OP_SUBTRACT,
+			chunk.OP_ADD, chunk.OP_DEFINE_GLOBAL, chunk.OP_GET_OBJECT_MEMBER,
+			chunk.OP_CALL, chunk.OP_TRY_BLOCK_END, chunk.OP_PUSH_UNDEFINED,
+			chunk.OP_RETURN, chunk.OP_ADD_ARGUMENTS_TO_LOCALS, chunk.OP_IN,
+			chunk.OP_NULL_COALESHING:
+			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+
+		case chunk.OP_IMPORT, chunk.OP_CONSTANT, chunk.OP_GET_HEAP_VAR,
+			chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL, chunk.OP_GET_LOCAL,
+			chunk.OP_SET_LOCAL, chunk.OP_STORE_ARG_COUNT:
+			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			ip++
+			fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+
+		case chunk.OP_NEW, chunk.OP_JUMP_IF_FALSE, chunk.OP_TRY_BLOCK_START,
+			chunk.OP_JUMP_IF_TRUE, chunk.OP_JUMP:
+			ip++
+
+			operand := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+			ip += 3
+
+			if code == chunk.OP_NEW {
+				fmt.Printf("%04d | %d\n", ip*4, operand)
+			} else {
+				fmt.Printf("%04d | %d\n", ip*4, operand*4)
 			}
-		case chunk.OP_IMPORT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_YIELD:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_THIS:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_PUSH_PROPERTY:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_PUSH_METHOD:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_CREATE_CLASS_START:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_CREATE_CLASS_END:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_NEGATE:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_CONSTANT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_GET_HEAP_VAR:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_DEFINE_HEAP_VAR:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_POP_LOCAL:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_EQUALS:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_AWAIT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_STRICT_EQUALS:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_STRICT_NOT_EQUALS:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_THROW:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_EXPONENTIATION:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_LOGICAL_OR:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_MODULO:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_NEW:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_PUSH_CURRENT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_CREATE_OBJECT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_SET_OBJECT_MEMBER:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_CREATE_HEAP_SCOPE:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_ITERATOR_NEXT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_ITERATOR_CURRENT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
+
 		case chunk.OP_CREATE_ARRAY:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-				ip++
-				length := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
-				ip += 3
-				fmt.Printf("%04d | %d\n", ip*4, length)
-			}
+			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			ip++
+			length := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
+			ip += 3
+			fmt.Printf("%04d | %d\n", ip*4, length)
+
 		case chunk.OP_GET_ITERATOR:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-				ip++
-				t := opCode[ip]
-				str := ""
+			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			ip++
+			t := opCode[ip]
+			str := ""
 
-				if t == compiler.ITERATOR_FOR_IN {
-					str = "ITERATOR_FOR_IN"
-				} else {
-					str = "ITERATOR_FOR_OF"
-				}
-				fmt.Printf("%04d | %d -> %s \n", ip*4, t, str)
+			if t == compiler.ITERATOR_FOR_IN {
+				str = "ITERATOR_FOR_IN"
+			} else {
+				str = "ITERATOR_FOR_OF"
 			}
-		case chunk.OP_PUSH_ELEMENT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_POP:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_LESS_THAN_EQUAL:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_LESS_THAN:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_GREATER_THAN_EQUAL:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_GREATER_THAN:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_SUBTRACT:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_ADD:
-			{
-				fmt.Printf("%04d | %s \n", ip*4, opNames[code])
-			}
-		case chunk.OP_DEFINE_GLOBAL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_GET_GLOBAL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_SET_GLOBAL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_DEFINE_LOCAL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_GET_LOCAL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_SET_LOCAL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
-		case chunk.OP_GET_OBJECT_MEMBER:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_CALL:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_JUMP_IF_FALSE:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
-				ip += 3
-				fmt.Printf("%04d | %d\n", ip*4, jump*4)
-			}
-		case chunk.OP_TRY_BLOCK_START:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
-				ip += 3
-				fmt.Printf("%04d | %d\n", ip*4, jump*4)
-			}
-		case chunk.OP_TRY_BLOCK_END:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_JUMP_IF_TRUE:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
-				ip += 3
-				fmt.Printf("%04d | %d\n", ip*4, jump*4)
-			}
-		case chunk.OP_JUMP:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				jump := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
-				ip += 3
-				fmt.Printf("%04d | %d\n", ip*4, jump*4)
-			}
-		case chunk.OP_PUSH_UNDEFINED:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_RETURN:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_ADD_ARGUMENTS_TO_LOCALS:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-			}
-		case chunk.OP_STORE_ARG_COUNT:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
-				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-			}
+			fmt.Printf("%04d | %d -> %s \n", ip*4, t, str)
+
 		case chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			ip++
+			amount := opCode[ip]
+			fmt.Printf("%04d | amount: %d \n", ip*4, amount)
+
+			for range amount {
 				ip++
-				fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-
-				amount := opCode[ip]
-
-				for range amount {
-					ip++
-					fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
-				}
-			}
-		case chunk.OP_IN:
-			{
-				fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+				fmt.Printf("%04d | var index: %d \n", ip*4, opCode[ip])
 			}
 		}
 		ip++

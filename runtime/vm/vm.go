@@ -688,6 +688,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				vm.push(has)
 			}
+		case chunk.OP_NULL_COALESHING:
+			{
+				right := vm.pop()
+				left := vm.pop()
+
+				if left == value.NULL || left == value.UNDEFINED {
+					vm.push(right)
+				} else {
+					vm.push(left)
+				}
+			}
 		case chunk.OP_NEGATE:
 			{
 				v := vm.pop()
