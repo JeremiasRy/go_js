@@ -65,4 +65,5 @@ const (
 	OP_EXPORT
 	OP_IN
 	OP_NOT
+	OP_NULL_COALESHING
 )
