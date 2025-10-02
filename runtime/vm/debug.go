@@ -111,23 +111,19 @@ func printFunction(c value.ValueChunk) {
 
 		case chunk.OP_IMPORT, chunk.OP_CONSTANT, chunk.OP_GET_HEAP_VAR,
 			chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL, chunk.OP_GET_LOCAL,
-			chunk.OP_SET_LOCAL, chunk.OP_STORE_ARG_COUNT:
+			chunk.OP_SET_LOCAL, chunk.OP_STORE_ARG_COUNT, chunk.OP_NEW:
 			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			ip++
 			fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 
-		case chunk.OP_NEW, chunk.OP_JUMP_IF_FALSE, chunk.OP_TRY_BLOCK_START,
+		case chunk.OP_JUMP_IF_FALSE, chunk.OP_TRY_BLOCK_START,
 			chunk.OP_JUMP_IF_TRUE, chunk.OP_JUMP:
 			ip++
+			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 
 			operand := int(opCode[ip+3]) | int(opCode[ip+2])<<8 | int(opCode[ip+1])<<16 | int(opCode[ip])<<24
 			ip += 3
-
-			if code == chunk.OP_NEW {
-				fmt.Printf("%04d | %d\n", ip*4, operand)
-			} else {
-				fmt.Printf("%04d | %d\n", ip*4, operand*4)
-			}
+			fmt.Printf("%04d | %d\n", ip*4, operand*4)
 
 		case chunk.OP_CREATE_ARRAY:
 			fmt.Printf("%04d | %s \n", ip*4, opNames[code])

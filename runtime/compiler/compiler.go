@@ -191,7 +191,6 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 	if fs.block != nil {
 		variable.scope = LOCAL
 	}
-
 	variable.slot = fs.getCurrentSlot()
 }
 
@@ -368,18 +367,27 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
 		{
-
 			var variable *Variable
 			isMember := false
+			getObj := true
 
 			switch current.Left.Type {
 			case parser.NODE_MEMBER_EXPRESSION:
+				current := current.Left
 				isMember = true
-				if current.Left.Object.Type == parser.NODE_THIS_EXPRESSION {
+				if current.Object.Type == parser.NODE_THIS_EXPRESSION {
 					variable = ThisVariable
 					break
 				}
-				variable, _ = symbolTable.findVariable(current.Left.Object.Name)
+				if current.Object.Type == parser.NODE_MEMBER_EXPRESSION {
+					getObj = false
+					generateByteCode(current.Object, symbolTable, fn)
+				}
+
+				if current.Object.Type == parser.NODE_IDENTIFIER {
+					variable, _ = symbolTable.findVariable(current.Object.Name)
+				}
+
 			default:
 				variable, _ = symbolTable.findVariable(current.Left.Name)
 
@@ -389,36 +397,41 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			var setOp uint8
 			var getOp uint8
 
-			switch variable.scope {
-			case LOCAL:
-				{
-					defineOp = chunk.OP_DEFINE_LOCAL
-					setOp = chunk.OP_SET_LOCAL
-					getOp = chunk.OP_GET_LOCAL
-				}
-			case GLOBAL:
-				{
-					defineOp = chunk.OP_DEFINE_GLOBAL
-					setOp = chunk.OP_SET_GLOBAL
-					getOp = chunk.OP_GET_GLOBAL
-				}
-			case HEAP:
-				{
-					defineOp = chunk.OP_DEFINE_HEAP_VAR
-					setOp = chunk.OP_SET_HEAP_VAR
-					getOp = chunk.OP_GET_HEAP_VAR
-				}
-			case THIS:
-				{
-					getOp = chunk.OP_THIS
+			if variable != nil {
+				switch variable.scope {
+				case LOCAL:
+					{
+						defineOp = chunk.OP_DEFINE_LOCAL
+						setOp = chunk.OP_SET_LOCAL
+						getOp = chunk.OP_GET_LOCAL
+					}
+				case GLOBAL:
+					{
+						defineOp = chunk.OP_DEFINE_GLOBAL
+						setOp = chunk.OP_SET_GLOBAL
+						getOp = chunk.OP_GET_GLOBAL
+					}
+				case HEAP:
+					{
+						defineOp = chunk.OP_DEFINE_HEAP_VAR
+						setOp = chunk.OP_SET_HEAP_VAR
+						getOp = chunk.OP_GET_HEAP_VAR
+					}
+				case THIS:
+					{
+						getOp = chunk.OP_THIS
+					}
 				}
 			}
 
 			if isMember {
 				setOp = chunk.OP_SET_OBJECT_MEMBER
-				fn.ValueChunk().EmitByte(getOp)
 
-				if getOp != chunk.OP_THIS {
+				if getObj {
+					fn.ValueChunk().EmitByte(getOp)
+				}
+
+				if getOp != chunk.OP_THIS && variable != nil {
 					fn.ValueChunk().EmitByte(uint8(variable.slot))
 				}
 
@@ -432,6 +445,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							handle := allocator.Allocate(str)
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 						}
+
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitBytes(setOp, chunk.OP_POP)
 					}
@@ -1335,6 +1349,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				}
 			}
+		}
+	case parser.NODE_CHAIN_EXPRESSION:
+		{
+			generateByteCode(current.Expression, symbolTable, fn)
 		}
 	}
 }
