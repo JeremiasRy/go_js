@@ -44,6 +44,12 @@ var (
 	KEY_RETURN value.Value
 	KEY_VALUE  value.Value
 	KEY_DONE   value.Value
+
+	// map
+	KEY_HAS  value.Value
+	KEY_GET  value.Value
+	KEY_SET  value.Value
+	KEY_SIZE value.Value
 )
 
 func createCommonHandles() {
@@ -75,4 +81,9 @@ func createCommonHandles() {
 	KEY_RETURN = value.EncodeHandle(allocator.Allocate(LightString("return")))
 	KEY_VALUE = value.EncodeHandle(allocator.Allocate(LightString("value")))
 	KEY_DONE = value.EncodeHandle(allocator.Allocate(LightString("done")))
+
+	KEY_HAS = value.EncodeHandle(allocator.Allocate(LightString("has")))
+	KEY_GET = value.EncodeHandle(allocator.Allocate(LightString("get")))
+	KEY_SET = value.EncodeHandle(allocator.Allocate(LightString("set")))
+	KEY_SIZE = value.EncodeHandle(allocator.Allocate(LightString("size")))
 }

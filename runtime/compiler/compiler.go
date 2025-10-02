@@ -290,6 +290,15 @@ func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope)
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineMapConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	mapCtor := native.NewMapConstructor()
+	mapCtorHandle := allocator.Allocate(mapCtor)
+
+	symbolTable.addVariable(native.MAP_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(mapCtorHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
@@ -302,6 +311,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineArrayConstructor(main, global)
 	definePromiseConstructor(main, global)
 	defineDateConstructor(main, global)
+	defineMapConstructor(main, global)
 
 	prePass(ast, global)
 	generateByteCode(ast, global, main)
@@ -1198,7 +1208,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
-			//safeguards later: len(current.Arguments) > uint8.MAX
+			// safeguards later: len(current.Arguments) > uint8.MAX
 			generateByteCode(current.Callee, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_NEW)
 			fn.ValueChunk().EmitByte(uint8(len(current.Arguments)))

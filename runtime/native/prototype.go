@@ -16,6 +16,7 @@ const (
 	ERROR_CONSTRUCTOR_NAME    string = "Error"
 	DATE_CONSTRUCTOR_NAME     string = "Date"
 	GENERATOR_NAME            string = "Generator"
+	MAP_CONSTRUCTOR_NAME      string = "Map"
 )
 
 var (
@@ -24,6 +25,7 @@ var (
 	PROTOTYPE_STRING    value.Value
 	PROTOTYPE_DATE      value.Value
 	PROTOTYPE_GENERATOR value.Value
+	PROTOTYPE_MAP       value.Value
 )
 
 type Prototype struct {
@@ -138,5 +140,26 @@ func initGeneratorPrototype() {
 	p.SetMember(KEY_RETURN, return_)
 
 	PROTOTYPE_GENERATOR = value.EncodeHandle(allocator.Allocate(p))
+}
 
+func initMapPrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_MAP")
+	}
+
+	p := &Prototype{
+		name: MAP_CONSTRUCTOR_NAME,
+	}
+
+	p.Members = map[string]ObjectValueEntry{}
+
+	mapHas := value.EncodeHandle(allocator.Allocate(NewMapHas()))
+	mapGet := value.EncodeHandle(allocator.Allocate(NewMapGet()))
+	mapSet := value.EncodeHandle(allocator.Allocate(NewMapSet()))
+
+	p.SetMember(KEY_HAS, mapHas)
+	p.SetMember(KEY_SET, mapSet)
+	p.SetMember(KEY_GET, mapGet)
+
+	PROTOTYPE_MAP = value.EncodeHandle(allocator.Allocate(p))
 }

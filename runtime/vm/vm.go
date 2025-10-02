@@ -1113,6 +1113,29 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						f, c = vm.Call(fn, &ip, thisCtx, argCount)
 					}
+				case *native.MapGet:
+					{
+						arg := vm.pop()
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+
+						vm.push(fn.Get(owner.(*native.Map), arg))
+					}
+				case *native.MapHas:
+					{
+						arg := vm.pop()
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+
+						vm.push(fn.Has(owner.(*native.Map), arg))
+					}
+				case *native.MapSet:
+					{
+						v := vm.pop()
+						k := vm.pop()
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+
+						fn.Set(owner.(*native.Map), k, v)
+						vm.push(value.UNDEFINED)
+					}
 				case *native.ArrayPush:
 					{
 						arg := vm.pop()
