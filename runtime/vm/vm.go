@@ -985,6 +985,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.pop() // pop this context
 				}
 
+				if objValue == value.UNDEFINED {
+					vm.push(value.UNDEFINED)
+					continue
+				}
+
 				obj, err := allocator.GetObject(objValue.GetHandle())
 
 				if err != nil {

@@ -1350,6 +1350,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 		}
+	case parser.NODE_CHAIN_EXPRESSION:
+		{
+			generateByteCode(current.Expression, symbolTable, fn)
+		}
 	}
 }
 
