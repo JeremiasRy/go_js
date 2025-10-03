@@ -1470,6 +1470,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(value.FALSE)
 						}
 					}
+				case *native.SetAdd:
+					{
+						arg := vm.pop()
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						fn.Add(owner.(*native.Set), arg)
+						vm.push(value.UNDEFINED)
+					}
+				case *native.SetHas:
+					{
+						arg := vm.pop()
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						vm.push(fn.Has(owner.(*native.Set), arg))
+					}
 				}
 
 			}

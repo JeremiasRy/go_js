@@ -17,6 +17,7 @@ const (
 	DATE_CONSTRUCTOR_NAME     string = "Date"
 	GENERATOR_NAME            string = "Generator"
 	MAP_CONSTRUCTOR_NAME      string = "Map"
+	SET_CONSTRUCTOR_NAME      string = "Set"
 )
 
 var (
@@ -26,6 +27,7 @@ var (
 	PROTOTYPE_DATE      value.Value
 	PROTOTYPE_GENERATOR value.Value
 	PROTOTYPE_MAP       value.Value
+	PROTOTYPE_SET       value.Value
 )
 
 type Prototype struct {
@@ -162,4 +164,23 @@ func initMapPrototype() {
 	p.SetMember(KEY_GET, mapGet)
 
 	PROTOTYPE_MAP = value.EncodeHandle(allocator.Allocate(p))
+}
+
+func initSetPrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_SET")
+	}
+	p := &Prototype{
+		name: SET_CONSTRUCTOR_NAME,
+	}
+
+	p.Members = map[string]ObjectValueEntry{}
+
+	setHas := value.EncodeHandle(allocator.Allocate(NewSetHas()))
+	setAdd := value.EncodeHandle(allocator.Allocate(NewSetAdd()))
+
+	p.SetMember(KEY_HAS, setHas)
+	p.SetMember(KEY_ADD, setAdd)
+
+	PROTOTYPE_SET = value.EncodeHandle(allocator.Allocate(p))
 }

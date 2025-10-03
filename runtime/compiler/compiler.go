@@ -300,6 +300,15 @@ func defineMapConstructor(main *object.ObjFunction, symbolTable *FunctionScope) 
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineSetConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	setCtor := native.NewSetConstructor()
+	setCtorHandle := allocator.Allocate(setCtor)
+
+	symbolTable.addVariable(native.SET_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(setCtorHandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
@@ -313,6 +322,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	definePromiseConstructor(main, global)
 	defineDateConstructor(main, global)
 	defineMapConstructor(main, global)
+	defineSetConstructor(main, global)
 
 	prePass(ast, global)
 	generateByteCode(ast, global, main)
@@ -687,15 +697,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			popStack = false
 			if current.Callee != nil {
 				callee, _ := symbolTable.findVariable(current.Callee.Name)
-				storedArgCount := false
 				if callee != nil && callee.fn != nil {
-					if len(current.Arguments) > callee.fn.GetArity() {
-						fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
-						storedArgCount = true
-					}
-
-					if !storedArgCount && callee.fn.HasRestParameter() {
+					if callee.fn.HasRestParameter() {
 						fn.ValueChunk().EmitByte(chunk.OP_STORE_LOCAL_START)
+					} else if len(current.Arguments) > callee.fn.GetArity() {
+						fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
 					}
 				}
 			}

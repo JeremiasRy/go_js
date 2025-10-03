@@ -223,3 +223,21 @@ func (*MapConstructor) Type() object.ObjType {
 func (*MapConstructor) New(params ...any) (object.Object, error) {
 	return NewMap(), nil
 }
+
+type SetConstructor struct{}
+
+func NewSetConstructor() *SetConstructor {
+	return &SetConstructor{}
+}
+
+func (*SetConstructor) String() string {
+	return "Function Set"
+}
+
+func (*SetConstructor) Type() object.ObjType {
+	return object.OBJ_SET_CONSTRUCTOR
+}
+
+func (*SetConstructor) New(params ...any) (object.Object, error) {
+	return NewSet(), nil
+}
