@@ -8,6 +8,7 @@ const user = {
 
 const { id, firstName, ...otherInfo } = user;
 
+
 const result = {
     ...otherInfo
 };
@@ -20,3 +21,4 @@ const newObj = {
 }
 
 console.log(`${newObj.id}${newObj.firstName}${newObj.lastName}${newObj.age}${newObj.city}`)
+

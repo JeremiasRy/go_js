@@ -77,6 +77,7 @@ var opNames = map[uint8]string{
 	chunk.OP_NULL_COALESHING:                 "OP_NULL_COALESHING",
 	chunk.OP_SPREAD:                          "OP_SPREAD",
 	chunk.OP_STORE_LOCAL_START:               "OP_STORE_LOCAL_START",
+	chunk.OP_CREATE_REST_OBJECT:              "OP_CREATE_REST_OBJECT",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -156,6 +157,16 @@ func printFunction(c value.ValueChunk) {
 			for range amount {
 				ip++
 				fmt.Printf("%04d | var index: %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_CREATE_REST_OBJECT:
+			fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			ip++
+			amount := opCode[ip]
+			fmt.Printf("%04d | exclude: %d \n", ip*4, amount)
+
+			for range amount {
+				ip++
+				fmt.Printf("%04d | KEY: %s \n", ip*4, stringer.String(c.Constants[opCode[ip]]))
 			}
 		}
 		ip++
