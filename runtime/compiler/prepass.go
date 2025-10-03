@@ -71,7 +71,18 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 		for _, param := range current.Params {
-			symbolTable.addVariable(param.Name, LET, false, nil)
+			switch param.Type {
+			case parser.NODE_IDENTIFIER:
+				symbolTable.addVariable(param.Name, LET, false, nil)
+			case parser.NODE_REST_ELEMENT:
+				symbolTable.hasRestParameter = true
+				switch param.Argument.Type {
+				case parser.NODE_IDENTIFIER:
+					symbolTable.addVariable(param.Argument.Name, LET, false, nil)
+				default:
+					panic("unsupported rest element argument")
+				}
+			}
 		}
 
 		symbolTable.arity = len(current.Params)
@@ -101,7 +112,18 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 		}
 		for _, param := range current.Params {
-			symbolTable.addVariable(param.Name, LET, false, nil)
+			switch param.Type {
+			case parser.NODE_IDENTIFIER:
+				symbolTable.addVariable(param.Name, LET, false, nil)
+			case parser.NODE_REST_ELEMENT:
+				symbolTable.hasRestParameter = true
+				switch param.Argument.Type {
+				case parser.NODE_IDENTIFIER:
+					symbolTable.addVariable(param.Argument.Name, LET, false, nil)
+				default:
+					panic("unsupported rest element argument")
+				}
+			}
 		}
 		symbolTable.arity = len(current.Params)
 
@@ -124,6 +146,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					name := node.Identifier.Name
 					arity := len(node.Arguments)
 					var fn object.Callable
+
 					if node.IsAsync {
 						fn = native.NewAsyncFunction(name, arity, nil)
 					} else {
@@ -134,7 +157,18 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				}
 			}
 			for _, param := range current.Params {
-				symbolTable.addVariable(param.Name, LET, false, nil)
+				switch param.Type {
+				case parser.NODE_IDENTIFIER:
+					symbolTable.addVariable(param.Name, LET, false, nil)
+				case parser.NODE_REST_ELEMENT:
+					symbolTable.hasRestParameter = true
+					switch param.Argument.Type {
+					case parser.NODE_IDENTIFIER:
+						symbolTable.addVariable(param.Argument.Name, LET, false, nil)
+					default:
+						panic("unsupported rest element argument")
+					}
+				}
 			}
 			symbolTable.arity = len(current.Params)
 
@@ -376,6 +410,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Local, symbolTable)
 	case parser.NODE_EXPORT_NAMED_DECLARATION:
 		prePass(current.Declaration, symbolTable)
+	case parser.NODE_REST_ELEMENT:
+
 	}
 
 }

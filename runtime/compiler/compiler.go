@@ -61,6 +61,7 @@ type FunctionScope struct {
 	block               *BlockScope
 	arity               int
 	needsArgumentsSlice bool
+	hasRestParameter    bool
 }
 
 const (
@@ -484,6 +485,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn = nextFn.fn
 			isInHeapScopeAlready := symbolTable.isInHeapScope()
+			if symbolTable.hasRestParameter {
+				fn.SetHasRestParameter()
+			}
 
 			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
@@ -549,6 +553,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
+
+			if symbolTable.hasRestParameter {
+				newFn.SetHasRestParameter()
+			}
 
 			handle := allocator.Allocate(newFn)
 			v := value.EncodeHandle(handle)
@@ -619,6 +627,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			symbolTable = FUNCTION_SCOPES[current]
 			newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
+			if symbolTable.hasRestParameter {
+				newFn.SetHasRestParameter()
+			}
 			handle := allocator.Allocate(newFn)
 			value := value.EncodeHandle(handle)
 
@@ -674,17 +685,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			prevPopStack := popStack
 			popStack = false
+			if current.Callee != nil {
+				callee, _ := symbolTable.findVariable(current.Callee.Name)
+				storedArgCount := false
+				if callee != nil && callee.fn != nil {
+					if len(current.Arguments) > callee.fn.GetArity() {
+						fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
+						storedArgCount = true
+					}
+
+					if !storedArgCount && callee.fn.HasRestParameter() {
+						fn.ValueChunk().EmitByte(chunk.OP_STORE_LOCAL_START)
+					}
+				}
+			}
 
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
 
-			if current.Callee != nil {
-				callee, _ := symbolTable.findVariable(current.Callee.Name)
-				if callee != nil && callee.fn != nil && len(current.Arguments) > callee.fn.GetArity() {
-					fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
-				}
-			}
 			generateByteCode(current.Callee, symbolTable, fn)
 			popStack = prevPopStack
 
@@ -1352,7 +1371,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_CHAIN_EXPRESSION:
 		{
+			/*
+				kinda cheap this one, we could have a OP for start chain expression, to not throw errors when property is not found, but meh...
+				Now basically everything is a chain expression
+			*/
 			generateByteCode(current.Expression, symbolTable, fn)
+		}
+	case parser.NODE_SPREAD_ELEMENT:
+		{
+			generateByteCode(current.Argument, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_SPREAD)
 		}
 	}
 }
