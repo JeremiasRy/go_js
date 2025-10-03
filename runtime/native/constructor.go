@@ -149,8 +149,11 @@ func NewMain(fn *object.ObjFunction) *Main {
 
 func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	msg := &object.JobChannelMessage{
-		Callback: m.Fn.Clone(),
-		Done:     done,
+		Callback: object.Callback{
+			Fn:      m.Fn.Clone(),
+			ThisCtx: value.UNDEFINED,
+		},
+		Done: done,
 	}
 	callbackChannel <- msg
 }
@@ -168,7 +171,7 @@ func NewLog() *Log {
 type SetTimeout struct {
 	ObjNativeFn
 	time     int
-	callback *object.ObjFunction
+	callback object.Callback
 }
 
 func NewSetTimeout() *SetTimeout {
@@ -178,9 +181,12 @@ func NewSetTimeout() *SetTimeout {
 	return setTimeout
 }
 
-func (st *SetTimeout) Set(ms int, callback *object.ObjFunction) {
+func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
 	st.time = ms
-	st.callback = callback
+	st.callback = object.Callback{
+		Fn:      fn,
+		ThisCtx: this,
+	}
 }
 
 func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {

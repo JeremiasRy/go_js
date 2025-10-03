@@ -3,6 +3,7 @@ package eventloop
 import (
 	"go_js/object"
 	"go_js/queue"
+	"go_js/value"
 	"sync"
 )
 
@@ -50,7 +51,7 @@ func Dispatch(job object.Job) {
 	el.work++
 	message := &object.JobChannelMessage{
 		Job:      job,
-		Callback: nil,
+		Callback: object.Callback{Fn: nil, ThisCtx: value.UNDEFINED},
 		Done: func() {
 			el.wg.Done()
 			el.work--

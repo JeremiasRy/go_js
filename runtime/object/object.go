@@ -46,9 +46,14 @@ func IsValueObject(v value.Value) (bool, uint32) {
 	return false, 0
 }
 
+type Callback struct {
+	Fn      Callable
+	ThisCtx value.Value
+}
+
 type JobChannelMessage struct {
 	Job      Job
-	Callback Callable
+	Callback Callback
 	Done     func()
 }
 

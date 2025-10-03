@@ -73,9 +73,12 @@ func (asyncFn *ObjAsyncFunction) Await(p *ObjPromise) {
 func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	asyncFn.Awaiting.Listen()
 	message := &object.JobChannelMessage{
-		Job:      nil,
-		Callback: asyncFn,
-		Done:     done,
+		Job: nil,
+		Callback: object.Callback{
+			Fn:      asyncFn,
+			ThisCtx: value.UNDEFINED,
+		},
+		Done: done,
 	}
 
 	callbackChannel <- message
