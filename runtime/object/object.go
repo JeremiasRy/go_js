@@ -73,4 +73,6 @@ type Callable interface {
 	SetHeapScope(scope int)
 	ReturnsPromise(v bool)
 	Clone() Callable
+	HasRestParameter() bool
+	SetHasRestParameter()
 }

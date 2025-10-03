@@ -15,6 +15,7 @@ type ObjFunction struct {
 	Chunk     *value.ValueChunk
 	Arity     int
 	HeapScope int
+	rest      bool
 }
 
 const NOT_IN_HEAP_SCOPE int = -1
@@ -61,4 +62,12 @@ func (fn *ObjFunction) SetHeapScope(scope int) {
 
 func (*ObjFunction) ReturnsPromise(v bool) {
 	// just to implement the interface
+}
+
+func (obj *ObjFunction) HasRestParameter() bool {
+	return obj.rest
+}
+
+func (obj *ObjFunction) SetHasRestParameter() {
+	obj.rest = true
 }

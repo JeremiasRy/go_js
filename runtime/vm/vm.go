@@ -21,12 +21,14 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
+const NO_STORED_LOCAL_START = -1
 
 var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
 var imports = make(map[string]value.Value)
 var heapVars = make(map[int][]value.Value)
 var heapScopesCount int
+var storedLocalStart int = NO_STORED_LOCAL_START
 
 type CallFrame struct {
 	fn         object.Callable
@@ -367,6 +369,33 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		returnTo = *currentIp
 	}
 
+	if fn.HasRestParameter() {
+		if storedLocalStart != NO_STORED_LOCAL_START {
+			localStart = storedLocalStart
+			storedLocalStart = -1
+			restLength := vm.stackTop - localStart - (fn.GetArity() - 1)
+
+			arr := native.NewArray(restLength)
+
+			for range restLength {
+				arr.PushElement(vm.pop())
+			}
+
+			vm.push(value.EncodeHandle(allocator.Allocate(arr)))
+			goto cont
+		}
+
+		restLength := int(argCount - (uint8(fn.GetArity()) - 1))
+		arr := native.NewArray(restLength)
+
+		for range restLength {
+			arr.PushElement(vm.pop())
+		}
+
+		vm.push(value.EncodeHandle(allocator.Allocate(arr)))
+	}
+cont:
+
 	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnTo, this)
 	vm.frameCount++
 
@@ -575,27 +604,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				b := vm.pop()
 				a := vm.pop()
 
-				bIsObject, bHandle := object.IsValueObject(b)
-				aIsObject, aHandle := object.IsValueObject(a)
-
-				if bIsObject && aIsObject {
-					bObj, _ := allocator.GetObject(bHandle)
-					aObj, _ := allocator.GetObject(aHandle)
-
-					if bObj.Type() == aObj.Type() {
-						if bObj.String() == aObj.String() {
-							vm.push(value.TRUE)
-						} else {
-							vm.push(value.FALSE)
-						}
-
+				if b.IsObject() && a.IsObject() {
+					if allocator.GetPointer(b.GetHandle()) == allocator.GetPointer(a.GetHandle()) {
+						vm.push(value.TRUE)
 					} else {
 						vm.push(value.FALSE)
 					}
-					continue
-				}
-
-				if a == b {
+				} else if a == b {
 					vm.push(value.TRUE)
 				} else {
 					vm.push(value.FALSE)
@@ -606,24 +621,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				b := vm.pop()
 				a := vm.pop()
 
-				bIsObject, bHandle := object.IsValueObject(b)
-				aIsObject, aHandle := object.IsValueObject(a)
-
-				if bIsObject && aIsObject {
-					bObj, _ := allocator.GetObject(bHandle)
-					aObj, _ := allocator.GetObject(aHandle)
-
-					if bObj.Type() == aObj.Type() {
-
-					} else {
+				if b.IsObject() && a.IsObject() {
+					if allocator.GetPointer(b.GetHandle()) != allocator.GetPointer(a.GetHandle()) {
 						vm.push(value.TRUE)
+					} else {
+						vm.push(value.FALSE)
 					}
-				}
-
-				if a == b {
-					vm.push(value.FALSE)
-				} else {
+				} else if a != b {
 					vm.push(value.TRUE)
+				} else {
+					vm.push(value.FALSE)
 				}
 			}
 		case chunk.OP_LOGICAL_OR:
@@ -707,6 +714,24 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(value.ValueFromFloat64(-(v.AsNumber())))
 				} else {
 					return value.UNDEFINED, fmt.Errorf("no support for negating %s yet", stringer.String(v))
+				}
+			}
+		case chunk.OP_SPREAD:
+			{
+				v := vm.pop()
+
+				if !v.IsObject() {
+					return value.UNDEFINED, fmt.Errorf("%v cannot be spread", stringer.String(v))
+				}
+				obj, _ := allocator.GetObject(v.GetHandle())
+
+				switch obj := obj.(type) {
+				case *native.ObjArr:
+					for _, v := range obj.Values() {
+						vm.push(v)
+					}
+				default:
+					return value.UNDEFINED, fmt.Errorf("unsupported spread operation for object %v", stringer.String(v))
 				}
 			}
 		case chunk.OP_JUMP_IF_FALSE:
@@ -1744,6 +1769,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				count := c.Code[ip]
 				ip++
 				argCount = count
+			}
+		case chunk.OP_STORE_LOCAL_START:
+			{
+				storedLocalStart = vm.stackTop
 			}
 		case chunk.OP_AWAIT:
 			{
