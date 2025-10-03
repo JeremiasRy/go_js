@@ -2038,6 +2038,22 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.push(value.EncodeHandle(allocator.Allocate(newObj)))
 			}
+		case chunk.OP_SET_FROM_SPREAD:
+			{
+				source := vm.pop()
+				destination := vm.peek()
+				obj, _ := allocator.GetObject(source.GetHandle())
+
+				dstObj, _ := allocator.GetObject(destination.GetHandle())
+
+				for _, k := range obj.(*native.ObjObject).Keys() {
+					if k == native.KEY_PROTO {
+						continue
+					}
+
+					dstObj.(*native.ObjObject).SetMember(k, obj.(*native.ObjObject).GetMember(k))
+				}
+			}
 
 		}
 	}

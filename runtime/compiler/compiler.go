@@ -831,9 +831,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitBytes(getOp, uint8(obj.slot))
 
 						if prop.Shorthand {
-							fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
+							fn.ValueChunk().WriteConstant(v)
 						} else {
-							fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(k))))
+							fn.ValueChunk().WriteConstant(k)
 						}
 						fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
 						exclude = append(exclude, k)
@@ -1193,26 +1193,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 					fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 				case parser.NODE_SPREAD_ELEMENT:
-					/*
-						item, _ := symbolTable.findVariable(property.Argument.Name)
+					item, _ := symbolTable.findVariable(property.Argument.Name)
+					var getOp uint8
 
-						var getOp uint8
-						var defineOp uint8
-						switch item.scope {
-						case LOCAL:
-							getOp = chunk.OP_GET_LOCAL
-							defineOp = chunk.OP_DEFINE_LOCAL
-						case GLOBAL:
-							getOp = chunk.OP_GET_GLOBAL
-							defineOp = chunk.OP_DEFINE_GLOBAL
-						case HEAP:
-							getOp = chunk.OP_GET_HEAP_VAR
-							defineOp = chunk.OP_DEFINE_HEAP_VAR
-						}
-						fmt.Println(defineOp)
-
-						fn.ValueChunk().EmitBytes(getOp, uint8(item.slot))
-					*/
+					switch item.scope {
+					case LOCAL:
+						getOp = chunk.OP_GET_LOCAL
+					case GLOBAL:
+						getOp = chunk.OP_GET_GLOBAL
+					case HEAP:
+						getOp = chunk.OP_GET_HEAP_VAR
+					}
+					fn.ValueChunk().EmitBytes(getOp, uint8(item.slot), chunk.OP_SET_FROM_SPREAD)
 				}
 			}
 			popStack = prevPopstack
@@ -1231,9 +1223,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			for i < len(current.Quasis) {
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
-				if len(quasi.Raw) == 0 {
-					break
-				}
+
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
 				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 
