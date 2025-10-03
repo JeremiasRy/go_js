@@ -2,6 +2,7 @@ package queue
 
 import (
 	"container/list"
+	"errors"
 	"go_js/object"
 	"sync"
 )
@@ -35,7 +36,7 @@ func Init(wg *sync.WaitGroup) {
 	}
 }
 
-func Enqueue(callback object.Callable, priority TaskPriority) {
+func Enqueue(callback object.Callback, priority TaskPriority) {
 	q.wg.Add(1)
 	var l *list.List
 
@@ -50,7 +51,7 @@ func Enqueue(callback object.Callable, priority TaskPriority) {
 	QueueC <- struct{}{}
 }
 
-func Dequeue() object.Callable {
+func Dequeue() (object.Callback, error) {
 	var l *list.List
 
 	if q.microTask.Len() > 0 {
@@ -60,11 +61,11 @@ func Dequeue() object.Callable {
 	}
 
 	if l == nil {
-		return nil
+		return object.Callback{}, errors.New("no tasks to dequeue")
 	}
 
 	front := l.Front()
 	l.Remove(front)
 	q.wg.Done()
-	return front.Value.(object.Callable)
+	return front.Value.(object.Callback), nil
 }

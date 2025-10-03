@@ -411,15 +411,15 @@ cont:
 func (vm *VM) Run(wg *sync.WaitGroup) {
 	wg.Add(1)
 Run:
-	fn := queue.Dequeue()
-	for fn != nil {
-		f, c := vm.Call(fn, nil, value.UNDEFINED, 0)
+	callback, errDequeue := queue.Dequeue()
+	for errDequeue == nil {
+		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, 0)
 		_, err := vm.run(f, c)
 
 		if err != nil {
 			log.Fatalf("runtime error: %s", err.Error())
 		}
-		fn = queue.Dequeue()
+		callback, errDequeue = queue.Dequeue()
 	}
 
 	if vm.debug {
@@ -1447,7 +1447,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						if callback, ok := obj.(*object.ObjFunction); ok {
-							fn.Set(int(ms), callback)
+							fn.Set(int(ms), callback, thisCtx)
 							eventloop.Dispatch(fn.Clone())
 							vm.push(value.UNDEFINED)
 						}
