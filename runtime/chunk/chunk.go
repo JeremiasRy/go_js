@@ -68,4 +68,6 @@ const (
 	OP_NULL_COALESHING
 	OP_SPREAD
 	OP_STORE_LOCAL_START
+	OP_CREATE_REST_OBJECT // op <len of exluded> <...excluded constant slot>
+	OP_SET_FROM_SPREAD
 )

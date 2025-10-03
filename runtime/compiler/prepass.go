@@ -195,14 +195,20 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_VARIABLE_DECLARATION:
 		for _, declaration := range current.Declarations {
-			switch declaration.Identifier.Type {
+			ident := declaration.Identifier
+			switch ident.Type {
 			case parser.NODE_ARRAY_PATTERN:
-				for _, node := range declaration.Identifier.Elements {
+				for _, node := range ident.Elements {
 					symbolTable.addVariable(node.Name, LET, false, nil)
 				}
 			case parser.NODE_OBJECT_PATTERN:
-				for _, node := range declaration.Identifier.Properties {
-					symbolTable.addVariable(node.Value.(*parser.Node).Name, LET, false, nil)
+				for _, node := range ident.Properties {
+					switch node.Type {
+					case parser.NODE_PROPERTY:
+						symbolTable.addVariable(node.Value.(*parser.Node).Name, LET, false, nil)
+					case parser.NODE_REST_ELEMENT:
+						symbolTable.addVariable(node.Argument.Name, LET, false, nil)
+					}
 				}
 			default:
 				for _, declaration := range current.Declarations {

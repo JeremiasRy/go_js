@@ -2008,6 +2008,53 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(value.TRUE)
 				}
 			}
+		case chunk.OP_CREATE_REST_OBJECT:
+			{
+				origin := vm.pop()
+				obj, _ := allocator.GetObject(origin.GetHandle())
+
+				amountOfExludedKeys := c.Code[ip]
+				ip++
+
+				exludeMap := map[value.Value]struct{}{}
+
+				for range amountOfExludedKeys {
+					key := c.Constants[c.Code[ip]]
+					ptr := value.EncodeHandle(allocator.GetPointer(key.GetHandle()))
+					exludeMap[ptr] = struct{}{}
+					ip++
+				}
+
+				newObj := native.NewObjectHash()
+
+				for _, k := range obj.(*native.ObjObject).Keys() {
+					if k == native.KEY_PROTO {
+						continue
+					}
+					ptr := value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
+					if _, found := exludeMap[ptr]; !found {
+						newObj.SetMember(k, obj.(*native.ObjObject).GetMember(k))
+					}
+				}
+				vm.push(value.EncodeHandle(allocator.Allocate(newObj)))
+			}
+		case chunk.OP_SET_FROM_SPREAD:
+			{
+				source := vm.pop()
+				destination := vm.peek()
+				obj, _ := allocator.GetObject(source.GetHandle())
+
+				dstObj, _ := allocator.GetObject(destination.GetHandle())
+
+				for _, k := range obj.(*native.ObjObject).Keys() {
+					if k == native.KEY_PROTO {
+						continue
+					}
+
+					dstObj.(*native.ObjObject).SetMember(k, obj.(*native.ObjObject).GetMember(k))
+				}
+			}
+
 		}
 	}
 }

@@ -77,6 +77,8 @@ var opNames = map[uint8]string{
 	chunk.OP_NULL_COALESHING:                 "OP_NULL_COALESHING",
 	chunk.OP_SPREAD:                          "OP_SPREAD",
 	chunk.OP_STORE_LOCAL_START:               "OP_STORE_LOCAL_START",
+	chunk.OP_CREATE_REST_OBJECT:              "OP_CREATE_REST_OBJECT",
+	chunk.OP_SET_FROM_SPREAD:                 "OP_SET_FROM_SPREAD",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -108,7 +110,7 @@ func printFunction(c value.ValueChunk) {
 			chunk.OP_ADD, chunk.OP_DEFINE_GLOBAL, chunk.OP_GET_OBJECT_MEMBER,
 			chunk.OP_CALL, chunk.OP_TRY_BLOCK_END, chunk.OP_PUSH_UNDEFINED,
 			chunk.OP_RETURN, chunk.OP_ADD_ARGUMENTS_TO_LOCALS, chunk.OP_IN,
-			chunk.OP_NULL_COALESHING, chunk.OP_SPREAD, chunk.OP_STORE_LOCAL_START:
+			chunk.OP_NULL_COALESHING, chunk.OP_SPREAD, chunk.OP_STORE_LOCAL_START, chunk.OP_SET_FROM_SPREAD:
 			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 
 		case chunk.OP_IMPORT, chunk.OP_CONSTANT, chunk.OP_GET_HEAP_VAR,
@@ -156,6 +158,16 @@ func printFunction(c value.ValueChunk) {
 			for range amount {
 				ip++
 				fmt.Printf("%04d | var index: %d \n", ip*4, opCode[ip])
+			}
+		case chunk.OP_CREATE_REST_OBJECT:
+			fmt.Printf("%04d | %s\n", ip*4, opNames[code])
+			ip++
+			amount := opCode[ip]
+			fmt.Printf("%04d | %d \n", ip*4, amount)
+
+			for range amount {
+				ip++
+				fmt.Printf("%04d | %s \n", ip*4, stringer.String(c.Constants[opCode[ip]]))
 			}
 		}
 		ip++

@@ -808,31 +808,57 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					getOp = chunk.OP_GET_HEAP_VAR
 				}
 
+				exclude := []value.Value{}
+
 				for _, prop := range pattern.Properties {
-					var defineOp uint8
-					k := prop.Key.Name
-					v := prop.Value.(*parser.Node).Name
+					switch prop.Type {
+					case parser.NODE_PROPERTY:
+						name := prop.Value.(*parser.Node).Name
+						property, _ := symbolTable.findVariable(name)
+						var defineOp uint8
+						k := value.EncodeHandle(allocator.Allocate(native.LightString(prop.Key.Name)))
+						v := value.EncodeHandle(allocator.Allocate(native.LightString(name)))
 
-					property, _ := symbolTable.findVariable(v)
+						switch property.scope {
+						case LOCAL:
+							defineOp = chunk.OP_DEFINE_LOCAL
+						case GLOBAL:
+							defineOp = chunk.OP_DEFINE_GLOBAL
+						case HEAP:
+							defineOp = chunk.OP_DEFINE_HEAP_VAR
+						}
 
-					switch property.scope {
-					case LOCAL:
-						defineOp = chunk.OP_DEFINE_LOCAL
-					case GLOBAL:
-						defineOp = chunk.OP_DEFINE_GLOBAL
-					case HEAP:
-						defineOp = chunk.OP_DEFINE_HEAP_VAR
+						fn.ValueChunk().EmitBytes(getOp, uint8(obj.slot))
+
+						if prop.Shorthand {
+							fn.ValueChunk().WriteConstant(v)
+						} else {
+							fn.ValueChunk().WriteConstant(k)
+						}
+						fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
+						exclude = append(exclude, k)
+					case parser.NODE_REST_ELEMENT:
+						item, _ := symbolTable.findVariable(prop.Argument.Name)
+						fn.ValueChunk().EmitBytes(getOp, uint8(obj.slot), chunk.OP_CREATE_REST_OBJECT, uint8(len(exclude)))
+						for _, exclude := range exclude {
+							slot := fn.ValueChunk().AddConstant(exclude)
+							fn.ValueChunk().EmitByte(slot)
+						}
+
+						var defineOp uint8
+
+						switch item.scope {
+						case LOCAL:
+							defineOp = chunk.OP_DEFINE_LOCAL
+						case HEAP:
+							defineOp = chunk.OP_DEFINE_HEAP_VAR
+						case GLOBAL:
+							defineOp = chunk.OP_DEFINE_GLOBAL
+						}
+
+						fn.ValueChunk().EmitByte(defineOp)
 					}
 
-					fn.ValueChunk().EmitBytes(getOp, uint8(obj.slot))
-
-					if prop.Shorthand {
-						fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
-					} else {
-						fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(k))))
-
-					}
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
 				}
 				return
 			}
@@ -1161,9 +1187,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			prevPopstack := popStack
 			popStack = false
 			for _, property := range current.Properties {
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(property.Key.Name))))
-				generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
-				fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
+				switch property.Type {
+				case parser.NODE_PROPERTY:
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(property.Key.Name))))
+					generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
+					fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
+				case parser.NODE_SPREAD_ELEMENT:
+					item, _ := symbolTable.findVariable(property.Argument.Name)
+					var getOp uint8
+
+					switch item.scope {
+					case LOCAL:
+						getOp = chunk.OP_GET_LOCAL
+					case GLOBAL:
+						getOp = chunk.OP_GET_GLOBAL
+					case HEAP:
+						getOp = chunk.OP_GET_HEAP_VAR
+					}
+					fn.ValueChunk().EmitBytes(getOp, uint8(item.slot), chunk.OP_SET_FROM_SPREAD)
+				}
 			}
 			popStack = prevPopstack
 		}
@@ -1181,9 +1223,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			for i < len(current.Quasis) {
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
-				if len(quasi.Raw) == 0 {
-					break
-				}
+
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
 				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 
