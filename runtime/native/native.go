@@ -26,4 +26,5 @@ func Init() {
 	initStringPrototype()
 	initGeneratorPrototype()
 	initMapPrototype()
+	initSetPrototype()
 }

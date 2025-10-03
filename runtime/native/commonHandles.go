@@ -45,11 +45,12 @@ var (
 	KEY_VALUE  value.Value
 	KEY_DONE   value.Value
 
-	// map
+	// map-set
 	KEY_HAS  value.Value
 	KEY_GET  value.Value
 	KEY_SET  value.Value
 	KEY_SIZE value.Value
+	KEY_ADD  value.Value
 )
 
 func createCommonHandles() {
@@ -86,4 +87,5 @@ func createCommonHandles() {
 	KEY_GET = value.EncodeHandle(allocator.Allocate(LightString("get")))
 	KEY_SET = value.EncodeHandle(allocator.Allocate(LightString("set")))
 	KEY_SIZE = value.EncodeHandle(allocator.Allocate(LightString("size")))
+	KEY_ADD = value.EncodeHandle(allocator.Allocate(LightString("add")))
 }
