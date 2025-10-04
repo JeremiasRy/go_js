@@ -51,6 +51,10 @@ var (
 	KEY_SET  value.Value
 	KEY_SIZE value.Value
 	KEY_ADD  value.Value
+
+	// promise
+	KEY_RESOLVE value.Value
+	KEY_THEN    value.Value
 )
 
 func createCommonHandles() {
@@ -88,4 +92,7 @@ func createCommonHandles() {
 	KEY_SET = value.EncodeHandle(allocator.Allocate(LightString("set")))
 	KEY_SIZE = value.EncodeHandle(allocator.Allocate(LightString("size")))
 	KEY_ADD = value.EncodeHandle(allocator.Allocate(LightString("add")))
+
+	KEY_RESOLVE = value.EncodeHandle(allocator.Allocate(LightString("resolve")))
+	KEY_THEN = value.EncodeHandle(allocator.Allocate(LightString("then")))
 }

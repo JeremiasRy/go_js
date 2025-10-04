@@ -49,6 +49,7 @@ func IsValueObject(v value.Value) (bool, uint32) {
 type Callback struct {
 	Fn      Callable
 	ThisCtx value.Value
+	Stack   []value.Value
 }
 
 type JobChannelMessage struct {

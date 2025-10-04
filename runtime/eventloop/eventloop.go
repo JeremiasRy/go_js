@@ -40,7 +40,7 @@ func Start() {
 
 	go func() {
 		for message := range el.jobCallbackChannel {
-			queue.Enqueue(message.Callback, queue.TASK)
+			queue.Enqueue(message.Callback, queue.TASK, true)
 			message.Done()
 		}
 	}()
