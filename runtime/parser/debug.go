@@ -298,7 +298,7 @@ func printNode(node *Node) {
 		fmt.Printf("Failed to print node:\n\n %s\n", err.Error())
 	}
 
-	println(string(jsonStr))
+	fmt.Println(string(jsonStr))
 }
 
 func PrintNode(node *Node) {

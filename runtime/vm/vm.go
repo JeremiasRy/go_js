@@ -413,6 +413,12 @@ func (vm *VM) Run(wg *sync.WaitGroup) {
 Run:
 	callback, errDequeue := queue.Dequeue()
 	for errDequeue == nil {
+		if len(callback.Stack) > 0 {
+			for _, v := range callback.Stack {
+				vm.push(v)
+			}
+		}
+
 		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, 0)
 		_, err := vm.run(f, c)
 
@@ -429,10 +435,11 @@ Run:
 
 	tick := time.NewTicker(100 * time.Millisecond)
 	hasWork := eventloop.HasWork()
+
+	if vm.debug {
+		fmt.Printf("eventloop has work: %v\n", hasWork)
+	}
 	for hasWork {
-		if vm.debug {
-			fmt.Printf("eventloop has work: %v\n", hasWork)
-		}
 		select {
 		case <-queue.QueueC:
 			{
@@ -1135,6 +1142,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				switch fn := fn.(type) {
 				case *native.ObjAsyncFunction:
 					{
+						fn = fn.Clone().(*native.ObjAsyncFunction)
 						if !fn.ReturnArgumentIsPromise {
 							promise := native.NewPromise()
 							fn.SetPromise(promise)
@@ -1153,6 +1161,30 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case object.Callable:
 					{
 						f, c = vm.Call(fn, &ip, thisCtx, argCount)
+					}
+				case *native.Resolve:
+					{
+						v := vm.pop()
+						fn := native.NewAsyncFunction("RESOLVED_FN", 0, nil)
+						fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
+						promise := native.NewPromise()
+						fn.SetPromise(promise)
+						vm.push(value.EncodeHandle(allocator.Allocate(promise)))
+
+						f, c = vm.Call(fn, &ip, value.UNDEFINED, 0)
+						vm.push(v)
+					}
+				case *native.Then:
+					{
+						p, _ := allocator.GetObject(thisCtx.GetHandle())
+						v := p.(*native.ObjPromise).Value
+						callbackFn := vm.pop()
+
+						callback, _ := allocator.GetObject(callbackFn.GetHandle())
+						fn := callback.(*object.ObjFunction)
+
+						queue.Enqueue(object.Callback{Fn: fn, ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
+						vm.push(value.UNDEFINED)
 					}
 				case *native.MapGet:
 					{
@@ -1433,6 +1465,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						v := vm.pop()
 						fn.Resolve(v)
+						vm.push(value.UNDEFINED)
 					}
 				case *native.SetTimeout:
 					{
@@ -1483,6 +1516,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						owner, _ := allocator.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Has(owner.(*native.Set), arg))
 					}
+				case *native.QueueMicroTask:
+					{
+						v := vm.pop()
+
+						fn, _ := allocator.GetObject(v.GetHandle())
+						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
+					}
 				}
 
 			}
@@ -1509,7 +1549,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 
 					vm.stackTop = f.localStart
-					vm.push(value)
+
+					if promise.ReturnArgumentIsPromise {
+						vm.push(value)
+					}
 
 					f = vm.currentFrame()
 					c = *f.fn.ValueChunk()
@@ -2054,7 +2097,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					dstObj.(*native.ObjObject).SetMember(k, obj.(*native.ObjObject).GetMember(k))
 				}
 			}
-
 		}
 	}
 }

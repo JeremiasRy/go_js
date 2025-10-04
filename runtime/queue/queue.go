@@ -36,7 +36,7 @@ func Init(wg *sync.WaitGroup) {
 	}
 }
 
-func Enqueue(callback object.Callback, priority TaskPriority) {
+func Enqueue(callback object.Callback, priority TaskPriority, sendMessage bool) {
 	q.wg.Add(1)
 	var l *list.List
 
@@ -48,7 +48,10 @@ func Enqueue(callback object.Callback, priority TaskPriority) {
 	}
 
 	l.PushBack(callback)
-	QueueC <- struct{}{}
+
+	if sendMessage {
+		QueueC <- struct{}{}
+	}
 }
 
 func Dequeue() (object.Callback, error) {

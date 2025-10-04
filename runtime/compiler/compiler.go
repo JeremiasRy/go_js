@@ -309,6 +309,15 @@ func defineSetConstructor(main *object.ObjFunction, symbolTable *FunctionScope) 
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineQueueMicroTask(main *object.ObjFunction, symbolTable *FunctionScope) {
+	queueMicroTask := native.NewQueueMicroTask()
+	handle := allocator.Allocate(queueMicroTask)
+
+	symbolTable.addVariable(native.QUEUE_MICRO_TASK_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
@@ -323,6 +332,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineDateConstructor(main, global)
 	defineMapConstructor(main, global)
 	defineSetConstructor(main, global)
+	defineQueueMicroTask(main, global)
 
 	prePass(ast, global)
 	generateByteCode(ast, global, main)
@@ -550,9 +560,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitByte(chunk.OP_ADD_ARGUMENTS_TO_LOCALS)
 			}
 
+			prevPopStack := popStack
+			popStack = true
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
+			popStack = prevPopStack
 
 			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
@@ -622,9 +635,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
 			} else {
+				prevPopStack := popStack
+				popStack = true
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, newFn)
 				}
+				popStack = prevPopStack
 			}
 
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
@@ -646,9 +662,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
 			} else {
+				prevPopStack := popStack
+				popStack = true
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, newFn)
 				}
+				popStack = prevPopStack
 			}
 
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
@@ -672,15 +691,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
+			prevPopstack := popStack
+			popStack = false
 			for _, declaration := range current.Declarations {
-				popStack = false
 				generateByteCode(declaration, symbolTable, fn)
-				popStack = true
 			}
+			popStack = prevPopstack
 		}
 
 	case parser.NODE_ARRAY_EXPRESSION:
 		{
+
+			prevPopstack := popStack
 			popStack = false
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_ARRAY)
 			fn.ValueChunk().EmitUint32(uint32(len(current.Elements)))
@@ -689,7 +711,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(item, symbolTable, fn)
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_ELEMENT)
 			}
-			popStack = true
+			popStack = prevPopstack
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
@@ -706,6 +728,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 
+			if len(current.Arguments) == 0 && calleeIsPromiseFunction(current.Callee) {
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+			}
+
 			for _, node := range current.Arguments {
 				generateByteCode(node, symbolTable, fn)
 			}
@@ -714,7 +740,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			popStack = prevPopStack
 
 			fn.ValueChunk().EmitByte(chunk.OP_CALL)
-
 			if popStack {
 				fn.ValueChunk().EmitByte(chunk.OP_POP)
 			}
@@ -936,10 +961,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
+			prevPopstack := popStack
 			popStack = false
 			generateByteCode(current.Left, symbolTable, fn)
 			generateByteCode(current.Right, symbolTable, fn)
-			popStack = true
+			popStack = prevPopstack
 
 			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 		}
@@ -972,14 +998,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_RETURN_STATEMENT:
 		{
-			fn.ReturnsPromise(checkIfNewArgumentIsPromise(current.Argument))
+			fn.ReturnsPromise(argumentIsPromise(current.Argument))
 
 			if current.Argument == nil {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 			} else {
+				prevPopstack := popStack
 				popStack = false
 				generateByteCode(current.Argument, symbolTable, fn)
-				popStack = true
+				popStack = prevPopstack
 			}
 
 			fn.ValueChunk().EmitByte(chunk.OP_RETURN)
@@ -1322,9 +1349,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_AWAIT_EXPRESSION:
 		{
+			prevPopstack := popStack
 			popStack = false
 			generateByteCode(current.Argument, symbolTable, fn)
-			popStack = true
+			popStack = prevPopstack
 			fn.ValueChunk().EmitByte(chunk.OP_AWAIT)
 		}
 	case parser.NODE_UNARY_EXPRESSION:
@@ -1485,13 +1513,23 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 	}
 }
 
-func checkIfNewArgumentIsPromise(current *parser.Node) bool {
+func argumentIsPromise(current *parser.Node) bool {
 	switch current.Type {
 	case parser.NODE_NEW_EXPRESSION:
 		{
 			if current.Callee.Type == parser.NODE_IDENTIFIER {
 				return current.Callee.Name == native.PROMISE_CONSTRUCTOR_NAME
 			}
+		}
+	}
+	return false
+}
+
+func calleeIsPromiseFunction(current *parser.Node) bool {
+	switch current.Type {
+	case parser.NODE_MEMBER_EXPRESSION:
+		if current.Object.Type == parser.NODE_IDENTIFIER && current.Property.Type == parser.NODE_IDENTIFIER {
+			return current.Object.Name == native.PROMISE_CONSTRUCTOR_NAME && current.Property.Name == "resolve"
 		}
 	}
 	return false

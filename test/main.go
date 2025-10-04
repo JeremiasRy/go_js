@@ -52,7 +52,7 @@ func main() {
 
 	fmt.Print(" done")
 
-	fmt.Printf("\nRunning %d tests.\n", len(expected))
+	fmt.Printf("\nRunning %d tests.\n", len(scripts))
 
 	fails := []struct {
 		test     string
@@ -65,7 +65,7 @@ func main() {
 			continue
 		}
 		name := script.Name()
-		fmt.Printf("%-50s %2d/%d... ", name, nth+1, len(expected))
+		fmt.Printf("%-50s %2d/%d... ", name, nth+1, len(scripts))
 
 		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, "test-scripts/"+name)
 		out, err := cmd.CombinedOutput()

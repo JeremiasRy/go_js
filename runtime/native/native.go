@@ -18,6 +18,16 @@ func (onf *ObjNativeFn) String() string {
 	return fmt.Sprintf("<native fn %s()>", onf.name)
 }
 
+type QueueMicroTask struct {
+	ObjNativeFn
+}
+
+func NewQueueMicroTask() *QueueMicroTask {
+	q := &QueueMicroTask{}
+	q.name = QUEUE_MICRO_TASK_NAME
+	return q
+}
+
 func Init() {
 	createCommonHandles()
 	initObjectPrototype()
@@ -27,4 +37,6 @@ func Init() {
 	initGeneratorPrototype()
 	initMapPrototype()
 	initSetPrototype()
+	initPromiseConstructorPrototype()
+	initPromisePrototype()
 }

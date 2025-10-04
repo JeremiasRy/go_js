@@ -4,8 +4,8 @@ setTimeout(() => {
     console.log("5. Macrotask (setTimeout)");
 }, 0);
 
-Promise.resolve().then(() => {
-    console.log("3. Microtask (Promise.then)");
+Promise.resolve("hello").then((message) => {
+    console.log(`3. Microtask (Promise.then) ${message}`);
     queueMicrotask(() => {
         console.log("4. Nested Microtask (queueMicrotask)");
     });

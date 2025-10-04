@@ -21,6 +21,7 @@ var statusToString = map[PromiseStatus]string{
 }
 
 type ObjPromise struct {
+	ObjObject
 	object.Ctx
 	Status PromiseStatus
 	Value  value.Value
@@ -29,12 +30,17 @@ type ObjPromise struct {
 }
 
 func NewPromise() *ObjPromise {
-	return &ObjPromise{
+
+	promise := &ObjPromise{
 		Status: PENDING,
 		Value:  value.UNDEFINED,
 
 		c: make(chan struct{}, 1),
 	}
+	promise.Members = map[string]ObjectValueEntry{}
+	promise.SetMember(KEY_PROTO, PROTOTYPE_PROMISE)
+
+	return promise
 }
 
 func (op *ObjPromise) Type() object.ObjType {
@@ -65,10 +71,26 @@ func (op *ObjPromise) Listen() {
 	}
 }
 
-type PromiseConstructor struct{}
+type Then struct {
+	ObjNativeFn
+}
+
+func NewThen() *Then {
+	t := &Then{}
+	t.name = "then"
+	return t
+}
+
+type PromiseConstructor struct {
+	ObjObject
+}
 
 func NewPromiseConstructor() *PromiseConstructor {
-	return &PromiseConstructor{}
+	pctor := &PromiseConstructor{}
+	pctor.Members = map[string]ObjectValueEntry{}
+
+	pctor.SetMember(KEY_PROTO, PROTOTYPE_PROMISE_CONSTRUCTOR)
+	return pctor
 }
 
 func (pCtor *PromiseConstructor) Type() object.ObjType {
