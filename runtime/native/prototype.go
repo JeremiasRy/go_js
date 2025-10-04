@@ -18,16 +18,19 @@ const (
 	GENERATOR_NAME            string = "Generator"
 	MAP_CONSTRUCTOR_NAME      string = "Map"
 	SET_CONSTRUCTOR_NAME      string = "Set"
+	QUEUE_MICRO_TASK_NAME     string = "queueMicrotask"
 )
 
 var (
-	PROTOTYPE_OBJECT    value.Value
-	PROTOTYPE_ARRAY     value.Value
-	PROTOTYPE_STRING    value.Value
-	PROTOTYPE_DATE      value.Value
-	PROTOTYPE_GENERATOR value.Value
-	PROTOTYPE_MAP       value.Value
-	PROTOTYPE_SET       value.Value
+	PROTOTYPE_OBJECT              value.Value
+	PROTOTYPE_ARRAY               value.Value
+	PROTOTYPE_STRING              value.Value
+	PROTOTYPE_DATE                value.Value
+	PROTOTYPE_GENERATOR           value.Value
+	PROTOTYPE_MAP                 value.Value
+	PROTOTYPE_SET                 value.Value
+	PROTOTYPE_PROMISE_CONSTRUCTOR value.Value
+	PROTOTYPE_PROMISE             value.Value
 )
 
 type Prototype struct {
@@ -183,4 +186,39 @@ func initSetPrototype() {
 	p.SetMember(KEY_ADD, setAdd)
 
 	PROTOTYPE_SET = value.EncodeHandle(allocator.Allocate(p))
+}
+
+func initPromiseConstructorPrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_PROMISE")
+	}
+	p := &Prototype{
+		name: PROMISE_CONSTRUCTOR_NAME,
+	}
+
+	p.Members = map[string]ObjectValueEntry{}
+
+	resolve := value.EncodeHandle(allocator.Allocate(NewResolve()))
+
+	p.SetMember(KEY_RESOLVE, resolve)
+
+	PROTOTYPE_PROMISE_CONSTRUCTOR = value.EncodeHandle(allocator.Allocate(p))
+}
+
+func initPromisePrototype() {
+	if PROTOTYPE_OBJECT == 0 {
+		panic("it's important that PROTOTYPE_OBJECT is initialized PROTOTYPE_RESOLVED_PROMISE")
+	}
+
+	p := &Prototype{
+		name: PROMISE_CONSTRUCTOR_NAME,
+	}
+
+	p.Members = map[string]ObjectValueEntry{}
+
+	then := value.EncodeHandle(allocator.Allocate(NewThen()))
+
+	p.SetMember(KEY_THEN, then)
+
+	PROTOTYPE_PROMISE = value.EncodeHandle(allocator.Allocate(p))
 }

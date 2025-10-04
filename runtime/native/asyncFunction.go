@@ -87,3 +87,13 @@ func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMes
 func (asyncFn *ObjAsyncFunction) ReturnsPromise(v bool) {
 	asyncFn.ReturnArgumentIsPromise = v
 }
+
+type Resolve struct {
+	ObjNativeFn
+}
+
+func NewResolve() *Resolve {
+	r := &Resolve{}
+	r.name = "resolve"
+	return r
+}
