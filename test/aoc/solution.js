@@ -1,14 +1,9 @@
-/**
- * @typedef {Map<string, number>} WireMap
- */
-
-
+import { input } from "./input.js"
 
 /**
- * @type {WireMap}
+ * @type {Map<string, number>}
  */
 const WIRES = new Map()
-
 const XOR = "XOR"
 const OR = "OR"
 const AND = "AND"
@@ -20,6 +15,9 @@ for (const wire of init.split("\n")) {
     WIRES.set(key, parseInt(value))
 }
 
+/**
+ * @type {string[][]}
+ */
 const commands = []
 
 for (const command of program.split("\n")) {
@@ -63,10 +61,7 @@ function applyCommand(src1, oper, src2, dst) {
     if (WIRES.has(src1) && WIRES.has(src2)) {
         switch (oper) {
             case (XOR): {
-                result = 0
-                if (WIRES.get(src1) !== WIRES.get(src2)) {
-                    result = 1
-                }
+                result = WIRES.get(src1) ^ WIRES.get(src2)
                 break;
             }
             case (OR): {

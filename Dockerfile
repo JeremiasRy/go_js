@@ -6,6 +6,7 @@ COPY ./test/go.mod ./
 COPY ./test ./
 COPY ./test/test-scripts ./
 COPY ./test/benchmark-scripts ./
+COPY ./test/aoc ./
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o go_js_test .
 
@@ -25,6 +26,7 @@ WORKDIR /app
 COPY --from=test_builder /app/go_js_test .
 COPY --from=test_builder /app/test-scripts ./test-scripts
 COPY --from=test_builder /app/benchmark-scripts ./benchmark-scripts
+COPY --from=test_builder /app/aoc ./aoc
 COPY --from=runtime_builder /app/go_js .
 
 ENTRYPOINT ["./go_js_test"]

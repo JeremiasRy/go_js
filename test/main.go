@@ -17,6 +17,8 @@ const PREFIX_TEST_SCIPT string = "mission"
 const EXPECTED_TEST_RESULT_RUNNER = "node"
 const RUNTIME_BINARY_NAME = "go_js"
 
+const AOC_PUZZLE_LOCATION = "aoc/solution.js"
+
 func main() {
 	benchmarks, err := os.ReadDir(DIR_NAME_BENCMARKS)
 
@@ -67,7 +69,7 @@ func main() {
 		name := script.Name()
 		fmt.Printf("%-50s %2d/%d... ", name, nth+1, len(scripts))
 
-		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, "test-scripts/"+name)
+		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, DIR_NAME_TEST_SCRIPTS+"/"+name)
 		out, err := cmd.CombinedOutput()
 
 		if err != nil {
@@ -106,6 +108,21 @@ func main() {
 	}
 
 	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n\n\n", len(scripts)-len(fails), len(scripts))
+
+	fmt.Println("RUNNING AOC PUZZLE")
+	goJsCmd := exec.Command("./"+RUNTIME_BINARY_NAME, AOC_PUZZLE_LOCATION)
+	nodeCmd := exec.Command(EXPECTED_TEST_RESULT_RUNNER, AOC_PUZZLE_LOCATION)
+
+	resGoJs, _ := goJsCmd.CombinedOutput()
+	resNode, _ := nodeCmd.CombinedOutput()
+
+	if bytes.Equal(resGoJs, resNode) {
+		fmt.Println("aoc solution passed ✅")
+	} else {
+		fmt.Println("aoc solution failed ❌")
+	}
+	fmt.Println()
+	fmt.Println()
 
 	fmt.Print("RUNNING BENCHMARKS")
 
