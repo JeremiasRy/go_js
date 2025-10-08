@@ -1,5 +1,3 @@
-
-
 const num = 2
 
 switch (num) {
