@@ -9,7 +9,6 @@ import (
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
-	"go_js/stringer"
 	"go_js/value"
 	"log"
 	"math"
@@ -107,13 +106,13 @@ func (vm *VM) getGlobal(global int) value.Value {
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
 	if !a.IsObject() && b.IsObject() {
-		a = value.EncodeHandle(allocator.Allocate(native.LightString(stringer.String(a))))
+		a = value.EncodeHandle(allocator.Allocate(native.LightString(native.String(a))))
 	}
 
 	if a.IsObject() {
 		var bObj object.Object
 		if !b.IsObject() {
-			bObj = native.LightString(stringer.String(b))
+			bObj = native.LightString(native.String(b))
 		}
 		aObj, _ := allocator.GetObject(a.GetHandle())
 
@@ -209,7 +208,7 @@ func compNumToObject(num value.Value, obj object.Object) bool {
 	case *native.ObjStringBuilder:
 		return numString == obj.Flush().String()
 	default:
-		return numString == stringer.ObjToPrimitive(obj)
+		return numString == native.ObjToPrimitive(obj)
 	}
 }
 
@@ -230,7 +229,7 @@ func compBoolToObject(boolean value.Value, obj object.Object) bool {
 	case *native.ObjStringBuilder:
 		str = obj.Flush().String()
 	default:
-		str = stringer.ObjToPrimitive(obj)
+		str = native.ObjToPrimitive(obj)
 	}
 
 	if len(str) == 0 {
@@ -252,7 +251,7 @@ func compStringToObject(str object.Object, obj object.Object) bool {
 		return str.String() == obj.(*native.ObjStringBuilder).Flush().String()
 	}
 
-	return str.String() == stringer.ObjToPrimitive(obj)
+	return str.String() == native.ObjToPrimitive(obj)
 }
 
 func looseComparison(a, b value.Value) bool {
@@ -725,7 +724,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v.IsNumber() {
 					vm.push(value.ValueFromFloat64(-(v.AsNumber())))
 				} else {
-					return value.UNDEFINED, fmt.Errorf("no support for negating %s yet", stringer.String(v))
+					return value.UNDEFINED, fmt.Errorf("no support for negating %s yet", native.String(v))
 				}
 			}
 		case chunk.OP_ARG_START:
@@ -737,7 +736,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 
 				if !v.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%v cannot be spread", stringer.String(v))
+					return value.UNDEFINED, fmt.Errorf("%v cannot be spread", native.String(v))
 				}
 				obj, _ := allocator.GetObject(v.GetHandle())
 
@@ -747,7 +746,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						vm.push(v)
 					}
 				default:
-					return value.UNDEFINED, fmt.Errorf("unsupported spread operation for object %v", stringer.String(v))
+					return value.UNDEFINED, fmt.Errorf("unsupported spread operation for object %v", native.String(v))
 				}
 			}
 		case chunk.OP_JUMP_IF_FALSE:
@@ -1013,7 +1012,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if obj, ok := obj.(object.Hashable); ok {
 					obj.SetMember(k, v)
 				} else {
-					return value.UNDEFINED, fmt.Errorf("we currently don't support adding properties to %s types", stringer.String(hash))
+					return value.UNDEFINED, fmt.Errorf("we currently don't support adding properties to %s types", native.String(hash))
 				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
@@ -1034,7 +1033,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				obj, err := allocator.GetObject(objValue.GetHandle())
 
 				if err != nil {
-					return value.UNDEFINED, fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", stringer.String(objValue), err)
+					return value.UNDEFINED, fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", native.String(objValue), err)
 				}
 
 				switch obj := obj.(type) {
@@ -1124,7 +1123,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						vm.push(v)
 					}
 				default:
-					return value.UNDEFINED, fmt.Errorf("can't get %s from %s", stringer.String(member), stringer.String(objValue))
+					return value.UNDEFINED, fmt.Errorf("can't get %s from %s", native.String(member), native.String(objValue))
 				}
 			}
 		case chunk.OP_PUSH_UNDEFINED:
@@ -1173,8 +1172,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						f, c = vm.Call(fn, &ip, thisCtx, argCount)
 					}
+
 				case *native.Resolve:
 					{
+						// kinda ugly here, I 'compile' an async function that only returns so that it resolves the promise immediatly
 						v := vm.pop()
 						fn := native.NewAsyncFunction("RESOLVED_FN", 0, nil)
 						fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
@@ -1222,7 +1223,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.ArrayPush:
 					{
-						arg := vm.pop()
+						arg := vm.popN(argCount)
 						this, _ := allocator.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Push(this.(*native.ObjArr), arg))
 					}
@@ -1249,7 +1250,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								done = iterator.Next()
 							}
 						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
 						}
 
 						vm.push(value.UNDEFINED)
@@ -1288,7 +1289,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								done = iterator.Next()
 							}
 						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
 						}
 						length := len(arr)
 						objArr := native.NewArray(length)
@@ -1331,7 +1332,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								done = iterator.Next()
 							}
 						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
 						}
 						length := len(arr)
 						objArr := native.NewArray(length)
@@ -1374,9 +1375,32 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								done = iterator.Next()
 							}
 						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", stringer.String(callback))
+							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
 						}
 						vm.push(initialValue)
+					}
+				case *native.ArrayJoin:
+					{
+						s := value.UNDEFINED
+
+						if argCount == 1 {
+							s = vm.pop()
+						}
+
+						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+
+						vm.push(fn.Join(arr.(*native.ObjArr), s))
+					}
+				case *native.ArrayShift:
+					{
+						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+						vm.push(fn.Shift(arr.(*native.ObjArr)))
+					}
+				case *native.ArrayReverse:
+					{
+						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+						fn.Reverse(arr.(*native.ObjArr))
+						vm.push(value.UNDEFINED)
 					}
 				case *native.StringToUpperCase:
 					{
@@ -1387,7 +1411,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						arg := vm.pop()
 						this, _ := allocator.GetObject(thisCtx.GetHandle())
-						vm.push(fn.Includes(this.String(), stringer.String(arg)))
+						vm.push(fn.Includes(this.String(), native.String(arg)))
 					}
 				case *native.ToString:
 					{
@@ -1397,21 +1421,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.Log:
 					{
-						arg := vm.pop()
 
-						if arg.IsObject() {
-							obj, err := allocator.GetObject(arg.GetHandle())
-
-							if err != nil {
-								return value.UNDEFINED, fmt.Errorf("couldn't receive argument at native.Log %s", err)
-							}
-
-							if b, ok := obj.(*native.ObjStringBuilder); ok {
-								arg = value.EncodeHandle(allocator.Allocate(b.Flush()))
-							}
-						}
-
-						vm.log(arg)
+						args := vm.popN(argCount)
+						fn.Log(args)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.Next:
@@ -1613,7 +1625,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				arrOBj, ok := obj.(*native.ObjArr)
 
 				if !ok {
-					return value.UNDEFINED, fmt.Errorf("trying to initialize {%s} that is not an array", stringer.String(arr))
+					return value.UNDEFINED, fmt.Errorf("trying to initialize {%s} that is not an array", native.String(arr))
 				}
 
 				arrOBj.PushElement(v)
@@ -1625,7 +1637,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 
 				if !iteratee.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iteratee))
+					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iteratee))
 				}
 
 				obj, err := allocator.GetObject(iteratee.GetHandle())
@@ -1637,7 +1649,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iteratorObj, ok := obj.(object.Iterable)
 
 				if !ok {
-					return value.UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iteratee))
+					return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iteratee))
 				}
 
 				var iterator *object.Iterator
@@ -1655,7 +1667,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
@@ -1667,7 +1679,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					return value.UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iterator))
 				}
 
 				done := iteratorObj.Next()
@@ -1683,7 +1695,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iterator := vm.peek()
 
 				if !iterator.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%s is not an object", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iterator))
 				}
 
 				obj, err := allocator.GetObject(iterator.GetHandle())
@@ -1695,7 +1707,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iteratorObj, ok := obj.(*object.Iterator)
 
 				if !ok {
-					return value.UNDEFINED, fmt.Errorf("%s is not iterable", stringer.String(iterator))
+					return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iterator))
 				}
 
 				vm.push(iteratorObj.Current())
@@ -1737,7 +1749,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						obj, err := allocator.GetObject(ctor.GetHandle())
 
 						if err != nil {
-							return value.UNDEFINED, fmt.Errorf("contructor was not an object %s", stringer.String(ctor))
+							return value.UNDEFINED, fmt.Errorf("contructor was not an object %s", native.String(ctor))
 						}
 
 						if constructor, ok := obj.(object.Callable); ok {
@@ -1758,7 +1770,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 							vm.push(instance)
 						} else {
-							return value.UNDEFINED, fmt.Errorf("contructor was not an function %s", stringer.String(ctor))
+							return value.UNDEFINED, fmt.Errorf("contructor was not an function %s", native.String(ctor))
 						}
 
 					}
@@ -1889,7 +1901,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(value.EncodeHandle(allocator.Allocate(class)))
 					vm.push(value.EncodeHandle(allocator.Allocate(proto)))
 				} else {
-					return value.UNDEFINED, fmt.Errorf("%s is not a string", stringer.String(name))
+					return value.UNDEFINED, fmt.Errorf("%s is not a string", native.String(name))
 				}
 			}
 		case chunk.OP_CREATE_CLASS_END:
@@ -1909,7 +1921,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				methodObj, err := allocator.GetObject(method.GetHandle())
 
 				if err != nil {
-					return value.UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(method))
+					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(method))
 				}
 
 				if m, ok := methodObj.(object.Callable); ok {
@@ -1918,7 +1930,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 					method = value.EncodeHandle(allocator.Allocate(m))
 				} else {
-					return value.UNDEFINED, fmt.Errorf("%s was not an function", stringer.String(method))
+					return value.UNDEFINED, fmt.Errorf("%s was not an function", native.String(method))
 				}
 
 				key := vm.pop()
@@ -1928,13 +1940,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				protoObj, err := allocator.GetObject(prototype.GetHandle())
 
 				if err != nil {
-					return value.UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(prototype))
+					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(prototype))
 				}
 
 				if p, ok := protoObj.(*native.Prototype); ok {
 					p.SetMember(key, method)
 				} else {
-					return value.UNDEFINED, fmt.Errorf("%s was not an prototype", stringer.String(prototype))
+					return value.UNDEFINED, fmt.Errorf("%s was not an prototype", native.String(prototype))
 				}
 			}
 		case chunk.OP_PUSH_PROPERTY:
@@ -1947,13 +1959,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				classObj, err := allocator.GetObject(class.GetHandle())
 
 				if err != nil {
-					return value.UNDEFINED, fmt.Errorf("%s was not an object", stringer.String(class))
+					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(class))
 				}
 
 				if c, ok := classObj.(*native.ObjClass); ok {
 					c.PushProperty(k, v)
 				} else {
-					return value.UNDEFINED, fmt.Errorf("%s was not an class object", stringer.String(class))
+					return value.UNDEFINED, fmt.Errorf("%s was not an class object", native.String(class))
 				}
 			}
 		case chunk.OP_THIS:
@@ -2109,5 +2121,5 @@ func setHeapScopes(c *value.ValueChunk, heapScope int) error {
 }
 
 func (vm *VM) log(arg value.Value) {
-	fmt.Printf("%s\n", stringer.String(arg))
+	fmt.Printf("%s\n", native.String(arg))
 }

@@ -1,8 +1,11 @@
 package native
 
 import (
+	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
+	"slices"
+	"strings"
 )
 
 type ObjArr struct {
@@ -84,8 +87,10 @@ func NewArrayPush() *ArrayPush {
 	return p
 }
 
-func (p *ArrayPush) Push(owner *ObjArr, v value.Value) value.Value {
-	owner.PushElement(v)
+func (p *ArrayPush) Push(owner *ObjArr, values []value.Value) value.Value {
+	for _, v := range values {
+		owner.PushElement(v)
+	}
 	return owner.GetMember(KEY_LENGTH)
 }
 
@@ -117,4 +122,65 @@ func NewArrayReduce() *ArrayReduce {
 	r := &ArrayReduce{}
 	r.name = "reduce"
 	return r
+}
+
+type ArrayJoin struct {
+	ObjNativeFn
+}
+
+func NewArrayJoin() *ArrayJoin {
+	j := &ArrayJoin{}
+	j.name = "join"
+	j.Arity = 1
+	return j
+}
+
+func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
+	s := ","
+	i := make([]string, len(arr.items))
+	for idx, item := range arr.items {
+		i[idx] = String(item)
+	}
+
+	if separator != value.UNDEFINED {
+		s = String(separator)
+	}
+
+	res := strings.Join(i, s)
+	return value.EncodeHandle(allocator.Allocate(LightString(res)))
+}
+
+type ArrayReverse struct {
+	ObjNativeFn
+}
+
+func NewArrayReverse() *ArrayReverse {
+	r := &ArrayReverse{}
+	r.name = "reverse"
+	return r
+}
+
+func (*ArrayReverse) Reverse(arr *ObjArr) {
+	slices.Reverse(arr.items)
+}
+
+type ArrayShift struct {
+	ObjNativeFn
+}
+
+func NewArrayShift() *ArrayShift {
+	s := &ArrayShift{}
+	s.name = "shift"
+	return s
+}
+
+func (*ArrayShift) Shift(arr *ObjArr) value.Value {
+	if len(arr.items) == 0 {
+		return value.UNDEFINED
+	}
+
+	v := arr.items[0]
+	arr.items = arr.items[1:]
+
+	return v
 }
