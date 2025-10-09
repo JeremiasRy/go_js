@@ -8,16 +8,17 @@ import (
 type Value uint64
 
 const (
-	STANDARD_NAN      Value = 0x7ff8000000000000
-	QNAN              Value = 0x7ffc000000000000
-	SIGN              Value = 0x8000000000000000
-	ENCODE_MASK       Value = math.MaxUint64 ^ TAG_OBJ
-	TAG_OBJ           Value = QNAN | SIGN
-	NULL              Value = QNAN | 1
-	UNDEFINED         Value = QNAN | (1 << 1)
-	TRUE              Value = QNAN | (1 << 2)
-	FALSE             Value = QNAN | (1 << 3)
-	TAG_METHOD_HANDLE Value = QNAN | (1 << 4)
+	STANDARD_NAN       Value = 0x7ff8000000000000
+	QNAN               Value = 0x7ffc000000000000
+	SIGN               Value = 0x8000000000000000
+	ENCODE_MASK        Value = math.MaxUint64 ^ TAG_OBJ
+	TAG_OBJ            Value = QNAN | SIGN
+	NULL               Value = QNAN | 1
+	UNDEFINED          Value = QNAN | (1 << 1)
+	TRUE               Value = QNAN | (1 << 2)
+	FALSE              Value = QNAN | (1 << 3)
+	TAG_METHOD_HANDLE  Value = QNAN | (1 << 4)
+	TAG_ARGUMENT_START Value = QNAN | (1 << 5)
 )
 
 type ValueChunk struct {

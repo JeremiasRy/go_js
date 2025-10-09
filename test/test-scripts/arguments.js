@@ -6,4 +6,4 @@ function showArgs() {
     console.log(result);
 }
 
-showArgs(1, 'two', true);
+showArgs(12, 1, 'two', true);

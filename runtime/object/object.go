@@ -83,4 +83,6 @@ type Callable interface {
 	Clone() Callable
 	HasRestParameter() bool
 	SetHasRestParameter()
+	HasArguments() bool
+	SetHasArguments()
 }

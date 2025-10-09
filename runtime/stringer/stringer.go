@@ -141,6 +141,8 @@ func TypeDecoratedString(v value.Value) string {
 		return "null"
 	} else if v.IsType(value.TAG_METHOD_HANDLE) {
 		return "METHOD_HANDLE"
+	} else if v.IsType(value.TAG_ARGUMENT_START) {
+		return "ARG_START"
 	}
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 }

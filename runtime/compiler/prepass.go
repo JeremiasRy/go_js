@@ -228,7 +228,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_PROPERTY:
 		prePass(current.Value.(*parser.Node), symbolTable)
 	case parser.NODE_IDENTIFIER:
-		if !symbolTable.needsArgumentsSlice && current.Name == RESERVED_ARGUMENTS {
+		if current.Name == RESERVED_ARGUMENTS {
 			symbolTable.addArgumentsLocalToFunctionScope()
 			return
 		}

@@ -59,8 +59,6 @@ var opNames = map[uint8]string{
 	chunk.OP_TRY_BLOCK_END:                   "OP_TRY_BLOCK_END",
 	chunk.OP_THROW:                           "OP_THROW",
 	chunk.OP_NEW:                             "OP_NEW",
-	chunk.OP_ADD_ARGUMENTS_TO_LOCALS:         "OP_ADD_ARGUMENTS_TO_LOCALS",
-	chunk.OP_STORE_ARG_COUNT:                 "OP_STORE_ARG_COUNT",
 	chunk.OP_AWAIT:                           "OP_AWAIT",
 	chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS: "OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS",
 	chunk.OP_NEGATE:                          "OP_NEGATE",
@@ -76,9 +74,9 @@ var opNames = map[uint8]string{
 	chunk.OP_NOT:                             "OP_NOT",
 	chunk.OP_NULL_COALESHING:                 "OP_NULL_COALESHING",
 	chunk.OP_SPREAD:                          "OP_SPREAD",
-	chunk.OP_STORE_LOCAL_START:               "OP_STORE_LOCAL_START",
 	chunk.OP_CREATE_REST_OBJECT:              "OP_CREATE_REST_OBJECT",
 	chunk.OP_SET_FROM_SPREAD:                 "OP_SET_FROM_SPREAD",
+	chunk.OP_ARG_START:                       "OP_ARG_START",
 }
 
 func PrintChunk(c value.ValueChunk) {
@@ -108,14 +106,14 @@ func printFunction(c value.ValueChunk) {
 			chunk.OP_POP, chunk.OP_LESS_THAN_EQUAL, chunk.OP_LESS_THAN,
 			chunk.OP_GREATER_THAN_EQUAL, chunk.OP_GREATER_THAN, chunk.OP_SUBTRACT,
 			chunk.OP_ADD, chunk.OP_DEFINE_GLOBAL, chunk.OP_GET_OBJECT_MEMBER,
-			chunk.OP_CALL, chunk.OP_TRY_BLOCK_END, chunk.OP_PUSH_UNDEFINED,
-			chunk.OP_RETURN, chunk.OP_ADD_ARGUMENTS_TO_LOCALS, chunk.OP_IN,
-			chunk.OP_NULL_COALESHING, chunk.OP_SPREAD, chunk.OP_STORE_LOCAL_START, chunk.OP_SET_FROM_SPREAD:
+			chunk.OP_TRY_BLOCK_END, chunk.OP_PUSH_UNDEFINED,
+			chunk.OP_RETURN, chunk.OP_IN,
+			chunk.OP_NULL_COALESHING, chunk.OP_SPREAD, chunk.OP_SET_FROM_SPREAD:
 			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 
 		case chunk.OP_IMPORT, chunk.OP_CONSTANT, chunk.OP_GET_HEAP_VAR,
 			chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL, chunk.OP_GET_LOCAL,
-			chunk.OP_SET_LOCAL, chunk.OP_STORE_ARG_COUNT, chunk.OP_NEW:
+			chunk.OP_SET_LOCAL, chunk.OP_NEW, chunk.OP_CALL:
 			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			ip++
 			fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
