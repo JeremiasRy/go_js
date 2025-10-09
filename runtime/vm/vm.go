@@ -13,6 +13,7 @@ import (
 	"go_js/value"
 	"log"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,14 +22,12 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const NO_STORED_LOCAL_START = -1
 
 var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
 var imports = make(map[string]value.Value)
 var heapVars = make(map[int][]value.Value)
 var heapScopesCount int
-var storedLocalStart int = NO_STORED_LOCAL_START
 
 type CallFrame struct {
 	fn         object.Callable
@@ -361,42 +360,28 @@ func (vm *VM) peekN(i int) value.Value {
 	return vm.stack[vm.stackTop-(i+1)]
 }
 
-func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCount uint8) (f CallFrame, c value.ValueChunk) {
-	localStart := max(vm.stackTop-fn.GetArity()-int(argCount), 0)
-	returnTo := 0
+func (vm *VM) findArgStart() []value.Value {
+	arguments := []value.Value{}
+
+	v := vm.pop()
+	for v != value.TAG_ARGUMENT_START {
+		arguments = append(arguments, v)
+		v = vm.pop()
+	}
+	slices.Reverse(arguments)
+
+	return arguments
+}
+
+func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCount int) (f CallFrame, c value.ValueChunk) {
+	localStart := max(vm.stackTop-argCount, 0)
+	returnIp := 0
 
 	if currentIp != nil {
-		returnTo = *currentIp
+		returnIp = *currentIp
 	}
 
-	if fn.HasRestParameter() {
-		if storedLocalStart != NO_STORED_LOCAL_START {
-			localStart = storedLocalStart
-			storedLocalStart = -1
-			restLength := vm.stackTop - localStart - (fn.GetArity() - 1)
-
-			arr := native.NewArray(restLength)
-
-			for range restLength {
-				arr.PushElement(vm.pop())
-			}
-
-			vm.push(value.EncodeHandle(allocator.Allocate(arr)))
-			goto cont
-		}
-
-		restLength := int(argCount - (uint8(fn.GetArity()) - 1))
-		arr := native.NewArray(restLength)
-
-		for range restLength {
-			arr.PushElement(vm.pop())
-		}
-
-		vm.push(value.EncodeHandle(allocator.Allocate(arr)))
-	}
-cont:
-
-	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnTo, this)
+	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnIp, this)
 	vm.frameCount++
 
 	if currentIp != nil {
@@ -405,6 +390,27 @@ cont:
 
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
+
+	if fn.HasArguments() {
+		items := vm.popN(argCount)
+		arr := native.NewArrayFrom(items)
+		v := value.EncodeHandle(allocator.Allocate(arr))
+		vm.push(v)
+	}
+
+	if fn.HasRestParameter() {
+		arguments := vm.findArgStart()
+		f.localStart = vm.stackTop
+
+		arr := native.NewArrayFrom(arguments[fn.GetArity()-1:])
+		for _, v := range arguments[:fn.GetArity()-1] {
+			vm.push(v)
+		}
+		v := value.EncodeHandle(allocator.Allocate(arr))
+		vm.push(v)
+
+	}
+
 	return f, c
 }
 
@@ -419,7 +425,7 @@ Run:
 			}
 		}
 
-		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, 0)
+		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, callback.Fn.GetArity())
 		_, err := vm.run(f, c)
 
 		if err != nil {
@@ -457,7 +463,6 @@ Run:
 
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	ip := 0
-	var argCount uint8
 
 	if promise, ok := f.fn.(*native.ObjAsyncFunction); ok {
 
@@ -722,6 +727,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				} else {
 					return value.UNDEFINED, fmt.Errorf("no support for negating %s yet", stringer.String(v))
 				}
+			}
+		case chunk.OP_ARG_START:
+			{
+				vm.push(value.TAG_ARGUMENT_START)
 			}
 		case chunk.OP_SPREAD:
 			{
@@ -1124,6 +1133,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CALL:
 			{
+				argCount := int(c.Code[ip])
+				ip++
 				handle := vm.pop()
 
 				if handle != value.TAG_METHOD_HANDLE {
@@ -1708,7 +1719,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_NEW:
 			{
-				argCount := c.Code[ip]
+				argCount := int(c.Code[ip])
 				ip++
 				callee := vm.pop()
 				obj, err := allocator.GetObject(callee.GetHandle())
@@ -1732,7 +1743,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if constructor, ok := obj.(object.Callable); ok {
 							builder := NewVM(vm.debug)
 							fn := object.NewFunction("builder", 0, nil)
-							fn.ValueChunk().EmitBytes(chunk.OP_CALL, chunk.OP_RETURN)
+							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), chunk.OP_RETURN)
 							instance := value.EncodeHandle(allocator.Allocate(instance))
 
 							for _, v := range vm.popN(constructor.GetArity()) {
@@ -1807,28 +1818,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip = exceptionState.jumpTo
 				vm.stackTop = exceptionState.stackTop
 				vm.push(err)
-			}
-		case chunk.OP_ADD_ARGUMENTS_TO_LOCALS:
-			{
-
-				arr := native.NewArray(int(argCount))
-				for _, v := range vm.stack[vm.stackTop-int(argCount) : vm.stackTop] {
-					arr.PushElement(v)
-				}
-				handle := allocator.Allocate(arr)
-				vm.popN(int(argCount))
-				vm.push(value.EncodeHandle(handle))
-				argCount = 0
-			}
-		case chunk.OP_STORE_ARG_COUNT:
-			{
-				count := c.Code[ip]
-				ip++
-				argCount = count
-			}
-		case chunk.OP_STORE_LOCAL_START:
-			{
-				storedLocalStart = vm.stackTop
 			}
 		case chunk.OP_AWAIT:
 			{

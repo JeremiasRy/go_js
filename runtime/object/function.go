@@ -16,6 +16,7 @@ type ObjFunction struct {
 	Arity     int
 	HeapScope int
 	rest      bool
+	arguments bool
 }
 
 const NOT_IN_HEAP_SCOPE int = -1
@@ -70,4 +71,12 @@ func (obj *ObjFunction) HasRestParameter() bool {
 
 func (obj *ObjFunction) SetHasRestParameter() {
 	obj.rest = true
+}
+
+func (obj *ObjFunction) HasArguments() bool {
+	return obj.arguments
+}
+
+func (obj *ObjFunction) SetHasArguments() {
+	obj.arguments = true
 }

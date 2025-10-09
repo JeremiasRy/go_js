@@ -9,6 +9,7 @@ import (
 	"go_js/object"
 	"go_js/parser"
 	"go_js/value"
+	"log"
 	"slices"
 )
 
@@ -55,13 +56,13 @@ type BlockScope struct {
 }
 
 type FunctionScope struct {
-	parent              *FunctionScope
-	tableScope          VariableScope
-	vars                Variables
-	block               *BlockScope
-	arity               int
-	needsArgumentsSlice bool
-	hasRestParameter    bool
+	parent           *FunctionScope
+	tableScope       VariableScope
+	vars             Variables
+	block            *BlockScope
+	arity            int
+	hasRestParameter bool
+	needsArguments   bool
 }
 
 const (
@@ -112,6 +113,9 @@ func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *Function
 }
 
 func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
+	if _, found := fs.vars[RESERVED_ARGUMENTS]; found {
+		return
+	}
 	variable := &Variable{scope: LOCAL, type_: CONST, slot: -1, init: false, undeclared: false, fn: nil}
 	fs.vars[RESERVED_ARGUMENTS] = variable
 	for _, variable := range fs.vars {
@@ -120,7 +124,7 @@ func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
 		}
 	}
 	fs.vars[RESERVED_ARGUMENTS].slot = fs.arity
-	fs.needsArgumentsSlice = true
+	fs.needsArguments = true
 }
 
 func (fs *FunctionScope) isInHeapScope() bool {
@@ -505,8 +509,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn = nextFn.fn
 			isInHeapScopeAlready := symbolTable.isInHeapScope()
+			if symbolTable.hasRestParameter && symbolTable.needsArguments {
+				log.Fatal("Let's not do both arguments anr rest parameter")
+			}
+
 			if symbolTable.hasRestParameter {
 				fn.SetHasRestParameter()
+			}
+
+			if symbolTable.needsArguments {
+				fn.SetHasArguments()
 			}
 
 			functions := []*Variable{}
@@ -556,10 +568,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 
-			if symbolTable.needsArgumentsSlice {
-				fn.ValueChunk().EmitByte(chunk.OP_ADD_ARGUMENTS_TO_LOCALS)
-			}
-
 			prevPopStack := popStack
 			popStack = true
 			for _, node := range current.BodyNode.Body {
@@ -579,6 +587,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			if symbolTable.hasRestParameter {
 				newFn.SetHasRestParameter()
+			}
+
+			if symbolTable.needsArguments {
+				newFn.SetHasArguments()
 			}
 
 			handle := allocator.Allocate(newFn)
@@ -717,14 +729,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			prevPopStack := popStack
 			popStack = false
-			if current.Callee != nil {
-				callee, _ := symbolTable.findVariable(current.Callee.Name)
-				if callee != nil && callee.fn != nil {
-					if callee.fn.HasRestParameter() {
-						fn.ValueChunk().EmitByte(chunk.OP_STORE_LOCAL_START)
-					} else if len(current.Arguments) > callee.fn.GetArity() {
-						fn.ValueChunk().EmitBytes(chunk.OP_STORE_ARG_COUNT, uint8(len(current.Arguments)))
-					}
+			if callee, _ := symbolTable.findVariable(current.Callee.Name); callee != nil && callee.fn != nil {
+				if len(current.Arguments) > 1 && callee.fn.HasRestParameter() {
+					fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
 				}
 			}
 
@@ -739,7 +746,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Callee, symbolTable, fn)
 			popStack = prevPopStack
 
-			fn.ValueChunk().EmitByte(chunk.OP_CALL)
+			fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(current.Arguments)))
+
 			if popStack {
 				fn.ValueChunk().EmitByte(chunk.OP_POP)
 			}

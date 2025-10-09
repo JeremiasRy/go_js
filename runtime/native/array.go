@@ -10,11 +10,21 @@ type ObjArr struct {
 	items []value.Value
 }
 
-func NewObjArr(length int) *ObjArr {
+func NewArray(length int) *ObjArr {
 	arrObj := &ObjArr{items: make([]value.Value, 0, length)}
 	arrObj.Members = map[string]ObjectValueEntry{}
 
 	arrObj.SetMember(KEY_PROTO, PROTOTYPE_ARRAY)
+
+	return arrObj
+}
+
+func NewArrayFrom(items []value.Value) *ObjArr {
+	arrObj := &ObjArr{items: items}
+	arrObj.Members = map[string]ObjectValueEntry{}
+
+	arrObj.SetMember(KEY_PROTO, PROTOTYPE_ARRAY)
+	arrObj.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(items))))
 
 	return arrObj
 }

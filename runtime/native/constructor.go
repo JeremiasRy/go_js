@@ -111,12 +111,7 @@ func (ac *ArrayConstructor) New(params ...any) *ObjArr {
 		}
 	}
 
-	arr := NewObjArr(length)
-	return arr
-}
-
-func NewArray(length int) *ObjArr {
-	arr := NewObjArr(length)
+	arr := NewArray(length)
 	return arr
 }
 
