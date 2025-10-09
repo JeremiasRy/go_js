@@ -19,6 +19,9 @@ var (
 	KEY_MAP     value.Value
 	KEY_REDUCE  value.Value
 	KEY_PUSH    value.Value
+	KEY_JOIN    value.Value
+	KEY_SHIFT   value.Value
+	KEY_REVERSE value.Value
 	KEY_LENGTH  value.Value
 
 	// string
@@ -66,6 +69,9 @@ func createCommonHandles() {
 	KEY_FOREACH = value.EncodeHandle(allocator.Allocate(LightString("forEach")))
 	KEY_MAP = value.EncodeHandle(allocator.Allocate(LightString("map")))
 	KEY_REDUCE = value.EncodeHandle(allocator.Allocate(LightString("reduce")))
+	KEY_JOIN = value.EncodeHandle(allocator.Allocate(LightString("join")))
+	KEY_REVERSE = value.EncodeHandle(allocator.Allocate(LightString("reverse")))
+	KEY_SHIFT = value.EncodeHandle(allocator.Allocate(LightString("shift")))
 	KEY_LENGTH = value.EncodeHandle(allocator.Allocate(LightString("length")))
 
 	KEY_TOSTRING = value.EncodeHandle(allocator.Allocate(LightString("toString")))

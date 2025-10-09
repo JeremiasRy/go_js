@@ -7,7 +7,6 @@ import (
 	"go_js/compiler"
 	"go_js/native"
 	"go_js/object"
-	"go_js/stringer"
 	"go_js/value"
 )
 
@@ -165,7 +164,7 @@ func printFunction(c value.ValueChunk) {
 
 			for range amount {
 				ip++
-				fmt.Printf("%04d | %s \n", ip*4, stringer.String(c.Constants[opCode[ip]]))
+				fmt.Printf("%04d | %s \n", ip*4, native.String(c.Constants[opCode[ip]]))
 			}
 		}
 		ip++
@@ -195,7 +194,7 @@ func printFunction(c value.ValueChunk) {
 func printStack(stack []value.Value) {
 	print("[")
 	for i, val := range stack {
-		fmt.Printf("%s", stringer.TypeDecoratedString(val))
+		fmt.Printf("%s", native.TypeDecoratedString(val))
 		if i < len(stack)-1 {
 			fmt.Print(" | ")
 		}

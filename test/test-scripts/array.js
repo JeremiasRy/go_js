@@ -1,5 +1,5 @@
 let fruits = ["apple", "banana", "cherry"];
-fruits.push("date");
+fruits.push("date", "date2");
 fruits[4.5] = "haha!"
 fruits[-4.5] = "hehe!"
 

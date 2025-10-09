@@ -153,16 +153,6 @@ func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func())
 	callbackChannel <- msg
 }
 
-type Log struct {
-	ObjNativeFn
-}
-
-func NewLog() *Log {
-	log := &Log{}
-	log.name = "log"
-	return log
-}
-
 type SetTimeout struct {
 	ObjNativeFn
 	time     int

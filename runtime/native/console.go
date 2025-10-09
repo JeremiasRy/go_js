@@ -1,9 +1,11 @@
 package native
 
 import (
+	"fmt"
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
+	"strings"
 )
 
 type Console struct {
@@ -27,4 +29,24 @@ func NewObjectConsole() *Console {
 
 	c.SetMember(log, value.EncodeHandle(allocator.Allocate(NewLog())))
 	return c
+}
+
+type Log struct {
+	ObjNativeFn
+}
+
+func NewLog() *Log {
+	log := &Log{}
+	log.name = "log"
+	return log
+}
+
+func (*Log) Log(values []value.Value) {
+	s := make([]string, len(values))
+
+	for _, v := range values {
+		s = append(s, String(v))
+	}
+
+	fmt.Printf("%s\n", strings.Join(s, ""))
 }

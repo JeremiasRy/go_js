@@ -88,6 +88,9 @@ func initArrayPrototype() {
 	forEach := value.EncodeHandle(allocator.Allocate(NewArrayForEach()))
 	map_ := value.EncodeHandle(allocator.Allocate(NewArrayMap()))
 	reduce := value.EncodeHandle(allocator.Allocate(NewArrayReduce()))
+	join := value.EncodeHandle(allocator.Allocate(NewArrayJoin()))
+	shift := value.EncodeHandle(allocator.Allocate(NewArrayShift()))
+	reverse := value.EncodeHandle(allocator.Allocate(NewArrayReverse()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -96,6 +99,9 @@ func initArrayPrototype() {
 	p.SetMember(KEY_FOREACH, forEach)
 	p.SetMember(KEY_MAP, map_)
 	p.SetMember(KEY_REDUCE, reduce)
+	p.SetMember(KEY_JOIN, join)
+	p.SetMember(KEY_SHIFT, shift)
+	p.SetMember(KEY_REVERSE, reverse)
 	p.SetMember(KEY_LENGTH, value.ValueFromFloat64(0))
 
 	PROTOTYPE_ARRAY = value.EncodeHandle(allocator.Allocate(p))
