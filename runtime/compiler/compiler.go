@@ -101,6 +101,42 @@ var unaryOperatorMap = map[parser.UnaryOperator]uint8{
 var ROOT_SCRIPT_LOCATION string
 var imports = make(map[string]*parser.Node)
 
+type BreakPointType uint8
+
+const (
+	BREAKPOINT_CONTINUE BreakPointType = iota
+	BREAKPOINT_BREAK
+)
+
+type LoopBreakPoint struct {
+	position int
+	type_    BreakPointType
+}
+
+type Loop struct {
+	points []*LoopBreakPoint
+}
+
+var loopStack = []*Loop{}
+
+func currentLoop() *Loop {
+	if len(loopStack) == 0 {
+		return nil
+	}
+	return loopStack[0]
+}
+
+func pushLoop() {
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}})
+}
+
+func popLoop() {
+	if len(loopStack) == 0 {
+		return
+	}
+	loopStack = loopStack[1:]
+}
+
 func InitRootScriptLocation(src string) {
 	ROOT_SCRIPT_LOCATION = src
 }
@@ -1075,6 +1111,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), testStart)
 			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
 		}
+	case parser.NODE_CONTINUE_STATEMENT:
+		{
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+			l := currentLoop()
+			l.points = append(l.points, &LoopBreakPoint{type_: BREAKPOINT_CONTINUE, position: len(fn.ValueChunk().Code) - 4})
+		}
+	case parser.NODE_BREAK_STATEMENT:
+		{
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+			l := currentLoop()
+			l.points = append(l.points, &LoopBreakPoint{type_: BREAKPOINT_BREAK, position: len(fn.ValueChunk().Code) - 4})
+
+		}
 	case parser.NODE_UPDATE_EXPRESSION:
 		{
 			variable, _ := symbolTable.findVariable(current.Argument.Name)
@@ -1133,12 +1182,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
-
+			pushLoop()
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
 			count, _ := symbolTable.currentBlockVarCount()
 
+			updateStart := uint32(len(fn.ValueChunk().Code))
 			if count > 1 {
 				for count > 1 {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
@@ -1151,10 +1201,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
 
-			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
-			fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL) // pop initalizer var needs to be fixed...
-			symbolTable.exitBlockScope()
+			loopEnd := uint32(len(fn.ValueChunk().Code))
+			fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
 
+			fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL) // pop initalizer var
+			for _, breakpoint := range currentLoop().points {
+				pos := breakpoint.position
+				switch breakpoint.type_ {
+				case BREAKPOINT_BREAK:
+					fn.ValueChunk().PatchUint32(uint32(pos), loopEnd)
+				case BREAKPOINT_CONTINUE:
+					fn.ValueChunk().PatchUint32(uint32(pos), updateStart)
+				}
+			}
+			popLoop()
+			symbolTable.exitBlockScope()
 		}
 	case parser.NODE_FOR_OF_STATEMENT:
 		{
@@ -1170,6 +1231,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			parseForDotDotLoopVariable(current, symbolTable, fn)
 
+			pushLoop()
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
@@ -1179,7 +1241,20 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn.ValueChunk().EmitByte(chunk.OP_JUMP)
 			fn.ValueChunk().EmitUint32(jumpStart - 2)
-			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			loopEnd := uint32(len(fn.ValueChunk().Code))
+			fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
+
+			for _, breakpoint := range currentLoop().points {
+				pos := breakpoint.position
+				switch breakpoint.type_ {
+				case BREAKPOINT_BREAK:
+					fn.ValueChunk().PatchUint32(uint32(pos), loopEnd)
+				case BREAKPOINT_CONTINUE:
+					fn.ValueChunk().PatchUint32(uint32(pos), jumpStart)
+				}
+			}
+
+			popLoop()
 			fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
 
 			count, _ := symbolTable.currentBlockVarCount()
