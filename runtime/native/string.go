@@ -1,7 +1,7 @@
 package native
 
 import (
-	"fmt"
+	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
 	"strings"
@@ -26,16 +26,16 @@ func (*ObjStringBuilder) Type() object.ObjType {
 }
 
 func (osb *ObjStringBuilder) String() string {
-	return fmt.Sprintf("ObjStringBuilder { %s }", osb.b.String())
+	return osb.b.String()
 }
 
 func (osb *ObjStringBuilder) Concatenate(s string) {
 	osb.b.WriteString(s)
 }
 
-// maybe a bit misleading name since we don't reset or set the builder to nil, I'm thinking letting GC to collect these
 func (osb *ObjStringBuilder) Flush() LightString {
 	str := LightString(osb.b.String())
+	osb.b = nil
 	return str
 }
 
@@ -107,6 +107,38 @@ func (*StringIncludes) Includes(owner string, str string) value.Value {
 	return value.FALSE
 }
 
-type StringLength struct {
+type StringReplace struct {
 	ObjNativeFn
+}
+
+func NewStringReplace() *StringReplace {
+	r := &StringReplace{}
+	r.name = "replace"
+
+	return r
+}
+
+func (*StringReplace) Replace(owner object.Object, searchValue string, replaceValue string) value.Value {
+	result := strings.Replace(owner.String(), searchValue, replaceValue, 1)
+	return value.EncodeHandle(allocator.Allocate(LightString(result)))
+}
+
+type StringSplit struct {
+	ObjNativeFn
+}
+
+func NewStringSplit() *StringSplit {
+	s := &StringSplit{}
+	s.name = "split"
+
+	return s
+}
+
+func (*StringSplit) Split(owner object.Object, separator string) value.Value {
+	items := []value.Value{}
+
+	for _, s := range strings.Split(owner.String(), separator) {
+		items = append(items, value.EncodeHandle(allocator.Allocate(LightString(s))))
+	}
+	return value.EncodeHandle(allocator.Allocate(NewArrayFrom(items)))
 }

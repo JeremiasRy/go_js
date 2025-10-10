@@ -206,7 +206,7 @@ func compNumToObject(num value.Value, obj object.Object) bool {
 	case *native.ObjString:
 		return numString == obj.String()
 	case *native.ObjStringBuilder:
-		return numString == obj.Flush().String()
+		return numString == obj.String()
 	default:
 		return numString == native.ObjToPrimitive(obj)
 	}
@@ -227,7 +227,7 @@ func compBoolToObject(boolean value.Value, obj object.Object) bool {
 	case *native.ObjString:
 		str = obj.String()
 	case *native.ObjStringBuilder:
-		str = obj.Flush().String()
+		str = obj.String()
 	default:
 		str = native.ObjToPrimitive(obj)
 	}
@@ -248,7 +248,7 @@ func compBoolToObject(boolean value.Value, obj object.Object) bool {
 
 func compStringToObject(str object.Object, obj object.Object) bool {
 	if obj.Type() == object.OBJ_STRING_BUILDER {
-		return str.String() == obj.(*native.ObjStringBuilder).Flush().String()
+		return str.String() == obj.String()
 	}
 
 	return str.String() == native.ObjToPrimitive(obj)
@@ -1412,6 +1412,25 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arg := vm.pop()
 						this, _ := allocator.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Includes(this.String(), native.String(arg)))
+					}
+				case *native.StringSplit:
+					{
+						separator := vm.pop()
+
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						sep, _ := allocator.GetObject(separator.GetHandle())
+						vm.push(fn.Split(owner, sep.String()))
+					}
+				case *native.StringReplace:
+					{
+						replaceValue := vm.pop()
+						searchValue := vm.pop()
+
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						replace, _ := allocator.GetObject(replaceValue.GetHandle())
+						search, _ := allocator.GetObject(searchValue.GetHandle())
+
+						vm.push(fn.Replace(owner, search.String(), replace.String()))
 					}
 				case *native.ToString:
 					{

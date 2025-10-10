@@ -71,10 +71,6 @@ func String(v value.Value) string {
 				}
 				fmt.Fprintln(&b, "}")
 			}
-		case *ObjStringBuilder:
-			{
-				return obj.b.String()
-			}
 		}
 		return obj.String()
 	}

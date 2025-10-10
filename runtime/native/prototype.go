@@ -120,11 +120,15 @@ func initStringPrototype() {
 
 	includes := value.EncodeHandle(allocator.Allocate(NewStringIncludes()))
 	toUpperCase := value.EncodeHandle(allocator.Allocate(NewStringToUpperCase()))
+	replace := value.EncodeHandle(allocator.Allocate(NewStringReplace()))
+	split := value.EncodeHandle(allocator.Allocate(NewStringSplit()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
 	p.SetMember(KEY_INCLUDES, includes)
 	p.SetMember(KEY_TOUPPERCASE, toUpperCase)
+	p.SetMember(KEY_REPLACE, replace)
+	p.SetMember(KEY_SPLIT, split)
 
 	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
 }
