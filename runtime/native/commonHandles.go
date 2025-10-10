@@ -27,6 +27,8 @@ var (
 	// string
 	KEY_INCLUDES    value.Value
 	KEY_TOUPPERCASE value.Value
+	KEY_SPLIT       value.Value
+	KEY_REPLACE     value.Value
 
 	// object
 	KEY_TOSTRING       value.Value
@@ -82,6 +84,8 @@ func createCommonHandles() {
 
 	KEY_INCLUDES = value.EncodeHandle(allocator.Allocate(LightString("includes")))
 	KEY_TOUPPERCASE = value.EncodeHandle(allocator.Allocate(LightString("toUpperCase")))
+	KEY_SPLIT = value.EncodeHandle(allocator.Allocate(LightString("split")))
+	KEY_REPLACE = value.EncodeHandle(allocator.Allocate(LightString("replace")))
 
 	KEY_CTOR = value.EncodeHandle(allocator.Allocate(LightString("constructor")))
 
