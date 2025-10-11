@@ -519,6 +519,30 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				vm.push(vm.concatenate(a, b))
 			}
+		case chunk.OP_B_AND:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result := float64(int32(uint32((b.AsNumber()))) & int32(uint32(a.AsNumber())))
+
+				vm.push(value.ValueFromFloat64(result))
+			}
+		case chunk.OP_B_OR:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result := float64(int32(uint32((b.AsNumber()))) | int32(uint32(a.AsNumber())))
+
+				vm.push(value.ValueFromFloat64(result))
+			}
+		case chunk.OP_B_XOR:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result := float64(int32(uint32((b.AsNumber()))) ^ int32(uint32(a.AsNumber())))
+
+				vm.push(value.ValueFromFloat64(result))
+			}
 		case chunk.OP_SUBTRACT:
 			{
 				b := vm.pop()

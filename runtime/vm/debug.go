@@ -76,6 +76,9 @@ var opNames = map[uint8]string{
 	chunk.OP_CREATE_REST_OBJECT:              "OP_CREATE_REST_OBJECT",
 	chunk.OP_SET_FROM_SPREAD:                 "OP_SET_FROM_SPREAD",
 	chunk.OP_ARG_START:                       "OP_ARG_START",
+	chunk.OP_B_AND:                           "OP_B_AND",
+	chunk.OP_B_OR:                            "OP_B_OR",
+	chunk.OP_B_XOR:                           "OP_B_XOR",
 }
 
 func PrintChunk(c value.ValueChunk) {
