@@ -1196,7 +1196,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						f, c = vm.Call(fn, &ip, thisCtx, argCount)
 					}
-
 				case *native.Resolve:
 					{
 						// kinda ugly here, I 'compile' an async function that only returns so that it resolves the promise immediatly
@@ -1244,6 +1243,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						fn.Set(owner.(*native.Map), k, v)
 						vm.push(value.UNDEFINED)
+					}
+				case *native.MapKeys:
+					{
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						keys := fn.Keys(owner.(*native.Map))
+
+						handle := allocator.Allocate(keys)
+						vm.push(value.EncodeHandle(handle))
 					}
 				case *native.ArrayPush:
 					{
@@ -1675,7 +1682,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_GET_ITERATOR:
 			{
-				iteratee := vm.pop()
+
+				iteratee := vm.peek()
 				type_ := c.Code[ip]
 				ip++
 
@@ -1688,6 +1696,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if err != nil {
 					return value.UNDEFINED, err
 				}
+
+				if _, ok := obj.(*object.Iterator); ok {
+					continue
+				}
+
+				vm.pop()
 
 				iteratorObj, ok := obj.(object.Iterable)
 

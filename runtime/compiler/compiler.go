@@ -1226,7 +1226,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for range symbolTable.block.vars {
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
 			}
+			prevPopstack := popStack
+			popStack = false
 			generateByteCode(current.Right, symbolTable, fn)
+			popStack = prevPopstack
 			fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
