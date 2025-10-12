@@ -1,6 +1,8 @@
 package object
 
-import "go_js/value"
+import (
+	"go_js/value"
+)
 
 type Iterable interface {
 	Values() []value.Value

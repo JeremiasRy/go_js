@@ -19,6 +19,7 @@ const (
 	MAP_CONSTRUCTOR_NAME      string = "Map"
 	SET_CONSTRUCTOR_NAME      string = "Set"
 	QUEUE_MICRO_TASK_NAME     string = "queueMicrotask"
+	PARSE_INT_NAME            string = "parseInt"
 )
 
 var (
@@ -171,10 +172,12 @@ func initMapPrototype() {
 	mapHas := value.EncodeHandle(allocator.Allocate(NewMapHas()))
 	mapGet := value.EncodeHandle(allocator.Allocate(NewMapGet()))
 	mapSet := value.EncodeHandle(allocator.Allocate(NewMapSet()))
+	mapKeys := value.EncodeHandle(allocator.Allocate(NewMapKeys()))
 
 	p.SetMember(KEY_HAS, mapHas)
 	p.SetMember(KEY_SET, mapSet)
 	p.SetMember(KEY_GET, mapGet)
+	p.SetMember(KEY_KEYS, mapKeys)
 
 	PROTOTYPE_MAP = value.EncodeHandle(allocator.Allocate(p))
 }

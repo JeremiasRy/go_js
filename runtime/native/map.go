@@ -9,8 +9,9 @@ import (
 
 type Map struct {
 	ObjObject
-	init   int
-	values map[value.Value]ObjectValueEntry
+	init    int
+	values  map[value.Value]ObjectValueEntry
+	handles map[value.Value]value.Value
 }
 
 func (m *Map) String() string {
@@ -25,10 +26,46 @@ func NewMap() *Map {
 	m := &Map{}
 	m.Members = map[string]ObjectValueEntry{}
 	m.values = map[value.Value]ObjectValueEntry{}
+	m.handles = map[value.Value]value.Value{}
 
 	m.SetMember(KEY_PROTO, PROTOTYPE_MAP)
 	m.SetMember(KEY_SIZE, value.ValueFromFloat64(0))
 	return m
+}
+
+func (m *Map) Keys() []value.Value {
+	r := make([]value.Value, len(m.values))
+
+	for k, item := range m.values {
+		r[item.init] = m.handles[k]
+	}
+
+	return r
+}
+
+func (m *Map) Values() []value.Value {
+	r := make([]value.Value, len(m.values))
+
+	for _, item := range m.values {
+		r[item.init] = item.Value
+	}
+
+	return r
+}
+
+type MapKeys struct {
+	ObjNativeFn
+}
+
+func NewMapKeys() *MapKeys {
+	k := &MapKeys{}
+	k.name = "keys"
+
+	return k
+}
+
+func (*MapKeys) Keys(owner *Map) *object.Iterator {
+	return object.NewKeyIterator(owner)
 }
 
 type MapSet struct {
@@ -44,8 +81,9 @@ func NewMapSet() *MapSet {
 func (*MapSet) Set(owner *Map, k value.Value, v value.Value) {
 	// handles can point to the same object so we'll modify our key to contain the actual pointer
 	if k.IsObject() {
-		ptr := allocator.GetPointer(k.GetHandle())
-		k = value.EncodeHandle(ptr)
+		ptr := value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
+		owner.handles[ptr] = k
+		k = ptr
 	}
 	if _, found := owner.values[k]; found {
 		entry := owner.values[k]
@@ -62,7 +100,6 @@ func (*MapSet) Set(owner *Map, k value.Value, v value.Value) {
 
 	owner.init++
 	owner.SetMember(KEY_SIZE, value.ValueFromFloat64(float64(len(owner.values))))
-
 }
 
 type MapGet struct {
@@ -78,8 +115,9 @@ func NewMapGet() *MapGet {
 func (*MapGet) Get(owner *Map, k value.Value) value.Value {
 	// handles can point to the same object so we'll modify our key to contain the actual pointer
 	if k.IsObject() {
-		ptr := allocator.GetPointer(k.GetHandle())
-		k = value.EncodeHandle(ptr)
+		ptr := value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
+		owner.handles[ptr] = k
+		k = ptr
 	}
 	if v, found := owner.values[k]; found {
 		return v.Value

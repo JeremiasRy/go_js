@@ -33,6 +33,27 @@ func NewQueueMicroTask() *QueueMicroTask {
 	return q
 }
 
+type ParseInt struct {
+	ObjNativeFn
+}
+
+func NewParseInt() *ParseInt {
+	p := &ParseInt{}
+	p.name = "parseInt"
+
+	return p
+}
+
+func (*ParseInt) ParseInteger(str string, base int) (value.Value, error) {
+	i, err := strconv.ParseInt(str, base, 64)
+
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+
+	return value.ValueFromFloat64(float64(i)), nil
+}
+
 func Init() {
 	createCommonHandles()
 	initObjectPrototype()

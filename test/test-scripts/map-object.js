@@ -5,4 +5,7 @@ myMap.set("b", 2);
 console.log(myMap.get("a"));
 console.log(myMap.has("b"));
 console.log(myMap.size);
-console.log(myMap.keys())
+
+for (const key of myMap.keys()) {
+    console.log(key)
+}

@@ -519,6 +519,30 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				vm.push(vm.concatenate(a, b))
 			}
+		case chunk.OP_B_AND:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result := float64(int32(uint32((b.AsNumber()))) & int32(uint32(a.AsNumber())))
+
+				vm.push(value.ValueFromFloat64(result))
+			}
+		case chunk.OP_B_OR:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result := float64(int32(uint32((b.AsNumber()))) | int32(uint32(a.AsNumber())))
+
+				vm.push(value.ValueFromFloat64(result))
+			}
+		case chunk.OP_B_XOR:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result := float64(int32(uint32((b.AsNumber()))) ^ int32(uint32(a.AsNumber())))
+
+				vm.push(value.ValueFromFloat64(result))
+			}
 		case chunk.OP_SUBTRACT:
 			{
 				b := vm.pop()
@@ -1134,14 +1158,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				argCount := int(c.Code[ip])
 				ip++
-				handle := vm.pop()
-
-				if handle != value.TAG_METHOD_HANDLE {
-					panic("should always have a handle")
-				}
-
 				callee := vm.pop()
-				thisCtx := vm.pop()
+				thisCtx := value.UNDEFINED
+
+				if callee == value.TAG_METHOD_HANDLE {
+					callee = vm.pop()
+					thisCtx = vm.pop()
+				}
 
 				fn, err := allocator.GetObject(callee.GetHandle())
 
@@ -1172,7 +1195,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						f, c = vm.Call(fn, &ip, thisCtx, argCount)
 					}
-
 				case *native.Resolve:
 					{
 						// kinda ugly here, I 'compile' an async function that only returns so that it resolves the promise immediatly
@@ -1220,6 +1242,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						fn.Set(owner.(*native.Map), k, v)
 						vm.push(value.UNDEFINED)
+					}
+				case *native.MapKeys:
+					{
+						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						keys := fn.Keys(owner.(*native.Map))
+
+						handle := allocator.Allocate(keys)
+						vm.push(value.EncodeHandle(handle))
 					}
 				case *native.ArrayPush:
 					{
@@ -1565,6 +1595,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn, _ := allocator.GetObject(v.GetHandle())
 						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
 					}
+				case *native.ParseInt:
+					{
+						base := 10
+						if argCount == 2 {
+							base = int(vm.pop().AsNumber())
+						}
+
+						arg := vm.pop()
+						obj, _ := allocator.GetObject(arg.GetHandle())
+
+						v, _ := fn.ParseInteger(obj.String(), base)
+
+						vm.push(v)
+					}
 				}
 
 			}
@@ -1651,7 +1695,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_GET_ITERATOR:
 			{
-				iteratee := vm.pop()
+
+				iteratee := vm.peek()
 				type_ := c.Code[ip]
 				ip++
 
@@ -1664,6 +1709,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if err != nil {
 					return value.UNDEFINED, err
 				}
+
+				if _, ok := obj.(*object.Iterator); ok {
+					continue
+				}
+
+				vm.pop()
 
 				iteratorObj, ok := obj.(object.Iterable)
 
