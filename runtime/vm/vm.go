@@ -1158,14 +1158,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				argCount := int(c.Code[ip])
 				ip++
-				handle := vm.pop()
-
-				if handle != value.TAG_METHOD_HANDLE {
-					panic("should always have a handle")
-				}
-
 				callee := vm.pop()
-				thisCtx := vm.pop()
+				thisCtx := value.UNDEFINED
+
+				if callee == value.TAG_METHOD_HANDLE {
+					callee = vm.pop()
+					thisCtx = vm.pop()
+				}
 
 				fn, err := allocator.GetObject(callee.GetHandle())
 
@@ -1595,6 +1594,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						fn, _ := allocator.GetObject(v.GetHandle())
 						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
+					}
+				case *native.ParseInt:
+					{
+						base := 10
+						if argCount == 2 {
+							base = int(vm.pop().AsNumber())
+						}
+
+						arg := vm.pop()
+						obj, _ := allocator.GetObject(arg.GetHandle())
+
+						v, _ := fn.ParseInteger(obj.String(), base)
+
+						vm.push(v)
 					}
 				}
 

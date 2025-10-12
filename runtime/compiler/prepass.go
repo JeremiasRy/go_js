@@ -416,7 +416,16 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Local, symbolTable)
 	case parser.NODE_EXPORT_NAMED_DECLARATION:
 		prePass(current.Declaration, symbolTable)
-	case parser.NODE_REST_ELEMENT:
+	case parser.NODE_SWITCH_STATEMENT:
+		prePass(current.Discriminant, symbolTable)
+		for _, node := range current.Cases {
+			prePass(node, symbolTable)
+		}
+	case parser.NODE_SWITCH_CASE:
+		{
+			prePass(current.Test, symbolTable)
+			prePass(current.Consequent, symbolTable)
+		}
 
 	}
 

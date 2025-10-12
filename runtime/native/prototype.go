@@ -19,6 +19,7 @@ const (
 	MAP_CONSTRUCTOR_NAME      string = "Map"
 	SET_CONSTRUCTOR_NAME      string = "Set"
 	QUEUE_MICRO_TASK_NAME     string = "queueMicrotask"
+	PARSE_INT_NAME            string = "parseInt"
 )
 
 var (

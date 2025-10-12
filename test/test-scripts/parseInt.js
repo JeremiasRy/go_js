@@ -1,5 +1,5 @@
 const num = "02"
-parseInt(num)
+console.log(parseInt(num))
 
 const binary = "0101"
-parseInt(binary, 2)
+console.log(parseInt(binary, 2))

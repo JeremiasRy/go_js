@@ -361,6 +361,15 @@ func defineQueueMicroTask(main *object.ObjFunction, symbolTable *FunctionScope) 
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineParseInt(main *object.ObjFunction, symbolTable *FunctionScope) {
+	parseInt := native.NewParseInt()
+	handle := allocator.Allocate(parseInt)
+
+	symbolTable.addVariable(native.PARSE_INT_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
@@ -376,6 +385,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineMapConstructor(main, global)
 	defineSetConstructor(main, global)
 	defineQueueMicroTask(main, global)
+	defineParseInt(main, global)
 
 	prePass(ast, global)
 	generateByteCode(ast, global, main)
@@ -1544,6 +1554,44 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			generateByteCode(current.Argument, symbolTable, fn)
 			fn.ValueChunk().EmitByte(chunk.OP_SPREAD)
+		}
+	case parser.NODE_SWITCH_STATEMENT:
+		{
+			pushLoop()
+			patchFallthrough := -1
+			for _, c := range current.Cases {
+				prevPopStack := popStack
+				popStack = false
+				// we could just hold the discrimant at stack top and pop it later, but for simplicitys sake, we'll just fetch it everytime
+				generateByteCode(current.Discriminant, symbolTable, fn)
+				generateByteCode(c.Test, symbolTable, fn)
+				popStack = prevPopStack
+
+				fn.ValueChunk().EmitByte(chunk.OP_STRICT_EQUALS)
+				fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+
+				if patchFallthrough != -1 {
+					fn.ValueChunk().PatchUint32(uint32(patchFallthrough), uint32(len(fn.ValueChunk().Code)))
+					patchFallthrough = -1
+				}
+
+				jumpStart := len(fn.ValueChunk().Code) - 4
+				generateByteCode(c.Consequent, symbolTable, fn)
+				fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
+				patchFallthrough = len(fn.ValueChunk().Code) - 4
+
+				fn.ValueChunk().PatchUint32(uint32(jumpStart), uint32(len(fn.ValueChunk().Code)))
+			}
+			switchEnd := len(fn.ValueChunk().Code)
+
+			for _, breakpoint := range currentLoop().points {
+				pos := breakpoint.position
+				switch breakpoint.type_ {
+				case BREAKPOINT_BREAK:
+					fn.ValueChunk().PatchUint32(uint32(pos), uint32(switchEnd))
+				}
+			}
+			popLoop()
 		}
 	}
 }
