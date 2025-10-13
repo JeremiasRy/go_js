@@ -152,6 +152,7 @@ func TypeDecoratedString(v value.Value) string {
 			}
 		case LightString:
 			{
+
 				return fmt.Sprintf("'%s'", obj)
 			}
 		case *ObjArr:

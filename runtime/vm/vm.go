@@ -1088,6 +1088,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case native.LightString:
 					{
+
 						boxed := native.NewObjString(obj.String())
 						v := boxed.GetMember(member)
 
@@ -1105,6 +1106,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 						}
 						vm.push(v)
+
 					}
 				case *native.ObjStringBuilder:
 					{

@@ -371,6 +371,25 @@ func defineParseInt(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
+var module = false
+
+type PopRValue struct {
+	s []bool
+}
+
+var popReturnValue = &PopRValue{s: []bool{true}}
+
+func (p *PopRValue) current() bool {
+	return p.s[len(p.s)-1]
+}
+
+func (p *PopRValue) push(v bool) {
+	p.s = append(p.s, v)
+}
+
+func (p *PopRValue) pop() {
+	p.s = p.s[:len(p.s)-1]
+}
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
@@ -395,8 +414,6 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	return main, nil
 }
 
-var module = false
-
 func CompileModule(src string) (*object.ObjFunction, error) {
 	module = true
 	main := object.NewFunction(fmt.Sprintf("MODULE %s", src), 0, nil)
@@ -406,8 +423,6 @@ func CompileModule(src string) (*object.ObjFunction, error) {
 	module = false
 	return main, nil
 }
-
-var popStack = true
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
 	switch current.Type {
@@ -528,10 +543,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				switch current.AssignmentOperator {
 				case parser.ASSIGN:
 					{
-						prevPopStack := popStack
-						popStack = false
+						popReturnValue.push(false)
 						generateByteCode(current.Right, symbolTable, fn)
-						popStack = prevPopStack
+						popReturnValue.pop()
 
 						if variable.undeclared {
 							fn.ValueChunk().EmitByte(defineOp)
@@ -617,12 +631,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			}
 
-			prevPopStack := popStack
-			popStack = true
+			popReturnValue.push(true)
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
-			popStack = prevPopStack
+			popReturnValue.pop()
 
 			if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
@@ -696,12 +709,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
 			} else {
-				prevPopStack := popStack
-				popStack = true
+				popReturnValue.push(true)
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, newFn)
 				}
-				popStack = prevPopStack
+				popReturnValue.pop()
 			}
 
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
@@ -723,12 +735,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if current.IsExpression {
 				generateByteCode(current.BodyNode, symbolTable, newFn)
 			} else {
-				prevPopStack := popStack
-				popStack = true
+				popReturnValue.push(true)
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, newFn)
 				}
-				popStack = prevPopStack
+				popReturnValue.pop()
 			}
 
 			if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
@@ -752,19 +763,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_VARIABLE_DECLARATION:
 		{
-			prevPopstack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			for _, declaration := range current.Declarations {
 				generateByteCode(declaration, symbolTable, fn)
 			}
-			popStack = prevPopstack
+			popReturnValue.pop()
 		}
 
 	case parser.NODE_ARRAY_EXPRESSION:
 		{
 
-			prevPopstack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_ARRAY)
 			fn.ValueChunk().EmitUint32(uint32(len(current.Elements)))
 
@@ -772,12 +781,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(item, symbolTable, fn)
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_ELEMENT)
 			}
-			popStack = prevPopstack
+			popReturnValue.pop()
 		}
 	case parser.NODE_CALL_EXPRESSION:
 		{
-			prevPopStack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			if callee, _ := symbolTable.findVariable(current.Callee.Name); callee != nil && callee.fn != nil {
 				if len(current.Arguments) > 1 && callee.fn.HasRestParameter() {
 					fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
@@ -793,11 +801,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 
 			generateByteCode(current.Callee, symbolTable, fn)
-			popStack = prevPopStack
+			popReturnValue.pop()
 
 			fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(current.Arguments)))
 
-			if popStack {
+			if popReturnValue.current() {
 				fn.ValueChunk().EmitByte(chunk.OP_POP)
 			}
 		}
@@ -839,13 +847,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				var getOp uint8
 
-				switch arr.scope {
-				case LOCAL:
-					getOp = chunk.OP_GET_LOCAL
-				case GLOBAL:
-					getOp = chunk.OP_GET_GLOBAL
-				case HEAP:
-					getOp = chunk.OP_GET_HEAP_VAR
+				if arr != nil {
+					switch arr.scope {
+					case LOCAL:
+						getOp = chunk.OP_GET_LOCAL
+					case GLOBAL:
+						getOp = chunk.OP_GET_GLOBAL
+					case HEAP:
+						getOp = chunk.OP_GET_HEAP_VAR
+					}
 				}
 
 				for i, element := range pattern.Elements {
@@ -855,16 +865,33 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					switch el.scope {
 					case LOCAL:
-						defineOp = chunk.OP_DEFINE_LOCAL
+						if currentLoop() != nil {
+							defineOp = chunk.OP_SET_LOCAL
+						} else {
+							defineOp = chunk.OP_DEFINE_LOCAL
+
+						}
 					case GLOBAL:
 						defineOp = chunk.OP_DEFINE_GLOBAL
 					case HEAP:
 						defineOp = chunk.OP_DEFINE_HEAP_VAR
 					}
 
-					fn.ValueChunk().EmitBytes(getOp, uint8(arr.slot))
+					if arr != nil {
+						fn.ValueChunk().EmitBytes(getOp, uint8(arr.slot))
+					} else {
+						// GET_OBJECT_MEMBER pops the object so we'll keep pushing it to the stack
+						fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+					}
 					fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(i)))
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
+					if currentLoop() != nil {
+						fn.ValueChunk().EmitByte(uint8(el.slot))
+					}
+				}
+
+				if arr == nil {
+					fn.ValueChunk().EmitByte(chunk.OP_POP)
 				}
 				return
 			}
@@ -996,10 +1023,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_IF_STATEMENT:
 		{
-			prevPopStack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			generateByteCode(current.Test, symbolTable, fn)
-			popStack = prevPopStack
+			popReturnValue.pop()
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := len(fn.ValueChunk().Code) - 4
 
@@ -1018,12 +1044,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_BINARY_EXPRESSION:
 		{
-			prevPopstack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			generateByteCode(current.Left, symbolTable, fn)
 			generateByteCode(current.Right, symbolTable, fn)
-			popStack = prevPopstack
-
+			popReturnValue.pop()
 			fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 		}
 	case parser.NODE_LITERAL:
@@ -1060,10 +1084,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if current.Argument == nil {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 			} else {
-				prevPopstack := popStack
-				popStack = false
+				popReturnValue.push(false)
 				generateByteCode(current.Argument, symbolTable, fn)
-				popStack = prevPopstack
+				popReturnValue.pop()
 			}
 
 			fn.ValueChunk().EmitByte(chunk.OP_RETURN)
@@ -1117,12 +1140,25 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 
-			generateByteCode(current.BodyNode, symbolTable, fn)
+			pushLoop()
 
+			generateByteCode(current.BodyNode, symbolTable, fn)
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 
 			fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), testStart)
-			fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
+			loopEnd := uint32(len(fn.ValueChunk().Code))
+			fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
+
+			for _, breakpoint := range currentLoop().points {
+				pos := breakpoint.position
+				switch breakpoint.type_ {
+				case BREAKPOINT_BREAK:
+					fn.ValueChunk().PatchUint32(uint32(pos), loopEnd)
+				case BREAKPOINT_CONTINUE:
+					fn.ValueChunk().PatchUint32(uint32(pos), testStart)
+				}
+			}
+
 		}
 	case parser.NODE_CONTINUE_STATEMENT:
 		{
@@ -1151,7 +1187,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 
 			if !current.Prefix {
-				if !popStack {
+				if !popReturnValue.current() {
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
 				}
 
@@ -1171,7 +1207,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_ADD)
 				}
 
-				if !popStack {
+				if !popReturnValue.current() {
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
 				}
 			}
@@ -1236,10 +1272,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for range symbolTable.block.vars {
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
 			}
-			prevPopstack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			generateByteCode(current.Right, symbolTable, fn)
-			popStack = prevPopstack
+			popReturnValue.pop()
 			fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
@@ -1250,9 +1285,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			pushLoop()
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
-			}
-			if len(symbolTable.block.vars) > 1 {
-				fn.ValueChunk().EmitByte(chunk.OP_POP)
 			}
 
 			fn.ValueChunk().EmitByte(chunk.OP_JUMP)
@@ -1310,8 +1342,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		{
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_OBJECT)
 
-			prevPopstack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			for _, property := range current.Properties {
 				switch property.Type {
 				case parser.NODE_PROPERTY:
@@ -1333,12 +1364,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitBytes(getOp, uint8(item.slot), chunk.OP_SET_FROM_SPREAD)
 				}
 			}
-			popStack = prevPopstack
+			popReturnValue.pop()
 		}
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
 			start := native.LightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Raw)
 			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(start)))
+
+			if len(current.Quasis) == 1 {
+				return
+			}
 
 			if len(current.Expressions) > 0 {
 				generateByteCode(current.Expressions[0], symbolTable, fn)
@@ -1448,10 +1483,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_AWAIT_EXPRESSION:
 		{
-			prevPopstack := popStack
-			popStack = false
+			popReturnValue.push(false)
 			generateByteCode(current.Argument, symbolTable, fn)
-			popStack = prevPopstack
+			popReturnValue.pop()
 			fn.ValueChunk().EmitByte(chunk.OP_AWAIT)
 		}
 	case parser.NODE_UNARY_EXPRESSION:
@@ -1560,12 +1594,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			pushLoop()
 			patchFallthrough := -1
 			for _, c := range current.Cases {
-				prevPopStack := popStack
-				popStack = false
+				popReturnValue.push(false)
 				// we could just hold the discrimant at stack top and pop it later, but for simplicitys sake, we'll just fetch it everytime
 				generateByteCode(current.Discriminant, symbolTable, fn)
 				generateByteCode(c.Test, symbolTable, fn)
-				popStack = prevPopStack
+				popReturnValue.pop()
 
 				fn.ValueChunk().EmitByte(chunk.OP_STRICT_EQUALS)
 				fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
@@ -1627,6 +1660,10 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 							case HEAP:
 								defineOp = chunk.OP_SET_HEAP_VAR
 							}
+							// GET_MEMBER pops the object
+							if i < len(pattern.Properties)-1 {
+								fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+							}
 
 							if prop.Shorthand {
 								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
@@ -1634,10 +1671,9 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(k))))
 
 							}
+
 							fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp, uint8(property.slot))
-							if i < len(pattern.Properties) {
-								fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_CURRENT)
-							}
+
 						}
 						return
 					}
