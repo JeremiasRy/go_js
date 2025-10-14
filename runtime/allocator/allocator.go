@@ -47,3 +47,7 @@ func GetObject(handle uint32) (object.Object, error) {
 func GetPointer(handle uint32) uint32 {
 	return allocator[handle]
 }
+
+func Sweep() {
+	h.Sweep()
+}

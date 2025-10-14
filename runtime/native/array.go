@@ -9,6 +9,7 @@ import (
 )
 
 type ObjArr struct {
+	object.GC_TAG
 	ObjObject
 	items []value.Value
 }
@@ -161,7 +162,7 @@ func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
 	}
 
 	res := strings.Join(i, s)
-	return value.EncodeHandle(allocator.Allocate(LightString(res)))
+	return value.EncodeHandle(allocator.Allocate(NewLightString(res)))
 }
 
 type ArrayReverse struct {

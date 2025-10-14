@@ -35,6 +35,7 @@ var (
 )
 
 type Prototype struct {
+	object.GC_TAG
 	ObjObject
 	name string
 }

@@ -7,6 +7,7 @@ import (
 )
 
 type ObjGenerator struct {
+	object.GC_TAG
 	object.ObjFunction
 	ObjObject
 

@@ -13,6 +13,7 @@ type ObjectValueEntry struct {
 }
 
 type ObjObject struct {
+	object.GC_TAG
 	init    int
 	Members map[string]ObjectValueEntry
 }
@@ -51,7 +52,7 @@ func (o *ObjObject) Keys() []value.Value {
 		if k == PROTOTYPE_PROPERTY_STRING {
 			continue
 		}
-		keys = append(keys, value.EncodeHandle(allocator.Allocate(LightString(k))))
+		keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
 	}
 
 	p := o.Members[PROTOTYPE_PROPERTY_STRING].Value
@@ -63,7 +64,7 @@ func (o *ObjObject) Keys() []value.Value {
 				if k == PROTOTYPE_PROPERTY_STRING {
 					continue
 				}
-				keys = append(keys, value.EncodeHandle(allocator.Allocate(LightString(k))))
+				keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
 			}
 		}
 		p = obj.(object.Hashable).GetMember(KEY_PROTO)

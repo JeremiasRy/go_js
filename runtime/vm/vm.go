@@ -106,13 +106,13 @@ func (vm *VM) getGlobal(global int) value.Value {
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
 	if !a.IsObject() && b.IsObject() {
-		a = value.EncodeHandle(allocator.Allocate(native.LightString(native.String(a))))
+		a = value.EncodeHandle(allocator.Allocate(native.NewLightString(native.String(a))))
 	}
 
 	if a.IsObject() {
 		var bObj object.Object
 		if !b.IsObject() {
-			bObj = native.LightString(native.String(b))
+			bObj = native.NewLightString(native.String(b))
 		}
 		aObj, _ := allocator.GetObject(a.GetHandle())
 
@@ -126,7 +126,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						aObj.Concatenate(string(str.Flush()))
+						aObj.Concatenate(str.Flush().String())
 					}
 				default:
 					{
@@ -135,13 +135,13 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				}
 				return a
 			}
-		case native.LightString:
+		case *native.LightString:
 			{
 				builder := native.NewStringBuilder(aObj)
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						builder.Concatenate(string(str.Flush()))
+						builder.Concatenate(str.Flush().String())
 					}
 				default:
 					{
@@ -156,11 +156,11 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + string(str.Flush()))))
+						return value.EncodeHandle(allocator.Allocate(native.NewLightString(aObj.String() + str.Flush().String())))
 					}
 				default:
 					{
-						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + bObj.String())))
+						return value.EncodeHandle(allocator.Allocate(native.NewLightString(aObj.String() + bObj.String())))
 					}
 				}
 			}
@@ -201,7 +201,7 @@ func compBoolToNum(boolean value.Value, number value.Value) bool {
 func compNumToObject(num value.Value, obj object.Object) bool {
 	numString := strconv.FormatFloat(num.AsNumber(), 'f', -1, 64)
 	switch obj := obj.(type) {
-	case native.LightString:
+	case *native.LightString:
 		return numString == obj.String()
 	case *native.ObjString:
 		return numString == obj.String()
@@ -222,7 +222,7 @@ func compBoolToObject(boolean value.Value, obj object.Object) bool {
 	str := ""
 
 	switch obj := obj.(type) {
-	case native.LightString:
+	case *native.LightString:
 		str = obj.String()
 	case *native.ObjString:
 		str = obj.String()
@@ -323,9 +323,7 @@ func truthyValue(v value.Value) bool {
 		switch obj := obj.(type) {
 		case *native.ObjString:
 			return len(obj.Value) > 0
-		case native.LightString:
-			return len(string(obj)) > 0
-		case *native.StringConstructor:
+		case *native.LightString, *native.StringConstructor:
 			return len(obj.String()) > 0
 		default:
 			return true
@@ -1100,7 +1098,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(v)
 						}
 					}
-				case native.LightString:
+				case *native.LightString:
 					{
 
 						boxed := native.NewObjString(obj.String())
@@ -1124,7 +1122,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.ObjStringBuilder:
 					{
-						boxed := native.NewObjString(string(obj.Flush()))
+						boxed := native.NewObjString(obj.Flush().String())
 						v := boxed.GetMember(member)
 
 						if v.IsObject() {

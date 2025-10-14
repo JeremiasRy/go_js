@@ -30,3 +30,13 @@ func (heap *Heap) GetObject(ptr uint32) object.Object {
 func NewHeap() *Heap {
 	return &Heap{objects: []object.Object{}, freeList: []uint32{}}
 }
+
+func (heap *Heap) Sweep() {
+	for i, obj := range heap.objects {
+		if obj.Marked() {
+			obj.Clear()
+		} else {
+			heap.freeList = append(heap.freeList, uint32(i))
+		}
+	}
+}

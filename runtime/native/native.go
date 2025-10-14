@@ -10,6 +10,7 @@ import (
 )
 
 type ObjNativeFn struct {
+	object.GC_TAG
 	object.Ctx
 	name  string
 	Arity int
@@ -163,7 +164,7 @@ func TypeDecoratedString(v value.Value) string {
 			{
 				return fmt.Sprintf("'%s'", obj.Value)
 			}
-		case LightString:
+		case *LightString:
 			{
 
 				return fmt.Sprintf("'%s'", obj)

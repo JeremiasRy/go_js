@@ -65,6 +65,25 @@ type Job interface {
 type Object interface {
 	Type() ObjType
 	String() string
+	Mark()
+	Marked() bool
+	Clear()
+}
+
+type GC_TAG struct {
+	marked bool
+}
+
+func (tag *GC_TAG) Mark() {
+	tag.marked = true
+}
+
+func (tag *GC_TAG) Marked() bool {
+	return tag.marked
+}
+
+func (tag *GC_TAG) Clear() {
+	tag.marked = false
 }
 
 type Hashable interface {

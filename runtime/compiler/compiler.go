@@ -533,7 +533,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							generateByteCode(current.Left.Property, symbolTable, fn)
 							popReturnValue.pop()
 						} else {
-							str := native.LightString(current.Left.Property.Name)
+							str := native.NewLightString(current.Left.Property.Name)
 							handle := allocator.Allocate(str)
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 						}
@@ -829,7 +829,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Computed {
 					generateByteCode(current.Property, symbolTable, fn)
 				} else {
-					handle := allocator.Allocate(native.LightString(current.Property.Name))
+					handle := allocator.Allocate(native.NewLightString(current.Property.Name))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case parser.NODE_UNARY_EXPRESSION:
@@ -934,8 +934,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						name := prop.Value.(*parser.Node).Name
 						property, _ := symbolTable.findVariable(name)
 						var defineOp uint8
-						k := value.EncodeHandle(allocator.Allocate(native.LightString(prop.Key.Name)))
-						v := value.EncodeHandle(allocator.Allocate(native.LightString(name)))
+						k := value.EncodeHandle(allocator.Allocate(native.NewLightString(prop.Key.Name)))
+						v := value.EncodeHandle(allocator.Allocate(native.NewLightString(name)))
 
 						switch property.scope {
 						case LOCAL:
@@ -1068,7 +1068,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(string(v)))))
 				}
 			case bool:
 				{
@@ -1109,7 +1109,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
-				msg := value.EncodeHandle(allocator.Allocate(native.LightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
+				msg := value.EncodeHandle(allocator.Allocate(native.NewLightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
 
 				err := native.NewError()
 				err.SetMember(native.KEY_MESSAGE, msg)
@@ -1378,7 +1378,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, property := range current.Properties {
 				switch property.Type {
 				case parser.NODE_PROPERTY:
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(property.Key.Name))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(property.Key.Name))))
 					generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 					fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 				case parser.NODE_SPREAD_ELEMENT:
@@ -1400,7 +1400,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
-			start := native.LightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Raw)
+			start := native.NewLightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Raw)
 			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(start)))
 
 			if len(current.Quasis) == 1 {
@@ -1417,7 +1417,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for i < len(current.Quasis) {
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
 
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(quasi.Raw))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(quasi.Raw))))
 				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 
 				if i < len(current.Expressions) {
@@ -1527,7 +1527,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_CLASS_DECLARATION:
 		{
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(current.Identifier.Name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(current.Identifier.Name))))
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
 
 			generateByteCode(current.BodyNode, symbolTable, fn)
@@ -1562,14 +1562,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 			}
 
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(name))))
 			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(method)))
 			fn.ValueChunk().EmitByte(chunk.OP_PUSH_METHOD)
 		}
 	case parser.NODE_PROPERTY_DEFINITION:
 		{
 			name := current.Key.Name
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(name))))
 			generateByteCode(current.Value.(*parser.Node), symbolTable, fn)
 
 			fn.ValueChunk().EmitByte(chunk.OP_PUSH_PROPERTY)
@@ -1595,14 +1595,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					declarator := declaration.Declarations[0]
 					v, _ := symbolTable.findVariable(declarator.Identifier.Name)
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(declarator.Identifier.Name))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(declarator.Identifier.Name))))
 					fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
 				}
 			case parser.NODE_FUNCTION_DECLARATION:
 				{
 					v, _ := symbolTable.findVariable(declaration.Identifier.Name)
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(declaration.Identifier.Name))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(declaration.Identifier.Name))))
 					fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
 
 				}
@@ -1698,9 +1698,9 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 							}
 
 							if prop.Shorthand {
-								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(v))))
+								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(v))))
 							} else {
-								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.LightString(k))))
+								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(k))))
 
 							}
 

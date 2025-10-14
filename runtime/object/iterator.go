@@ -10,6 +10,7 @@ type Iterable interface {
 }
 
 type Iterator struct {
+	GC_TAG
 	current int
 	values  []value.Value
 }

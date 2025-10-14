@@ -7,17 +7,27 @@ import (
 	"strings"
 )
 
-type LightString string
+type LightString struct {
+	object.GC_TAG
+	s string
+}
 
 func (LightString) Type() object.ObjType {
 	return object.OBJ_STRING
 }
 
 func (str LightString) String() string {
-	return string(str)
+	return str.s
+}
+
+func NewLightString(s string) *LightString {
+	return &LightString{
+		s: s,
+	}
 }
 
 type ObjStringBuilder struct {
+	object.GC_TAG
 	b *strings.Builder
 }
 
@@ -33,17 +43,17 @@ func (osb *ObjStringBuilder) Concatenate(s string) {
 	osb.b.WriteString(s)
 }
 
-func (osb *ObjStringBuilder) Flush() LightString {
-	str := LightString(osb.b.String())
+func (osb *ObjStringBuilder) Flush() *LightString {
+	str := NewLightString(osb.b.String())
 	osb.b = nil
 	return str
 }
 
-func NewStringBuilder(init LightString) *ObjStringBuilder {
+func NewStringBuilder(init *LightString) *ObjStringBuilder {
 	b := &strings.Builder{}
 
-	b.WriteString(string(init))
-	b.Grow(len(init) + 10)
+	b.WriteString(string(init.s))
+	b.Grow(len(init.s) + 10)
 	return &ObjStringBuilder{
 		b: b,
 	}
@@ -120,7 +130,7 @@ func NewStringReplace() *StringReplace {
 
 func (*StringReplace) Replace(owner object.Object, searchValue string, replaceValue string) value.Value {
 	result := strings.Replace(owner.String(), searchValue, replaceValue, 1)
-	return value.EncodeHandle(allocator.Allocate(LightString(result)))
+	return value.EncodeHandle(allocator.Allocate(NewLightString(result)))
 }
 
 type StringSplit struct {
@@ -138,7 +148,7 @@ func (*StringSplit) Split(owner object.Object, separator string) value.Value {
 	items := []value.Value{}
 
 	for _, s := range strings.Split(owner.String(), separator) {
-		items = append(items, value.EncodeHandle(allocator.Allocate(LightString(s))))
+		items = append(items, value.EncodeHandle(allocator.Allocate(NewLightString(s))))
 	}
 	return value.EncodeHandle(allocator.Allocate(NewArrayFrom(items)))
 }

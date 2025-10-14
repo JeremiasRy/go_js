@@ -8,6 +8,7 @@ import (
 )
 
 type Map struct {
+	object.GC_TAG
 	ObjObject
 	init    int
 	values  map[value.Value]ObjectValueEntry

@@ -102,6 +102,7 @@ func (pCtor *PromiseConstructor) String() string {
 }
 
 type ResolveFunc struct {
+	object.GC_TAG
 	object.Ctx
 	owner *ObjPromise
 }

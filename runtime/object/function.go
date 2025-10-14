@@ -10,6 +10,7 @@ type NeedsContext interface {
 func (Ctx) Context() {}
 
 type ObjFunction struct {
+	GC_TAG
 	Ctx
 	Name      string
 	Chunk     *value.ValueChunk
