@@ -116,8 +116,14 @@ func main() {
 	resGoJs, _ := goJsCmd.CombinedOutput()
 	resNode, _ := nodeCmd.CombinedOutput()
 
-	if bytes.Equal(resGoJs, resNode) {
+	gojs := strings.ReplaceAll(string(resGoJs), "\n", "")
+	nodeJs := strings.ReplaceAll(string(resNode), "\n", "")
+
+	if gojs == nodeJs {
 		fmt.Println("aoc solution passed ✅")
+		fmt.Println("go_js:", gojs)
+		fmt.Println("node: ", nodeJs)
+
 	} else {
 		fmt.Println("aoc solution failed ❌")
 	}

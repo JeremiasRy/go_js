@@ -118,6 +118,7 @@ type LoopBreakPoint struct {
 
 type Loop struct {
 	points []*LoopBreakPoint
+	block  *BlockScope
 }
 
 var loopStack = []*Loop{}
@@ -129,8 +130,8 @@ func currentLoop() *Loop {
 	return loopStack[0]
 }
 
-func pushLoop() {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}})
+func pushLoop(block *BlockScope) {
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block})
 }
 
 func popLoop() {
@@ -528,15 +529,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case parser.ASSIGN:
 					{
 						if current.Left.Computed {
+							popReturnValue.push(false)
 							generateByteCode(current.Left.Property, symbolTable, fn)
+							popReturnValue.pop()
 						} else {
 							str := native.LightString(current.Left.Property.Name)
 							handle := allocator.Allocate(str)
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 						}
-
+						popReturnValue.push(false)
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitBytes(setOp, chunk.OP_POP)
+						popReturnValue.pop()
+
 					}
 				}
 			} else {
@@ -786,9 +791,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_CALL_EXPRESSION:
 		{
 			popReturnValue.push(false)
+			var calledWithSpread uint8 = 0 // false
 			if callee, _ := symbolTable.findVariable(current.Callee.Name); callee != nil && callee.fn != nil {
-				if len(current.Arguments) > 1 && callee.fn.HasRestParameter() {
+				if (len(current.Arguments) > 1 || argumentsContainSpread(current.Arguments)) || callee.fn.HasRestParameter() {
 					fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
+					if !callee.fn.HasRestParameter() && argumentsContainSpread(current.Arguments) {
+						calledWithSpread = 1
+					}
 				}
 			}
 
@@ -803,7 +812,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			generateByteCode(current.Callee, symbolTable, fn)
 			popReturnValue.pop()
 
-			fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(current.Arguments)))
+			fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(current.Arguments)), calledWithSpread)
 
 			if popReturnValue.current() {
 				fn.ValueChunk().EmitByte(chunk.OP_POP)
@@ -1140,7 +1149,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 
-			pushLoop()
+			pushLoop(BLOCK_SCOPES[current.BodyNode])
 
 			generateByteCode(current.BodyNode, symbolTable, fn)
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
@@ -1158,18 +1167,41 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().PatchUint32(uint32(pos), testStart)
 				}
 			}
+			popLoop()
 
 		}
 	case parser.NODE_CONTINUE_STATEMENT:
 		{
-			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			l := currentLoop()
+			currentBlock := symbolTable.block
+
+			for l.block != nil && currentBlock != nil {
+				for range currentBlock.vars {
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+				}
+				if currentBlock == l.block {
+					break
+				}
+				currentBlock = currentBlock.parent
+			}
+
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			l.points = append(l.points, &LoopBreakPoint{type_: BREAKPOINT_CONTINUE, position: len(fn.ValueChunk().Code) - 4})
 		}
 	case parser.NODE_BREAK_STATEMENT:
 		{
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 			l := currentLoop()
+			currentBlock := symbolTable.block
+			for l.block != nil && currentBlock != nil {
+				for range currentBlock.vars {
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+				}
+				if currentBlock == l.block {
+					break
+				}
+				currentBlock = currentBlock.parent
+			}
 			l.points = append(l.points, &LoopBreakPoint{type_: BREAKPOINT_BREAK, position: len(fn.ValueChunk().Code) - 4})
 
 		}
@@ -1231,7 +1263,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 			jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
-			pushLoop()
+			pushLoop(nil)
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
@@ -1282,7 +1314,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			parseForDotDotLoopVariable(current, symbolTable, fn)
 
-			pushLoop()
+			pushLoop(nil)
 			for _, node := range current.BodyNode.Body {
 				generateByteCode(node, symbolTable, fn)
 			}
@@ -1298,7 +1330,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case BREAKPOINT_BREAK:
 					fn.ValueChunk().PatchUint32(uint32(pos), loopEnd)
 				case BREAKPOINT_CONTINUE:
-					fn.ValueChunk().PatchUint32(uint32(pos), jumpStart)
+					fn.ValueChunk().PatchUint32(uint32(pos), jumpStart-2)
 				}
 			}
 
@@ -1591,7 +1623,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_SWITCH_STATEMENT:
 		{
-			pushLoop()
+			pushLoop(nil)
 			patchFallthrough := -1
 			for _, c := range current.Cases {
 				popReturnValue.push(false)
@@ -1695,6 +1727,19 @@ func argumentIsPromise(current *parser.Node) bool {
 			}
 		}
 	}
+	return false
+}
+
+func argumentsContainSpread(arguments []*parser.Node) bool {
+	for _, node := range arguments {
+		switch node.Type {
+		case parser.NODE_SPREAD_ELEMENT:
+			{
+				return true
+			}
+		}
+	}
+
 	return false
 }
 

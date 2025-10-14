@@ -142,3 +142,23 @@ func (*StringSplit) Split(owner object.Object, separator string) value.Value {
 	}
 	return value.EncodeHandle(allocator.Allocate(NewArrayFrom(items)))
 }
+
+type StringStartsWith struct {
+	ObjNativeFn
+}
+
+func NewStringStartsWith() *StringStartsWith {
+	s := &StringStartsWith{}
+	s.name = "startsWith"
+
+	return s
+}
+
+func (*StringStartsWith) StartsWith(owner object.Object, pattern string) value.Value {
+	str := owner.String()
+
+	if pattern == str[:len(pattern)] {
+		return value.TRUE
+	}
+	return value.FALSE
+}

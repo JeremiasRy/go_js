@@ -41,7 +41,6 @@ func NewLog() *Log {
 }
 
 func (*Log) Log(values []value.Value) {
-
 	for i, v := range values {
 		fmt.Printf("%v", String(v))
 

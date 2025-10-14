@@ -123,6 +123,7 @@ func initStringPrototype() {
 	toUpperCase := value.EncodeHandle(allocator.Allocate(NewStringToUpperCase()))
 	replace := value.EncodeHandle(allocator.Allocate(NewStringReplace()))
 	split := value.EncodeHandle(allocator.Allocate(NewStringSplit()))
+	startsWith := value.EncodeHandle(allocator.Allocate(NewStringStartsWith()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -130,6 +131,7 @@ func initStringPrototype() {
 	p.SetMember(KEY_TOUPPERCASE, toUpperCase)
 	p.SetMember(KEY_REPLACE, replace)
 	p.SetMember(KEY_SPLIT, split)
+	p.SetMember(KEY_STARTS_WITH, startsWith)
 
 	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
 }

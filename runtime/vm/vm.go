@@ -372,7 +372,8 @@ func (vm *VM) findArgStart() []value.Value {
 	return arguments
 }
 
-func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCount int) (f CallFrame, c value.ValueChunk) {
+// I think an opts struct would be good refactor here...
+func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCount int, calledWithSpread bool) (f CallFrame, c value.ValueChunk) {
 	localStart := max(vm.stackTop-argCount, 0)
 	returnIp := 0
 
@@ -407,7 +408,15 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		}
 		v := value.EncodeHandle(allocator.Allocate(arr))
 		vm.push(v)
+	}
 
+	if calledWithSpread {
+		arguments := vm.findArgStart()
+		f.localStart = vm.stackTop
+
+		for _, v := range arguments {
+			vm.push(v)
+		}
 	}
 
 	return f, c
@@ -424,7 +433,7 @@ Run:
 			}
 		}
 
-		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, callback.Fn.GetArity())
+		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, callback.Fn.GetArity(), false)
 		_, err := vm.run(f, c)
 
 		if err != nil {
@@ -488,7 +497,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	}
 
 	for {
-		// time.Sleep(time.Millisecond * 100)
+		//	time.Sleep(time.Millisecond * 100)
 		code := c.Code[ip]
 		ip++
 
@@ -1030,12 +1039,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						key := b.Flush()
 						k = value.EncodeHandle(allocator.Allocate(key))
 					}
-
 				}
 
-				if obj, ok := obj.(object.Hashable); ok {
+				if obj, ok := obj.(*native.ObjArr); ok && k.IsInteger() {
+					obj.SetElementAt(int(k.AsNumber()), v)
+					continue
+				}
+
+				switch obj := obj.(type) {
+				case object.Hashable:
 					obj.SetMember(k, v)
-				} else {
+				default:
 					return value.UNDEFINED, fmt.Errorf("we currently don't support adding properties to %s types", native.String(hash))
 				}
 			}
@@ -1160,6 +1174,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				argCount := int(c.Code[ip])
 				ip++
+				spread := c.Code[ip]
+				ip++
+
+				calledWithSpread := false
+				if spread == 1 {
+					calledWithSpread = true
+				}
 				callee := vm.pop()
 				thisCtx := value.UNDEFINED
 
@@ -1185,7 +1206,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(value.EncodeHandle(handle))
 						}
 
-						f, c = vm.Call(fn.Clone(), &ip, value.UNDEFINED, argCount)
+						f, c = vm.Call(fn.Clone(), &ip, value.UNDEFINED, argCount, calledWithSpread)
 						f.localStart -= int(argCount)
 					}
 				case *native.ObjGenerator:
@@ -1195,7 +1216,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case object.Callable:
 					{
-						f, c = vm.Call(fn, &ip, thisCtx, argCount)
+						f, c = vm.Call(fn, &ip, thisCtx, argCount, calledWithSpread)
 					}
 				case *native.Resolve:
 					{
@@ -1207,7 +1228,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.SetPromise(promise)
 						vm.push(value.EncodeHandle(allocator.Allocate(promise)))
 
-						f, c = vm.Call(fn, &ip, value.UNDEFINED, 0)
+						f, c = vm.Call(fn, &ip, value.UNDEFINED, 0, calledWithSpread)
 						vm.push(v)
 					}
 				case *native.Then:
@@ -1277,7 +1298,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 								item := iterator.Current()
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
 								runner.run(f, c)
 								done = iterator.Next()
 							}
@@ -1307,7 +1328,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 								item := iterator.Current()
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
 								result, err := runner.run(f, c)
 
 								if err != nil {
@@ -1353,7 +1374,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 								item := iterator.Current()
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
 								result, err := runner.run(f, c)
 
 								if err != nil {
@@ -1396,7 +1417,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								item := iterator.Current()
 								runner.push(initialValue)
 								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount)
+								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
 								result, err := runner.run(f, c)
 
 								if err != nil {
@@ -1432,7 +1453,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						arr, _ := allocator.GetObject(thisCtx.GetHandle())
 						fn.Reverse(arr.(*native.ObjArr))
-						vm.push(value.UNDEFINED)
+						vm.push(thisCtx)
+					}
+				case *native.StringStartsWith:
+					{
+						arg := vm.pop()
+						pattern, _ := allocator.GetObject(arg.GetHandle())
+						this, _ := allocator.GetObject(thisCtx.GetHandle())
+
+						vm.push(fn.StartsWith(this, pattern.String()))
 					}
 				case *native.StringToUpperCase:
 					{
@@ -1489,7 +1518,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							continue
 						}
 
-						f, c = vm.Call(generator, &ip, value.UNDEFINED, argCount)
+						f, c = vm.Call(generator, &ip, value.UNDEFINED, argCount, calledWithSpread)
 
 						ip = generator.Ip
 
@@ -1601,7 +1630,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						base := 10
 						if argCount == 2 {
-							base = int(vm.pop().AsNumber())
+							arg := vm.pop()
+							if arg.IsObject() {
+								str, _ := allocator.GetObject(arg.GetHandle())
+								baseArg, err := strconv.Atoi(str.String())
+								if err != nil {
+									return value.UNDEFINED, fmt.Errorf("invalid argument for parseInt %s", native.String(arg))
+								}
+								base = baseArg
+							} else {
+								base = int(arg.AsNumber())
+							}
+
 						}
 
 						arg := vm.pop()
@@ -1827,7 +1867,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if constructor, ok := obj.(object.Callable); ok {
 							builder := NewVM(vm.debug)
 							fn := object.NewFunction("builder", 0, nil)
-							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), chunk.OP_RETURN)
+							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
 							instance := value.EncodeHandle(allocator.Allocate(instance))
 
 							for _, v := range vm.popN(constructor.GetArity()) {
@@ -1837,7 +1877,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							builder.push(instance)
 							builder.push(ctor)
 							builder.push(value.TAG_METHOD_HANDLE)
-							f, c := builder.Call(fn, nil, value.UNDEFINED, argCount)
+							f, c := builder.Call(fn, nil, value.UNDEFINED, argCount, false)
 							builder.run(f, c)
 
 							vm.push(instance)
@@ -1880,7 +1920,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						if executor, ok := executor.(object.Callable); ok {
 							runner := NewVM(vm.debug)
-							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount)
+							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount, false)
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run(f, c)
 						}
@@ -2092,7 +2132,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				importer := NewVM(vm.debug)
 
-				f, c := importer.Call(module, nil, value.UNDEFINED, 0)
+				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
 				importer.run(f, c)
 
 				imports[str] = value.EncodeHandle(allocator.Allocate(importer.exports))
