@@ -19,6 +19,7 @@ const (
 	FALSE              Value = QNAN | (1 << 3)
 	TAG_METHOD_HANDLE  Value = QNAN | (1 << 4)
 	TAG_ARGUMENT_START Value = QNAN | (1 << 5)
+	EMPTY_ARRAY_ITEM   Value = QNAN | (1 << 6)
 )
 
 type ValueChunk struct {

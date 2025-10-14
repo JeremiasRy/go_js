@@ -115,11 +115,21 @@ func printFunction(c value.ValueChunk) {
 
 		case chunk.OP_IMPORT, chunk.OP_CONSTANT, chunk.OP_GET_HEAP_VAR,
 			chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL, chunk.OP_GET_LOCAL,
-			chunk.OP_SET_LOCAL, chunk.OP_NEW, chunk.OP_CALL:
+			chunk.OP_SET_LOCAL, chunk.OP_NEW:
 			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
 			ip++
 			fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 
+		case chunk.OP_CALL:
+			fmt.Printf("%04d | %s \n", ip*4, opNames[code])
+			ip++
+			fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
+			ip++
+			if opCode[ip] == 0 {
+				fmt.Printf("%04d | false \n", ip*4)
+			} else {
+				fmt.Printf("%04d | true \n", ip*4)
+			}
 		case chunk.OP_JUMP_IF_FALSE, chunk.OP_TRY_BLOCK_START,
 			chunk.OP_JUMP_IF_TRUE, chunk.OP_JUMP:
 			ip++

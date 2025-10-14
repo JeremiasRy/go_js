@@ -36,7 +36,7 @@ const (
 	OP_DEFINE_HEAP_VAR
 	OP_SET_HEAP_VAR
 	OP_GET_HEAP_VAR
-	OP_CALL // op <arguments len>
+	OP_CALL // op <arguments len> <called with spread 0 false 1 true>
 	OP_RETURN
 	OP_JUMP_IF_FALSE
 	OP_JUMP_IF_TRUE

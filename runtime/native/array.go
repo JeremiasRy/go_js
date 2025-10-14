@@ -36,6 +36,20 @@ func (oa *ObjArr) GetElementAt(i int) value.Value {
 	return oa.items[i]
 }
 
+func (oa *ObjArr) SetElementAt(i int, v value.Value) {
+	if len(oa.items) == i {
+		oa.items = append(oa.items, v)
+		oa.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(oa.items))))
+		return
+	} else if len(oa.items) < i {
+		for range (i + 1) - len(oa.items) {
+			oa.items = append(oa.items, value.EMPTY_ARRAY_ITEM)
+		}
+	}
+	oa.items[i] = v
+	oa.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(oa.items))))
+}
+
 func (oa *ObjArr) PushElement(v value.Value) {
 	oa.items = append(oa.items, v)
 	prevLength := oa.GetMember(KEY_LENGTH)
@@ -181,6 +195,8 @@ func (*ArrayShift) Shift(arr *ObjArr) value.Value {
 
 	v := arr.items[0]
 	arr.items = arr.items[1:]
+
+	arr.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(arr.items))))
 
 	return v
 }

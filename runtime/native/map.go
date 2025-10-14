@@ -85,6 +85,7 @@ func (*MapSet) Set(owner *Map, k value.Value, v value.Value) {
 		owner.handles[ptr] = k
 		k = ptr
 	}
+
 	if _, found := owner.values[k]; found {
 		entry := owner.values[k]
 		entry.Value = v
@@ -113,11 +114,8 @@ func NewMapGet() *MapGet {
 }
 
 func (*MapGet) Get(owner *Map, k value.Value) value.Value {
-	// handles can point to the same object so we'll modify our key to contain the actual pointer
 	if k.IsObject() {
-		ptr := value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
-		owner.handles[ptr] = k
-		k = ptr
+		k = value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
 	}
 	if v, found := owner.values[k]; found {
 		return v.Value
@@ -136,10 +134,8 @@ func NewMapHas() *MapHas {
 }
 
 func (*MapHas) Has(owner *Map, k value.Value) value.Value {
-	// handles can point to the same object so we'll modify our key to contain the actual pointer
 	if k.IsObject() {
-		ptr := allocator.GetPointer(k.GetHandle())
-		k = value.EncodeHandle(ptr)
+		k = value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
 	}
 	if _, found := owner.values[k]; found {
 		return value.TRUE

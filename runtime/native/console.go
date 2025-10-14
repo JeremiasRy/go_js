@@ -5,7 +5,6 @@ import (
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
-	"strings"
 )
 
 type Console struct {
@@ -42,11 +41,12 @@ func NewLog() *Log {
 }
 
 func (*Log) Log(values []value.Value) {
-	s := make([]string, len(values))
+	for i, v := range values {
+		fmt.Printf("%v", String(v))
 
-	for _, v := range values {
-		s = append(s, String(v))
+		if i < len(values)-1 {
+			fmt.Print(" ")
+		}
 	}
-
-	fmt.Printf("%s\n", strings.Join(s, ""))
+	fmt.Println()
 }

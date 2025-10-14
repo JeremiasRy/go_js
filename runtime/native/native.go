@@ -84,13 +84,20 @@ func String(v value.Value) string {
 			{
 				var b strings.Builder
 				fmt.Fprint(&b, "{")
+				l := len(obj.Members) - 1
+				c := 0
 				for k, v := range obj.Members {
 					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
-					fmt.Fprintf(&b, " %s: %s,", k, TypeDecoratedString(v.Value))
+					fmt.Fprintf(&b, " %s: %s", k, TypeDecoratedString(v.Value))
+					c++
+					if c < l {
+						fmt.Fprint(&b, ", ")
+					}
 				}
-				fmt.Fprintln(&b, "}")
+				fmt.Fprintln(&b, " }")
+				return b.String()
 			}
 		}
 		return obj.String()
@@ -102,6 +109,8 @@ func String(v value.Value) string {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
 		return "null"
+	} else if v.IsType(value.EMPTY_ARRAY_ITEM) {
+		return "EMPTY_ITEM"
 	}
 
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
@@ -116,12 +125,15 @@ func TypeDecoratedString(v value.Value) string {
 			{
 				var b strings.Builder
 				fmt.Fprint(&b, "{ ")
-				l := len(obj.Members)
+				l := len(obj.Members) - 1
 				c := 0
 				for k, v := range obj.Members {
+					if k == PROTOTYPE_PROPERTY_STRING {
+						continue
+					}
 					c++
 					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
-					if l != c {
+					if c < l {
 						fmt.Fprint(&b, ", ")
 					}
 				}
@@ -133,6 +145,7 @@ func TypeDecoratedString(v value.Value) string {
 			{
 				var b strings.Builder
 				fmt.Fprint(&b, "Error { ")
+
 				l := len(obj.Members)
 				c := 0
 				for k, v := range obj.Members {
@@ -152,6 +165,7 @@ func TypeDecoratedString(v value.Value) string {
 			}
 		case LightString:
 			{
+
 				return fmt.Sprintf("'%s'", obj)
 			}
 		case *ObjArr:
@@ -181,6 +195,8 @@ func TypeDecoratedString(v value.Value) string {
 		return "METHOD_HANDLE"
 	} else if v.IsType(value.TAG_ARGUMENT_START) {
 		return "ARG_START"
+	} else if v.IsType(value.EMPTY_ARRAY_ITEM) {
+		return "EMPTY_ITEM"
 	}
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 }
@@ -198,6 +214,8 @@ func DebugString(v value.Value) string {
 		return "undefined"
 	} else if v.IsType(value.NULL) {
 		return "null"
+	} else if v.IsType(value.EMPTY_ARRAY_ITEM) {
+		return "EMPTY_ITEM"
 	}
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 }
