@@ -15,6 +15,7 @@ type GarbageCollector struct {
 }
 
 var gc = &GarbageCollector{stats: &runtime.MemStats{}}
+var debug = false
 
 func pushGrey(o object.Object) {
 	gc.greyStack = append(gc.greyStack, o)
@@ -31,9 +32,9 @@ func popGrey() object.Object {
 }
 
 func markAndSweep(stackValues []value.Value) {
-	fmt.Println("-- GC DEBUG --")
-	runtime.ReadMemStats(gc.stats)
-	prev := gc.stats.HeapAlloc
+	if debug {
+		fmt.Println("-- GC DEBUG --")
+	}
 
 	for _, v := range append(gc.roots, stackValues...) {
 		if v.IsObject() {
@@ -52,10 +53,11 @@ func markAndSweep(stackValues []value.Value) {
 		current.Mark()
 		current = popGrey()
 	}
-	h.Sweep()
-	runtime.ReadMemStats(gc.stats)
-	fmt.Println("from:", prev, "to:", gc.stats.HeapAlloc)
-	fmt.Println("-- GC DEBUG END--")
+	h.sweep()
+
+	if debug {
+		fmt.Println("-- GC DEBUG END--")
+	}
 }
 
 func RequestGC(stackValues []value.Value) {
@@ -67,6 +69,16 @@ func RequestGC(stackValues []value.Value) {
 }
 
 func InitGC(roots []value.Value, d bool) {
-	gc.roots = roots
+	gc.roots = append(gc.roots, roots...)
 	clean = true
+	debug = d
+}
+
+func PushToRoots(v ...value.Value) {
+	for _, val := range v {
+		o, _ := GetObject(val.GetHandle())
+
+		fmt.Println(o.String())
+	}
+	gc.roots = append(gc.roots, v...)
 }

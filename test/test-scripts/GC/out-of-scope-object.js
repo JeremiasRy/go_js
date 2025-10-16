@@ -7,28 +7,6 @@ function createAndLeaveObject() {
     console.log(localObject)
 }
 
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
-createAndLeaveObject();
+for (let i = 0; i < 10000; i++) {
+    createAndLeaveObject()
+}

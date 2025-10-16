@@ -1,7 +1,6 @@
 package native
 
 import (
-	"fmt"
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
@@ -227,7 +226,6 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 }
 
 func (obj *ObjObject) SetMember(k, v value.Value) {
-	fmt.Printf("k: %d, v: %d\n", k.GetHandle(), v.GetHandle())
 	if k.IsObject() {
 		o, err := allocator.GetObject(k.GetHandle())
 

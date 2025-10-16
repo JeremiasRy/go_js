@@ -27,6 +27,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Could not create CPU profile: %v\n", err)
 			os.Exit(1)
 		}
+
 		defer f.Close()
 
 		if err := pprof.StartCPUProfile(f); err != nil {

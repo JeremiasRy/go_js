@@ -73,6 +73,12 @@ func initObjectPrototype() {
 	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(allocator.Allocate(NewHasOwnProperty())))
 
 	PROTOTYPE_OBJECT = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_OBJECT,
+		KEY_PROTO,
+		KEY_TOSTRING,
+		KEY_HASOWNPROPERTY,
+	)
 }
 
 func initArrayPrototype() {
@@ -106,6 +112,18 @@ func initArrayPrototype() {
 	p.SetMember(KEY_LENGTH, value.ValueFromFloat64(0))
 
 	PROTOTYPE_ARRAY = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_ARRAY,
+		KEY_FILTER,
+		KEY_PUSH,
+		KEY_FOREACH,
+		KEY_MAP,
+		KEY_REDUCE,
+		KEY_JOIN,
+		KEY_SHIFT,
+		KEY_REVERSE,
+		KEY_LENGTH,
+	)
 }
 
 func initStringPrototype() {
@@ -134,6 +152,14 @@ func initStringPrototype() {
 	p.SetMember(KEY_STARTS_WITH, startsWith)
 
 	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_STRING,
+		KEY_INCLUDES,
+		KEY_TOUPPERCASE,
+		KEY_REPLACE,
+		KEY_SPLIT,
+		KEY_STARTS_WITH,
+	)
 }
 
 func initGeneratorPrototype() {
@@ -158,6 +184,12 @@ func initGeneratorPrototype() {
 	p.SetMember(KEY_RETURN, return_)
 
 	PROTOTYPE_GENERATOR = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_GENERATOR,
+		KEY_NEXT,
+		KEY_THROW,
+		KEY_RETURN,
+	)
 }
 
 func initMapPrototype() {
@@ -182,6 +214,13 @@ func initMapPrototype() {
 	p.SetMember(KEY_KEYS, mapKeys)
 
 	PROTOTYPE_MAP = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_MAP,
+		KEY_HAS,
+		KEY_SET,
+		KEY_GET,
+		KEY_KEYS,
+	)
 }
 
 func initSetPrototype() {
@@ -201,6 +240,11 @@ func initSetPrototype() {
 	p.SetMember(KEY_ADD, setAdd)
 
 	PROTOTYPE_SET = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_SET,
+		KEY_HAS,
+		KEY_ADD,
+	)
 }
 
 func initPromiseConstructorPrototype() {
@@ -218,6 +262,10 @@ func initPromiseConstructorPrototype() {
 	p.SetMember(KEY_RESOLVE, resolve)
 
 	PROTOTYPE_PROMISE_CONSTRUCTOR = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_PROMISE_CONSTRUCTOR,
+		KEY_RESOLVE,
+	)
 }
 
 func initPromisePrototype() {
@@ -236,4 +284,8 @@ func initPromisePrototype() {
 	p.SetMember(KEY_THEN, then)
 
 	PROTOTYPE_PROMISE = value.EncodeHandle(allocator.Allocate(p))
+	allocator.PushToRoots(
+		PROTOTYPE_PROMISE,
+		KEY_THEN,
+	)
 }

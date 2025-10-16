@@ -79,13 +79,17 @@ func NewHeap() *Heap {
 	return &Heap{objects: []object.Object{}, freeList: map[uint32]struct{}{}}
 }
 
-func (heap *Heap) Sweep() {
+func (heap *Heap) sweep() {
+	count := len(heap.freeList)
 	for i, obj := range heap.objects {
 		if obj.Marked() {
 			obj.Clear()
 		} else if _, found := heap.freeList[uint32(i)]; !found {
 			heap.freeList[uint32(i)] = struct{}{}
 		}
+	}
+	if debug {
+		fmt.Printf("Cleaned up %d objects\n", len(heap.freeList)-count)
 	}
 	defragment()
 }
