@@ -8,7 +8,6 @@ import (
 )
 
 type Map struct {
-	object.GC_TAG
 	ObjObject
 	init    int
 	values  map[value.Value]ObjectValueEntry
@@ -21,6 +20,22 @@ func (m *Map) String() string {
 
 func (*Map) Type() object.ObjType {
 	return object.OBJ_MAP
+}
+
+func (o *Map) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range o.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	for _, v := range o.values {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+	return arr
 }
 
 func NewMap() *Map {

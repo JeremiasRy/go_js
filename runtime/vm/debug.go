@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"

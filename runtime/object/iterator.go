@@ -10,7 +10,7 @@ type Iterable interface {
 }
 
 type Iterator struct {
-	GC_TAG
+	marked  bool
 	current int
 	values  []value.Value
 }
@@ -41,4 +41,26 @@ func (i *Iterator) String() string {
 
 func (i *Iterator) Type() ObjType {
 	return OBJ_ITERATOR
+}
+
+func (i *Iterator) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range i.values {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+	return arr
+}
+
+func (i *Iterator) Mark() {
+	i.marked = true
+}
+
+func (i *Iterator) Marked() bool {
+	return i.marked
+}
+
+func (i *Iterator) Clear() {
+	i.marked = false
 }

@@ -3,6 +3,7 @@ package compiler
 import (
 	"cmp"
 	"fmt"
+
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/native"

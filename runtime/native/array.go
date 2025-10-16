@@ -9,7 +9,6 @@ import (
 )
 
 type ObjArr struct {
-	object.GC_TAG
 	ObjObject
 	items []value.Value
 }
@@ -31,6 +30,17 @@ func NewArrayFrom(items []value.Value) *ObjArr {
 	arrObj.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(items))))
 
 	return arrObj
+}
+
+func (oa *ObjArr) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range oa.items {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+
+	return arr
 }
 
 func (oa *ObjArr) GetElementAt(i int) value.Value {

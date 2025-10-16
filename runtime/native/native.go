@@ -5,15 +5,16 @@ import (
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
+	"log"
 	"strconv"
 	"strings"
 )
 
 type ObjNativeFn struct {
-	object.GC_TAG
 	object.Ctx
-	name  string
-	Arity int
+	marked bool
+	name   string
+	Arity  int
 }
 
 func (ObjNativeFn) Type() object.ObjType {
@@ -22,6 +23,22 @@ func (ObjNativeFn) Type() object.ObjType {
 
 func (onf *ObjNativeFn) String() string {
 	return fmt.Sprintf("<native fn %s()>", onf.name)
+}
+
+func (*ObjNativeFn) GetReferencingValues() []value.Value {
+	return []value.Value{}
+}
+
+func (i *ObjNativeFn) Mark() {
+	i.marked = true
+}
+
+func (i *ObjNativeFn) Marked() bool {
+	return i.marked
+}
+
+func (i *ObjNativeFn) Clear() {
+	i.marked = false
 }
 
 type QueueMicroTask struct {
@@ -70,7 +87,11 @@ func Init() {
 
 func String(v value.Value) string {
 	if v.IsObject() {
-		obj, _ := allocator.GetObject(v.GetHandle())
+		obj, err := allocator.GetObject(v.GetHandle())
+
+		if err != nil {
+			log.Fatalf("failed to fetch object '%s'", err)
+		}
 
 		switch obj := obj.(type) {
 		case *ObjError:
@@ -119,7 +140,11 @@ func String(v value.Value) string {
 
 func TypeDecoratedString(v value.Value) string {
 	if v.IsObject() {
-		obj, _ := allocator.GetObject(v.GetHandle())
+		obj, err := allocator.GetObject(v.GetHandle())
+
+		if err != nil {
+			log.Fatalf("failed to fetch object '%s'", err)
+		}
 
 		switch obj := obj.(type) {
 		case *ObjObject:

@@ -1005,6 +1005,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				handle := allocator.Allocate(objHash)
 
 				vm.push(value.EncodeHandle(handle))
+				allocator.RequestGC(append(vm.stack[:vm.stackTop], globals...))
 			}
 		case chunk.OP_SET_OBJECT_MEMBER:
 			{

@@ -92,7 +92,7 @@ func NewObject() *ObjObject {
 }
 
 type ArrayConstructor struct {
-	object.GC_TAG
+	ObjObject
 }
 
 func (*ArrayConstructor) String() string {
@@ -117,7 +117,7 @@ func (ac *ArrayConstructor) New(params ...any) *ObjArr {
 }
 
 type StringConstructor struct {
-	object.GC_TAG
+	ObjObject
 }
 
 func (*StringConstructor) String() string {
@@ -201,7 +201,7 @@ func (st *SetTimeout) Clone() *SetTimeout {
 }
 
 type MapConstructor struct {
-	object.GC_TAG
+	ObjObject
 }
 
 func NewMapConstructor() *MapConstructor {
@@ -221,7 +221,7 @@ func (*MapConstructor) New(params ...any) (object.Object, error) {
 }
 
 type SetConstructor struct {
-	object.GC_TAG
+	ObjObject
 }
 
 func NewSetConstructor() *SetConstructor {

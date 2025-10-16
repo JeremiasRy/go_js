@@ -5,7 +5,6 @@ import (
 )
 
 type ObjError struct {
-	object.GC_TAG
 	ObjObject
 }
 

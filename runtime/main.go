@@ -2,9 +2,9 @@ package main
 
 import (
 	"fmt"
+	"go_js/allocator"
 	"go_js/compiler"
 	"go_js/eventloop"
-	"go_js/gc"
 	"go_js/native"
 	"go_js/parser"
 	"go_js/queue"
@@ -72,6 +72,7 @@ func main() {
 	native.Init()
 
 	main, err := compiler.Compile(ast)
+	allocator.InitGC(main.ValueChunk().Constants, debug)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
@@ -83,7 +84,6 @@ func main() {
 	eventloop.Init(&wg)
 
 	vm := vm.NewVM(debug)
-	gc.Init(vm, main.ValueChunk().Constants)
 
 	go eventloop.Start()
 	go vm.Run(&wg)

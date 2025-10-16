@@ -9,7 +9,6 @@ import (
 )
 
 type ObjClass struct {
-	object.GC_TAG
 	ObjObject
 	name       string
 	properties map[value.Value]value.Value

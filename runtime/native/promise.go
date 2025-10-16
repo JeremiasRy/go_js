@@ -102,9 +102,13 @@ func (pCtor *PromiseConstructor) String() string {
 }
 
 type ResolveFunc struct {
-	object.GC_TAG
 	object.Ctx
-	owner *ObjPromise
+	owner  *ObjPromise
+	marked bool
+}
+
+func (*ResolveFunc) GetReferencingValues() []value.Value {
+	return []value.Value{}
 }
 
 func NewResolveFunc(owner *ObjPromise) *ResolveFunc {
@@ -117,6 +121,18 @@ func (*ResolveFunc) Type() object.ObjType {
 
 func (*ResolveFunc) String() string {
 	return "function Resolve"
+}
+
+func (o *ResolveFunc) Mark() {
+	o.marked = true
+}
+
+func (o *ResolveFunc) Marked() bool {
+	return o.marked
+}
+
+func (o *ResolveFunc) Clear() {
+	o.marked = false
 }
 
 func (resolve *ResolveFunc) Resolve(v value.Value) {

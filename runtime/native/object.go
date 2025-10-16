@@ -1,6 +1,7 @@
 package native
 
 import (
+	"fmt"
 	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
@@ -13,9 +14,31 @@ type ObjectValueEntry struct {
 }
 
 type ObjObject struct {
-	object.GC_TAG
+	marked  bool
 	init    int
 	Members map[string]ObjectValueEntry
+}
+
+func (o *ObjObject) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range o.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+	return arr
+}
+
+func (o *ObjObject) Mark() {
+	o.marked = true
+}
+
+func (o *ObjObject) Marked() bool {
+	return o.marked
+}
+
+func (o *ObjObject) Clear() {
+	o.marked = false
 }
 
 func NewObjectHash() *ObjObject {
@@ -67,13 +90,17 @@ func (o *ObjObject) Keys() []value.Value {
 				keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
 			}
 		}
-		p = obj.(object.Hashable).GetMember(KEY_PROTO)
+		if obj, ok := obj.(object.Hashable); ok {
+			p = obj.GetMember(KEY_PROTO)
+		} else {
+			p = value.NULL
+		}
 	}
 	return keys
 }
 
 func (o *ObjObject) Values() []value.Value {
-	panic("sorry not implemented yet")
+	panic("unimplemented")
 }
 
 type ToString struct {
@@ -200,6 +227,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 }
 
 func (obj *ObjObject) SetMember(k, v value.Value) {
+	fmt.Printf("k: %d, v: %d\n", k.GetHandle(), v.GetHandle())
 	if k.IsObject() {
 		o, err := allocator.GetObject(k.GetHandle())
 
