@@ -58,6 +58,7 @@ func (heap *Heap) Allocate(o object.Object) uint32 {
 
 		for key := range heap.freeList {
 			ptr = key
+			break
 		}
 
 		delete(heap.freeList, ptr)
@@ -77,49 +78,4 @@ func (heap *Heap) GetObject(ptr uint32) object.Object {
 
 func NewHeap() *Heap {
 	return &Heap{objects: []object.Object{}, freeList: map[uint32]struct{}{}}
-}
-
-func (heap *Heap) sweep() {
-	count := len(heap.freeList)
-	for i, obj := range heap.objects {
-		if obj.Marked() {
-			obj.Clear()
-		} else if _, found := heap.freeList[uint32(i)]; !found {
-			heap.freeList[uint32(i)] = struct{}{}
-		}
-	}
-	if debug {
-		fmt.Printf("Cleaned up %d objects\n", len(heap.freeList)-count)
-	}
-	defragment()
-}
-
-func defragment() {
-	arr := make([]object.Object, 0, len(h.objects)-len(h.freeList))
-	indexMap := map[uint32]uint32{}
-
-	for current := range h.objects {
-		if _, found := h.freeList[uint32(current)]; !found {
-			arr = append(arr, h.objects[current])
-			indexMap[uint32(current)] = uint32(len(arr) - 1)
-		}
-		current++
-	}
-
-	deleteMap := map[uint32]struct{}{}
-
-	for k, v := range allocator {
-		if new, found := indexMap[v]; found {
-			allocator[k] = new
-		} else {
-			deleteMap[k] = struct{}{}
-		}
-	}
-
-	for k := range deleteMap {
-		delete(allocator, k)
-	}
-
-	h.freeList = map[uint32]struct{}{}
-	h.objects = arr
 }

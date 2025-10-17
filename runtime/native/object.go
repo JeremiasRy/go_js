@@ -325,7 +325,7 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
-					val := value.EncodeHandle(allocator.Allocate(NewString(k)))
+					val := value.EncodeHandle(allocator.Allocate(NewLightString(k)))
 					r[v.init-1] = val
 				}
 				// remove __proto__

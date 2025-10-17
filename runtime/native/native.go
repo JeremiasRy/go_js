@@ -185,25 +185,22 @@ func TypeDecoratedString(v value.Value) string {
 
 				return b.String()
 			}
-		case *ObjString:
+		case *ObjString, *LightString, *ObjStringBuilder:
 			{
-				return fmt.Sprintf("'%s'", obj.Value)
-			}
-		case *LightString:
-			{
-
-				return fmt.Sprintf("'%s'", obj)
+				return fmt.Sprintf("'%s'", obj.String())
 			}
 		case *ObjArr:
 			{
 				var b strings.Builder
 				fmt.Fprint(&b, "[")
-				for i, v := range obj.Values() {
-					fmt.Fprintf(&b, " %s", TypeDecoratedString(v))
-					if i != len(obj.Values())-1 {
+
+				for i, item := range obj.items {
+					fmt.Fprintf(&b, " %s", TypeDecoratedString(item))
+					if i < len(obj.items)-1 {
 						fmt.Fprint(&b, ",")
 					}
 				}
+
 				fmt.Fprint(&b, " ]")
 				return b.String()
 			}

@@ -495,7 +495,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	}
 
 	for {
-		//	time.Sleep(time.Millisecond * 100)
+		// time.Sleep(time.Millisecond * 100)
 		code := c.Code[ip]
 		ip++
 
@@ -1534,13 +1534,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arg := vm.pop()
 						arr := fn.Keys(arg)
 
-						length := len(arr)
-						objArr := native.NewArray(length)
-
-						for _, item := range arr {
-							objArr.PushElement(item)
-						}
-
+						objArr := native.NewArrayFrom(arr)
 						v := value.EncodeHandle(allocator.Allocate(objArr))
 						vm.push(v)
 					}
@@ -1549,12 +1543,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arg := vm.pop()
 						arr := fn.Values(arg)
 
-						length := len(arr)
-						objArr := native.NewArray(length)
-
-						for _, item := range arr {
-							objArr.PushElement(item)
-						}
+						objArr := native.NewArrayFrom(arr)
 
 						v := value.EncodeHandle(allocator.Allocate(objArr))
 						vm.push(v)
