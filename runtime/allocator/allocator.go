@@ -34,6 +34,7 @@ func CreateHeapScope() (scope int) {
 }
 
 func Allocate(obj object.Object) uint32 {
+
 	if obj.Type() == object.OBJ_STRING {
 		val := obj.String()
 		if ptr, found := strings[val]; found {

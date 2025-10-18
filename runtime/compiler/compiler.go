@@ -46,6 +46,7 @@ type Variable struct {
 	init       bool // used in for of loops
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
 	fn         object.Callable
+	allocated  bool // for imported functions
 }
 
 var ThisVariable *Variable = &Variable{scope: THIS}
@@ -442,13 +443,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			})
 
 			for _, variable := range functions {
-				fnValue := allocator.Allocate(variable.fn)
+				if !variable.allocated {
+					fnValue := allocator.Allocate(variable.fn)
 
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-				if module {
-					fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
-				} else {
-					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
+					if module {
+						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+					} else {
+						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+					}
+					variable.allocated = true
 				}
 			}
 
@@ -609,6 +613,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			for _, variable := range functions {
 				fnValue := allocator.Allocate(variable.fn)
+
 				slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 
 				if uint8(variable.slot) != slot {

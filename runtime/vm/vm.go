@@ -472,7 +472,22 @@ func (vm *VM) runGC() {
 	if !vm.main {
 		return
 	}
-	allocator.RequestGC(append(vm.stack[:vm.stackTop], globals...))
+	g := map[uint32]value.Value{}
+
+	for _, v := range globals {
+		if v.IsObject() {
+			ptr := allocator.GetPointer(v.GetHandle())
+			g[ptr] = v
+		}
+	}
+
+	glob := []value.Value{}
+
+	for _, v := range g {
+		glob = append(glob, v)
+	}
+
+	allocator.RequestGC(append(vm.stack[:vm.stackTop], glob...))
 }
 
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
@@ -1106,7 +1121,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.LightString:
 					{
-
 						boxed := native.NewObjString(obj.String())
 						v := boxed.GetMember(member)
 
@@ -1118,13 +1132,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 							if _, ok := member.(object.NeedsContext); ok {
 								vm.push(objValue)
-								vm.push(value.EncodeHandle(allocator.Allocate(member)))
+								vm.push(v)
 								vm.push(value.TAG_METHOD_HANDLE)
 								continue
 							}
 						}
 						vm.push(v)
-
 					}
 				case *native.ObjStringBuilder:
 					{
