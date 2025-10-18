@@ -83,6 +83,7 @@ func markAndSweep(stackValues []value.Value) {
 
 func (heap *Heap) sweep() {
 	count := len(heap.freeList)
+
 	for i, obj := range heap.objects {
 		if obj.Marked() {
 			obj.Clear()
@@ -90,10 +91,13 @@ func (heap *Heap) sweep() {
 			heap.freeList[uint32(i)] = struct{}{}
 		}
 	}
+
 	if debug {
 		fmt.Printf("Cleaned up %d objects\n", len(heap.freeList)-count)
 	}
+
 	defragment()
+
 }
 
 func defragment() {

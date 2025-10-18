@@ -78,6 +78,7 @@ func initObjectPrototype() {
 		KEY_PROTO,
 		KEY_TOSTRING,
 		KEY_HASOWNPROPERTY,
+		KEY_MESSAGE,
 	)
 }
 
@@ -220,6 +221,7 @@ func initMapPrototype() {
 		KEY_SET,
 		KEY_GET,
 		KEY_KEYS,
+		KEY_SIZE,
 	)
 }
 
