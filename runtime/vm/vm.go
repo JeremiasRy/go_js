@@ -512,7 +512,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 		if vm.debug {
 			fmt.Println(f.fn.String())
-			printStack(vm.stack[0:vm.stackTop])
+			printStack(vm.stack[:vm.stackTop])
 			fmt.Println(opNames[code])
 		}
 
@@ -2016,13 +2016,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				classObj, _ := allocator.GetObject(class.GetHandle())
 				protoObj, _ := allocator.GetObject(proto.GetHandle())
-
-				classObj.(*native.ObjClass).SetPrototype(protoObj.(*native.Prototype))
+				protoObj.(*native.Prototype).SetMember(native.KEY_PROTO, native.PROTOTYPE_OBJECT)
+				classObj.(*native.ObjClass).SetPrototype(proto)
 			}
 		case chunk.OP_PUSH_METHOD:
 			{
 				method := vm.pop()
-
 				methodObj, err := allocator.GetObject(method.GetHandle())
 
 				if err != nil {
@@ -2032,14 +2031,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if m, ok := methodObj.(object.Callable); ok {
 					if m.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
 						m = m.Clone()
+						method = value.EncodeHandle(allocator.Allocate(m))
 					}
-					method = value.EncodeHandle(allocator.Allocate(m))
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s was not an function", native.String(method))
 				}
 
 				key := vm.pop()
-
 				prototype := vm.peek()
 
 				protoObj, err := allocator.GetObject(prototype.GetHandle())

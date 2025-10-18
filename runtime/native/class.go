@@ -3,7 +3,6 @@ package native
 import (
 	"fmt"
 
-	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
 )
@@ -51,9 +50,8 @@ func (oc *ObjClass) PushProperty(k value.Value, v value.Value) {
 	oc.properties[k] = v
 }
 
-func (oc *ObjClass) SetPrototype(prototype *Prototype) {
-	prototype.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
-	oc.SetMember(KEY_PROTO, value.EncodeHandle(allocator.Allocate(prototype)))
+func (oc *ObjClass) SetPrototype(proto value.Value) {
+	oc.SetMember(KEY_PROTO, proto)
 }
 
 type Instance struct {
