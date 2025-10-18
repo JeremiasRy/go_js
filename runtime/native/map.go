@@ -9,9 +9,8 @@ import (
 
 type Map struct {
 	ObjObject
-	init    int
-	values  map[value.Value]ObjectValueEntry
-	handles map[value.Value]value.Value
+	init   int
+	values map[value.Value]ObjectValueEntry
 }
 
 func (m *Map) String() string {
@@ -22,11 +21,31 @@ func (*Map) Type() object.ObjType {
 	return object.OBJ_MAP
 }
 
+func (o *Map) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range o.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	for k, v := range o.values {
+
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+
+		if k.IsObject() {
+			arr = append(arr, k)
+		}
+	}
+	return arr
+}
+
 func NewMap() *Map {
 	m := &Map{}
 	m.Members = map[string]ObjectValueEntry{}
 	m.values = map[value.Value]ObjectValueEntry{}
-	m.handles = map[value.Value]value.Value{}
 
 	m.SetMember(KEY_PROTO, PROTOTYPE_MAP)
 	m.SetMember(KEY_SIZE, value.ValueFromFloat64(0))
@@ -37,7 +56,7 @@ func (m *Map) Keys() []value.Value {
 	r := make([]value.Value, len(m.values))
 
 	for k, item := range m.values {
-		r[item.init] = m.handles[k]
+		r[item.init] = k
 	}
 
 	return r
@@ -79,13 +98,23 @@ func NewMapSet() *MapSet {
 }
 
 func (*MapSet) Set(owner *Map, k value.Value, v value.Value) {
-	// handles can point to the same object so we'll modify our key to contain the actual pointer
 	if k.IsObject() {
-		ptr := value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
-		owner.handles[ptr] = k
-		k = ptr
-	}
+		keyPtr := allocator.GetPointer(k.GetHandle())
 
+		for k := range owner.values {
+			if !k.IsObject() {
+				continue
+			}
+			if allocator.GetPointer(k.GetHandle()) == keyPtr {
+
+				entry := owner.values[k]
+				entry.Value = v
+
+				owner.values[k] = entry
+				return
+			}
+		}
+	}
 	if _, found := owner.values[k]; found {
 		entry := owner.values[k]
 		entry.Value = v
@@ -115,7 +144,16 @@ func NewMapGet() *MapGet {
 
 func (*MapGet) Get(owner *Map, k value.Value) value.Value {
 	if k.IsObject() {
-		k = value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
+		kPtr := allocator.GetPointer(k.GetHandle())
+
+		for k, v := range owner.values {
+			if !k.IsObject() {
+				continue
+			}
+			if allocator.GetPointer(k.GetHandle()) == kPtr {
+				return v.Value
+			}
+		}
 	}
 	if v, found := owner.values[k]; found {
 		return v.Value
@@ -134,8 +172,18 @@ func NewMapHas() *MapHas {
 }
 
 func (*MapHas) Has(owner *Map, k value.Value) value.Value {
+
 	if k.IsObject() {
-		k = value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
+		kPtr := allocator.GetPointer(k.GetHandle())
+
+		for k := range owner.values {
+			if !k.IsObject() {
+				continue
+			}
+			if allocator.GetPointer(k.GetHandle()) == kPtr {
+				return value.TRUE
+			}
+		}
 	}
 	if _, found := owner.values[k]; found {
 		return value.TRUE

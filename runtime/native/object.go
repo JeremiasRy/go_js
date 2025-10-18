@@ -13,8 +13,31 @@ type ObjectValueEntry struct {
 }
 
 type ObjObject struct {
+	marked  bool
 	init    int
 	Members map[string]ObjectValueEntry
+}
+
+func (o *ObjObject) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range o.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+	return arr
+}
+
+func (o *ObjObject) Mark() {
+	o.marked = true
+}
+
+func (o *ObjObject) Marked() bool {
+	return o.marked
+}
+
+func (o *ObjObject) Clear() {
+	o.marked = false
 }
 
 func NewObjectHash() *ObjObject {
@@ -51,7 +74,7 @@ func (o *ObjObject) Keys() []value.Value {
 		if k == PROTOTYPE_PROPERTY_STRING {
 			continue
 		}
-		keys = append(keys, value.EncodeHandle(allocator.Allocate(LightString(k))))
+		keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
 	}
 
 	p := o.Members[PROTOTYPE_PROPERTY_STRING].Value
@@ -63,16 +86,20 @@ func (o *ObjObject) Keys() []value.Value {
 				if k == PROTOTYPE_PROPERTY_STRING {
 					continue
 				}
-				keys = append(keys, value.EncodeHandle(allocator.Allocate(LightString(k))))
+				keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
 			}
 		}
-		p = obj.(object.Hashable).GetMember(KEY_PROTO)
+		if obj, ok := obj.(object.Hashable); ok {
+			p = obj.GetMember(KEY_PROTO)
+		} else {
+			p = value.NULL
+		}
 	}
 	return keys
 }
 
 func (o *ObjObject) Values() []value.Value {
-	panic("sorry not implemented yet")
+	panic("unimplemented")
 }
 
 type ToString struct {
@@ -298,7 +325,7 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
-					val := value.EncodeHandle(allocator.Allocate(NewString(k)))
+					val := value.EncodeHandle(allocator.Allocate(NewLightString(k)))
 					r[v.init-1] = val
 				}
 				// remove __proto__

@@ -30,6 +30,36 @@ func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator
 
 }
 
+func (i *ObjGenerator) Mark() {
+	i.marked = true
+}
+
+func (i *ObjGenerator) Marked() bool {
+	return i.marked
+}
+
+func (i *ObjGenerator) Clear() {
+	i.marked = false
+}
+
+func (i *ObjGenerator) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+
+	for _, v := range i.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	for _, v := range append(i.Locals, i.ValueChunk().Constants...) {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+
+	return arr
+}
+
 func (gn *ObjGenerator) Clone() object.Callable {
 	clone := *gn
 	return &clone

@@ -92,6 +92,7 @@ func NewObject() *ObjObject {
 }
 
 type ArrayConstructor struct {
+	ObjObject
 }
 
 func (*ArrayConstructor) String() string {
@@ -115,7 +116,9 @@ func (ac *ArrayConstructor) New(params ...any) *ObjArr {
 	return arr
 }
 
-type StringConstructor struct{}
+type StringConstructor struct {
+	ObjObject
+}
 
 func (*StringConstructor) String() string {
 	return "function String"
@@ -197,7 +200,9 @@ func (st *SetTimeout) Clone() *SetTimeout {
 	return &clone
 }
 
-type MapConstructor struct{}
+type MapConstructor struct {
+	ObjObject
+}
 
 func NewMapConstructor() *MapConstructor {
 	return &MapConstructor{}
@@ -215,7 +220,9 @@ func (*MapConstructor) New(params ...any) (object.Object, error) {
 	return NewMap(), nil
 }
 
-type SetConstructor struct{}
+type SetConstructor struct {
+	ObjObject
+}
 
 func NewSetConstructor() *SetConstructor {
 	return &SetConstructor{}

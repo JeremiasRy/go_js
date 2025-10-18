@@ -24,7 +24,7 @@ func NewObjectConsole() *Console {
 	c.Members = map[string]ObjectValueEntry{}
 	c.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
-	log := value.EncodeHandle(allocator.Allocate(LightString("log")))
+	log := value.EncodeHandle(allocator.Allocate(NewLightString("log")))
 
 	c.SetMember(log, value.EncodeHandle(allocator.Allocate(NewLog())))
 	return c

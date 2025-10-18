@@ -65,6 +65,10 @@ type Job interface {
 type Object interface {
 	Type() ObjType
 	String() string
+	Mark()
+	Marked() bool
+	Clear()
+	GetReferencingValues() []value.Value
 }
 
 type Hashable interface {

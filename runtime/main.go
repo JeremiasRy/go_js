@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"go_js/allocator"
 	"go_js/compiler"
 	"go_js/eventloop"
 	"go_js/native"
@@ -26,6 +27,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "Could not create CPU profile: %v\n", err)
 			os.Exit(1)
 		}
+
 		defer f.Close()
 
 		if err := pprof.StartCPUProfile(f); err != nil {
@@ -71,6 +73,7 @@ func main() {
 	native.Init()
 
 	main, err := compiler.Compile(ast)
+	allocator.InitGC(main.ValueChunk().Constants, debug)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
@@ -81,7 +84,7 @@ func main() {
 	queue.Init(&wg)
 	eventloop.Init(&wg)
 
-	vm := vm.NewVM(debug)
+	vm := vm.NewVM(debug, true)
 
 	go eventloop.Start()
 	go vm.Run(&wg)

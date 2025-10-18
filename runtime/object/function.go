@@ -1,6 +1,8 @@
 package object
 
-import "go_js/value"
+import (
+	"go_js/value"
+)
 
 type Ctx struct{}
 type NeedsContext interface {
@@ -11,6 +13,7 @@ func (Ctx) Context() {}
 
 type ObjFunction struct {
 	Ctx
+	marked    bool
 	Name      string
 	Chunk     *value.ValueChunk
 	Arity     int
@@ -31,6 +34,28 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 		Arity:     arity,
 		HeapScope: NOT_IN_HEAP_SCOPE,
 	}
+}
+
+func (fn *ObjFunction) Mark() {
+	fn.marked = true
+}
+
+func (fn *ObjFunction) Marked() bool {
+	return fn.marked
+}
+
+func (fn *ObjFunction) Clear() {
+	fn.marked = false
+}
+
+func (fn *ObjFunction) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range fn.ValueChunk().Constants {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+	return arr
 }
 
 func (fn *ObjFunction) Clone() Callable {

@@ -3,7 +3,6 @@ package native
 import (
 	"fmt"
 
-	"go_js/allocator"
 	"go_js/object"
 	"go_js/value"
 )
@@ -22,6 +21,21 @@ func (oc *ObjClass) String() string {
 	return fmt.Sprintf("[class %s]", oc.name)
 }
 
+func (o *ObjClass) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range o.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	for k, v := range o.properties {
+		arr = append(arr, k, v)
+	}
+
+	return arr
+}
+
 func NewObjClass(name string) *ObjClass {
 	oc := &ObjClass{
 		name:       name,
@@ -36,9 +50,8 @@ func (oc *ObjClass) PushProperty(k value.Value, v value.Value) {
 	oc.properties[k] = v
 }
 
-func (oc *ObjClass) SetPrototype(prototype *Prototype) {
-	prototype.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
-	oc.SetMember(KEY_PROTO, value.EncodeHandle(allocator.Allocate(prototype)))
+func (oc *ObjClass) SetPrototype(proto value.Value) {
+	oc.SetMember(KEY_PROTO, proto)
 }
 
 type Instance struct {

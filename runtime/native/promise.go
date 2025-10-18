@@ -43,6 +43,20 @@ func NewPromise() *ObjPromise {
 	return promise
 }
 
+func (op *ObjPromise) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+
+	arr = append(arr, op.Value)
+
+	for _, v := range op.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	return arr
+}
+
 func (op *ObjPromise) Type() object.ObjType {
 	return object.OBJ_PROMISE
 }
@@ -103,7 +117,12 @@ func (pCtor *PromiseConstructor) String() string {
 
 type ResolveFunc struct {
 	object.Ctx
-	owner *ObjPromise
+	owner  *ObjPromise
+	marked bool
+}
+
+func (*ResolveFunc) GetReferencingValues() []value.Value {
+	return []value.Value{}
 }
 
 func NewResolveFunc(owner *ObjPromise) *ResolveFunc {
@@ -116,6 +135,18 @@ func (*ResolveFunc) Type() object.ObjType {
 
 func (*ResolveFunc) String() string {
 	return "function Resolve"
+}
+
+func (o *ResolveFunc) Mark() {
+	o.marked = true
+}
+
+func (o *ResolveFunc) Marked() bool {
+	return o.marked
+}
+
+func (o *ResolveFunc) Clear() {
+	o.marked = false
 }
 
 func (resolve *ResolveFunc) Resolve(v value.Value) {

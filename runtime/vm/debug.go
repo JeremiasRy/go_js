@@ -2,6 +2,8 @@ package vm
 
 import (
 	"fmt"
+	"strings"
+
 	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"
@@ -207,7 +209,7 @@ func printFunction(c value.ValueChunk) {
 func printStack(stack []value.Value) {
 	print("[")
 	for i, val := range stack {
-		fmt.Printf("%s", native.TypeDecoratedString(val))
+		fmt.Printf("%s", strings.ReplaceAll(native.TypeDecoratedString(val), "\n", "\\n"))
 		if i < len(stack)-1 {
 			fmt.Print(" | ")
 		}

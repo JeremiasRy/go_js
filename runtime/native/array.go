@@ -32,6 +32,17 @@ func NewArrayFrom(items []value.Value) *ObjArr {
 	return arrObj
 }
 
+func (oa *ObjArr) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range oa.items {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+
+	return arr
+}
+
 func (oa *ObjArr) GetElementAt(i int) value.Value {
 	return oa.items[i]
 }
@@ -161,7 +172,7 @@ func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
 	}
 
 	res := strings.Join(i, s)
-	return value.EncodeHandle(allocator.Allocate(LightString(res)))
+	return value.EncodeHandle(allocator.Allocate(NewLightString(res)))
 }
 
 type ArrayReverse struct {

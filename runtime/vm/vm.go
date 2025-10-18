@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 const STACK_MAX = math.MaxUint8
@@ -25,8 +26,6 @@ const FRAMES_MAX = 64
 var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
 var imports = make(map[string]value.Value)
-var heapVars = make(map[int][]value.Value)
-var heapScopesCount int
 
 type CallFrame struct {
 	fn         object.Callable
@@ -62,9 +61,10 @@ type VM struct {
 	exports *native.ObjObject
 
 	debug bool
+	main  bool
 }
 
-func NewVM(debug bool) *VM {
+func NewVM(debug bool, main bool) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
 
@@ -75,6 +75,7 @@ func NewVM(debug bool) *VM {
 		stackTop:       0,
 		exceptionStack: []ExceptionState{},
 		debug:          debug,
+		main:           main,
 	}
 }
 
@@ -106,13 +107,13 @@ func (vm *VM) getGlobal(global int) value.Value {
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
 	if !a.IsObject() && b.IsObject() {
-		a = value.EncodeHandle(allocator.Allocate(native.LightString(native.String(a))))
+		a = value.EncodeHandle(allocator.Allocate(native.NewLightString(native.String(a))))
 	}
 
 	if a.IsObject() {
 		var bObj object.Object
 		if !b.IsObject() {
-			bObj = native.LightString(native.String(b))
+			bObj = native.NewLightString(native.String(b))
 		}
 		aObj, _ := allocator.GetObject(a.GetHandle())
 
@@ -126,7 +127,7 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						aObj.Concatenate(string(str.Flush()))
+						aObj.Concatenate(str.Flush().String())
 					}
 				default:
 					{
@@ -135,13 +136,13 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				}
 				return a
 			}
-		case native.LightString:
+		case *native.LightString:
 			{
 				builder := native.NewStringBuilder(aObj)
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						builder.Concatenate(string(str.Flush()))
+						builder.Concatenate(str.Flush().String())
 					}
 				default:
 					{
@@ -156,11 +157,11 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + string(str.Flush()))))
+						return value.EncodeHandle(allocator.Allocate(native.NewLightString(aObj.String() + str.Flush().String())))
 					}
 				default:
 					{
-						return value.EncodeHandle(allocator.Allocate(native.LightString(aObj.String() + bObj.String())))
+						return value.EncodeHandle(allocator.Allocate(native.NewLightString(aObj.String() + bObj.String())))
 					}
 				}
 			}
@@ -201,7 +202,7 @@ func compBoolToNum(boolean value.Value, number value.Value) bool {
 func compNumToObject(num value.Value, obj object.Object) bool {
 	numString := strconv.FormatFloat(num.AsNumber(), 'f', -1, 64)
 	switch obj := obj.(type) {
-	case native.LightString:
+	case *native.LightString:
 		return numString == obj.String()
 	case *native.ObjString:
 		return numString == obj.String()
@@ -222,7 +223,7 @@ func compBoolToObject(boolean value.Value, obj object.Object) bool {
 	str := ""
 
 	switch obj := obj.(type) {
-	case native.LightString:
+	case *native.LightString:
 		str = obj.String()
 	case *native.ObjString:
 		str = obj.String()
@@ -323,9 +324,7 @@ func truthyValue(v value.Value) bool {
 		switch obj := obj.(type) {
 		case *native.ObjString:
 			return len(obj.Value) > 0
-		case native.LightString:
-			return len(string(obj)) > 0
-		case *native.StringConstructor:
+		case *native.LightString, *native.StringConstructor:
 			return len(obj.String()) > 0
 		default:
 			return true
@@ -469,6 +468,28 @@ Run:
 	wg.Done()
 }
 
+func (vm *VM) runGC() {
+	if !vm.main {
+		return
+	}
+	g := map[uint32]value.Value{}
+
+	for _, v := range globals {
+		if v.IsObject() {
+			ptr := allocator.GetPointer(v.GetHandle())
+			g[ptr] = v
+		}
+	}
+
+	glob := []value.Value{}
+
+	for _, v := range g {
+		glob = append(glob, v)
+	}
+
+	allocator.RequestGC(append(vm.stack[:vm.stackTop], glob...))
+}
+
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	ip := 0
 
@@ -484,6 +505,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			for _, v := range promise.State.Stack {
 				vm.push(v)
 			}
+			allocator.ClearAsyncFunctionStack(uintptr(unsafe.Pointer(promise)))
 
 			ip = promise.State.Ip
 		}
@@ -497,13 +519,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	}
 
 	for {
-		//	time.Sleep(time.Millisecond * 100)
+		// time.Sleep(time.Millisecond * 100)
 		code := c.Code[ip]
 		ip++
 
+		if allocator.ShouldRunGCCycle() {
+			vm.runGC()
+		}
+
 		if vm.debug {
 			fmt.Println(f.fn.String())
-			printStack(vm.stack[0:vm.stackTop])
+			printStack(vm.stack[:vm.stackTop])
 			fmt.Println(opNames[code])
 		}
 
@@ -812,18 +838,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					variable = vm.pop()
 					vm.pop() // pop this context
 				}
-				if scope, found := heapVars[f.fn.GetHeapScope()]; found {
-					scope = append(scope, variable)
-					heapVars[f.fn.GetHeapScope()] = scope
-				} else {
-					panic("no heap scope generated for function")
-				}
+				allocator.DefineHeapVar(f.fn.GetHeapScope(), variable)
 			}
 		case chunk.OP_GET_HEAP_VAR:
 			{
-				heapVar := c.Code[ip]
+				slot := c.Code[ip]
 				ip++
-				v := heapVars[f.fn.GetHeapScope()][heapVar]
+				v := allocator.GetHeapVar(f.fn.GetHeapScope(), int(slot))
 				if v.IsObject() {
 					obj, err := allocator.GetObject(v.GetHandle())
 
@@ -842,9 +863,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_SET_HEAP_VAR:
 			{
-				heapVar := c.Code[ip]
+				slot := c.Code[ip]
 				ip++
-				heapVars[f.fn.GetHeapScope()][heapVar] = vm.pop()
+				allocator.SetHeapVar(f.fn.GetHeapScope(), int(slot), vm.pop())
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
@@ -1100,9 +1121,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(v)
 						}
 					}
-				case native.LightString:
+				case *native.LightString:
 					{
-
 						boxed := native.NewObjString(obj.String())
 						v := boxed.GetMember(member)
 
@@ -1114,17 +1134,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 							if _, ok := member.(object.NeedsContext); ok {
 								vm.push(objValue)
-								vm.push(value.EncodeHandle(allocator.Allocate(member)))
+								vm.push(v)
 								vm.push(value.TAG_METHOD_HANDLE)
 								continue
 							}
 						}
 						vm.push(v)
-
 					}
 				case *native.ObjStringBuilder:
 					{
-						boxed := native.NewObjString(string(obj.Flush()))
+						boxed := native.NewObjString(obj.Flush().String())
 						v := boxed.GetMember(member)
 
 						if v.IsObject() {
@@ -1292,7 +1311,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if err != nil {
 							return value.UNDEFINED, err
 						}
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1322,7 +1341,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1368,7 +1387,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1411,7 +1430,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 								item := iterator.Current()
@@ -1535,13 +1554,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arg := vm.pop()
 						arr := fn.Keys(arg)
 
-						length := len(arr)
-						objArr := native.NewArray(length)
-
-						for _, item := range arr {
-							objArr.PushElement(item)
-						}
-
+						objArr := native.NewArrayFrom(arr)
 						v := value.EncodeHandle(allocator.Allocate(objArr))
 						vm.push(v)
 					}
@@ -1550,12 +1563,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arg := vm.pop()
 						arr := fn.Values(arg)
 
-						length := len(arr)
-						objArr := native.NewArray(length)
-
-						for _, item := range arr {
-							objArr.PushElement(item)
-						}
+						objArr := native.NewArrayFrom(arr)
 
 						v := value.EncodeHandle(allocator.Allocate(objArr))
 						vm.push(v)
@@ -1826,10 +1834,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
-				heapScopesCount++
-				heapVars[heapScopesCount] = []value.Value{}
-				setHeapScopes(f.fn.ValueChunk(), heapScopesCount)
-				f.fn.SetHeapScope(heapScopesCount)
+				scope := allocator.CreateHeapScope()
+				setHeapScopes(f.fn.ValueChunk(), scope)
+				f.fn.SetHeapScope(scope)
 			}
 		case chunk.OP_TRY_BLOCK_START:
 			{
@@ -1865,7 +1872,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						if constructor, ok := obj.(object.Callable); ok {
-							builder := NewVM(vm.debug)
+							builder := NewVM(vm.debug, false)
 							fn := object.NewFunction("builder", 0, nil)
 							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
 							instance := value.EncodeHandle(allocator.Allocate(instance))
@@ -1919,7 +1926,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						resolveHandle := allocator.Allocate(resolve)
 
 						if executor, ok := executor.(object.Callable); ok {
-							runner := NewVM(vm.debug)
+							runner := NewVM(vm.debug, false)
 							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount, false)
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run(f, c)
@@ -1959,6 +1966,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						copy(stack, append(vm.stack[f.localStart:vm.stackTop], awaitee))
 						curentAsyncFn.Pause(stack, ip)
 						curentAsyncFn.Await(promise)
+						allocator.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
 
 						vm.frameCount--
 
@@ -1981,7 +1989,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					idx := int(c.Code[ip])
 					removeMap[idx] = true
 					ip++
-					heapVars[f.fn.GetHeapScope()] = append(heapVars[f.fn.GetHeapScope()], vm.stack[f.localStart+idx])
+					allocator.DefineHeapVar(f.fn.GetHeapScope(), vm.stack[f.localStart+idx])
 				}
 
 				localCount := (vm.stackTop - f.localStart) - int(amount)
@@ -2023,13 +2031,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				classObj, _ := allocator.GetObject(class.GetHandle())
 				protoObj, _ := allocator.GetObject(proto.GetHandle())
-
-				classObj.(*native.ObjClass).SetPrototype(protoObj.(*native.Prototype))
+				protoObj.(*native.Prototype).SetMember(native.KEY_PROTO, native.PROTOTYPE_OBJECT)
+				classObj.(*native.ObjClass).SetPrototype(proto)
 			}
 		case chunk.OP_PUSH_METHOD:
 			{
 				method := vm.pop()
-
 				methodObj, err := allocator.GetObject(method.GetHandle())
 
 				if err != nil {
@@ -2039,14 +2046,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if m, ok := methodObj.(object.Callable); ok {
 					if m.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
 						m = m.Clone()
+						method = value.EncodeHandle(allocator.Allocate(m))
 					}
-					method = value.EncodeHandle(allocator.Allocate(m))
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s was not an function", native.String(method))
 				}
 
 				key := vm.pop()
-
 				prototype := vm.peek()
 
 				protoObj, err := allocator.GetObject(prototype.GetHandle())
@@ -2130,7 +2136,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("failed to parser module %e", err)
 				}
 
-				importer := NewVM(vm.debug)
+				importer := NewVM(vm.debug, false)
 
 				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
 				importer.run(f, c)
