@@ -22,6 +22,21 @@ func (oc *ObjClass) String() string {
 	return fmt.Sprintf("[class %s]", oc.name)
 }
 
+func (o *ObjClass) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	for _, v := range o.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	for k, v := range o.properties {
+		arr = append(arr, k, v)
+	}
+
+	return arr
+}
+
 func NewObjClass(name string) *ObjClass {
 	oc := &ObjClass{
 		name:       name,

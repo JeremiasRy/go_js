@@ -3,13 +3,35 @@ package allocator
 import (
 	"fmt"
 	"go_js/object"
+	"go_js/value"
 )
 
+var heapScopesCount = 0
+var heapVars = make(map[int][]value.Value)
 var allocator = make(map[uint32]uint32)
 var strings = make(map[string]uint32)
 var handleCount uint32 = 0
 var h = NewHeap()
 var clean = false
+
+func GetHeapVar(scope int, slot int) value.Value {
+	return heapVars[scope][slot]
+}
+
+func SetHeapVar(scope int, slot int, v value.Value) {
+	heapVars[scope][slot] = v
+}
+
+func DefineHeapVar(scope int, v value.Value) {
+	heapVars[scope] = append(heapVars[scope], v)
+}
+
+func CreateHeapScope() (scope int) {
+	heapScopesCount++
+	heapVars[heapScopesCount] = []value.Value{}
+	scope = heapScopesCount
+	return scope
+}
 
 func Allocate(obj object.Object) uint32 {
 	if obj.Type() == object.OBJ_STRING {

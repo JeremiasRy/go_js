@@ -84,7 +84,7 @@ func main() {
 	queue.Init(&wg)
 	eventloop.Init(&wg)
 
-	vm := vm.NewVM(debug)
+	vm := vm.NewVM(debug, true)
 
 	go eventloop.Start()
 	go vm.Run(&wg)

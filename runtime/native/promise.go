@@ -43,6 +43,20 @@ func NewPromise() *ObjPromise {
 	return promise
 }
 
+func (op *ObjPromise) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+
+	arr = append(arr, op.Value)
+
+	for _, v := range op.Members {
+		if v.Value.IsObject() {
+			arr = append(arr, v.Value)
+		}
+	}
+
+	return arr
+}
+
 func (op *ObjPromise) Type() object.ObjType {
 	return object.OBJ_PROMISE
 }

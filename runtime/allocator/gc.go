@@ -9,12 +9,13 @@ import (
 )
 
 type GarbageCollector struct {
-	roots     []value.Value
-	greyStack []object.Object
-	stats     *runtime.MemStats
+	roots              []value.Value
+	asyncWorkKeepAlive map[uintptr][]value.Value
+	greyStack          []object.Object
+	stats              *runtime.MemStats
 }
 
-var gc = &GarbageCollector{stats: &runtime.MemStats{}}
+var gc = &GarbageCollector{stats: &runtime.MemStats{}, asyncWorkKeepAlive: map[uintptr][]value.Value{}}
 var debug = false
 
 func pushGrey(o object.Object) {
@@ -34,6 +35,7 @@ func popGrey() object.Object {
 func markAndSweep(stackValues []value.Value) {
 	if debug {
 		fmt.Println("-- GC DEBUG --")
+		fmt.Printf("Stack values %d\n", len(stackValues))
 	}
 
 	for _, v := range append(gc.roots, stackValues...) {
@@ -43,11 +45,30 @@ func markAndSweep(stackValues []value.Value) {
 		}
 	}
 
+	for _, items := range gc.asyncWorkKeepAlive {
+		for _, v := range items {
+			if v.IsObject() {
+				obj, _ := GetObject(v.GetHandle())
+				pushGrey(obj)
+			}
+		}
+	}
+
 	current := popGrey()
 
 	for current != nil {
 		for _, v := range current.GetReferencingValues() {
 			obj, _ := GetObject(v.GetHandle())
+
+			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
+				for _, v := range heapVars[fn.HeapScope] {
+					if v.IsObject() {
+						obj, _ := GetObject(v.GetHandle())
+						pushGrey(obj)
+					}
+				}
+			}
+
 			pushGrey(obj)
 		}
 		current.Mark()
@@ -134,4 +155,11 @@ func InitGC(roots []value.Value, d bool) {
 
 func PushToRoots(v ...value.Value) {
 	gc.roots = append(gc.roots, v...)
+}
+
+func StoreAsyncFunctionStack(ptr uintptr, v []value.Value) {
+	gc.asyncWorkKeepAlive[ptr] = v
+}
+func ClearAsyncFunctionStack(ptr uintptr) {
+	delete(gc.asyncWorkKeepAlive, ptr)
 }

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 )
 
 const STACK_MAX = math.MaxUint8
@@ -25,8 +26,6 @@ const FRAMES_MAX = 64
 var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
 var imports = make(map[string]value.Value)
-var heapVars = make(map[int][]value.Value)
-var heapScopesCount int
 
 type CallFrame struct {
 	fn         object.Callable
@@ -62,9 +61,10 @@ type VM struct {
 	exports *native.ObjObject
 
 	debug bool
+	main  bool
 }
 
-func NewVM(debug bool) *VM {
+func NewVM(debug bool, main bool) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
 
@@ -75,6 +75,7 @@ func NewVM(debug bool) *VM {
 		stackTop:       0,
 		exceptionStack: []ExceptionState{},
 		debug:          debug,
+		main:           main,
 	}
 }
 
@@ -467,6 +468,13 @@ Run:
 	wg.Done()
 }
 
+func (vm *VM) runGC() {
+	if !vm.main {
+		return
+	}
+	allocator.RequestGC(append(vm.stack[:vm.stackTop], globals...))
+}
+
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	ip := 0
 
@@ -482,6 +490,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			for _, v := range promise.State.Stack {
 				vm.push(v)
 			}
+			allocator.ClearAsyncFunctionStack(uintptr(unsafe.Pointer(promise)))
 
 			ip = promise.State.Ip
 		}
@@ -498,6 +507,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		// time.Sleep(time.Millisecond * 100)
 		code := c.Code[ip]
 		ip++
+
+		vm.runGC()
 
 		if vm.debug {
 			fmt.Println(f.fn.String())
@@ -810,18 +821,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					variable = vm.pop()
 					vm.pop() // pop this context
 				}
-				if scope, found := heapVars[f.fn.GetHeapScope()]; found {
-					scope = append(scope, variable)
-					heapVars[f.fn.GetHeapScope()] = scope
-				} else {
-					panic("no heap scope generated for function")
-				}
+				allocator.DefineHeapVar(f.fn.GetHeapScope(), variable)
 			}
 		case chunk.OP_GET_HEAP_VAR:
 			{
-				heapVar := c.Code[ip]
+				slot := c.Code[ip]
 				ip++
-				v := heapVars[f.fn.GetHeapScope()][heapVar]
+				v := allocator.GetHeapVar(f.fn.GetHeapScope(), int(slot))
 				if v.IsObject() {
 					obj, err := allocator.GetObject(v.GetHandle())
 
@@ -840,9 +846,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_SET_HEAP_VAR:
 			{
-				heapVar := c.Code[ip]
+				slot := c.Code[ip]
 				ip++
-				heapVars[f.fn.GetHeapScope()][heapVar] = vm.pop()
+				allocator.SetHeapVar(f.fn.GetHeapScope(), int(slot), vm.pop())
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
@@ -1005,7 +1011,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				handle := allocator.Allocate(objHash)
 
 				vm.push(value.EncodeHandle(handle))
-				allocator.RequestGC(append(vm.stack[:vm.stackTop], globals...))
 			}
 		case chunk.OP_SET_OBJECT_MEMBER:
 			{
@@ -1291,7 +1296,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if err != nil {
 							return value.UNDEFINED, err
 						}
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1321,7 +1326,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1367,7 +1372,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1410,7 +1415,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 
-						runner := NewVM(vm.debug)
+						runner := NewVM(vm.debug, false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 								item := iterator.Current()
@@ -1814,10 +1819,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
-				heapScopesCount++
-				heapVars[heapScopesCount] = []value.Value{}
-				setHeapScopes(f.fn.ValueChunk(), heapScopesCount)
-				f.fn.SetHeapScope(heapScopesCount)
+				scope := allocator.CreateHeapScope()
+				setHeapScopes(f.fn.ValueChunk(), scope)
+				f.fn.SetHeapScope(scope)
 			}
 		case chunk.OP_TRY_BLOCK_START:
 			{
@@ -1853,7 +1857,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						if constructor, ok := obj.(object.Callable); ok {
-							builder := NewVM(vm.debug)
+							builder := NewVM(vm.debug, false)
 							fn := object.NewFunction("builder", 0, nil)
 							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
 							instance := value.EncodeHandle(allocator.Allocate(instance))
@@ -1907,7 +1911,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						resolveHandle := allocator.Allocate(resolve)
 
 						if executor, ok := executor.(object.Callable); ok {
-							runner := NewVM(vm.debug)
+							runner := NewVM(vm.debug, false)
 							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount, false)
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run(f, c)
@@ -1947,6 +1951,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						copy(stack, append(vm.stack[f.localStart:vm.stackTop], awaitee))
 						curentAsyncFn.Pause(stack, ip)
 						curentAsyncFn.Await(promise)
+						allocator.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
 
 						vm.frameCount--
 
@@ -1969,7 +1974,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					idx := int(c.Code[ip])
 					removeMap[idx] = true
 					ip++
-					heapVars[f.fn.GetHeapScope()] = append(heapVars[f.fn.GetHeapScope()], vm.stack[f.localStart+idx])
+					allocator.DefineHeapVar(f.fn.GetHeapScope(), vm.stack[f.localStart+idx])
 				}
 
 				localCount := (vm.stackTop - f.localStart) - int(amount)
@@ -2118,7 +2123,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("failed to parser module %e", err)
 				}
 
-				importer := NewVM(vm.debug)
+				importer := NewVM(vm.debug, false)
 
 				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
 				importer.run(f, c)
