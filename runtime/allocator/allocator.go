@@ -13,6 +13,11 @@ var strings = make(map[string]uint32)
 var handleCount uint32 = 0
 var h = NewHeap()
 var clean = false
+var gcCycleDeterminator uint32 = 20
+
+func ShouldRunGCCycle() bool {
+	return handleCount%uint32(gcCycleDeterminator) == 0
+}
 
 func GetHeapVar(scope int, slot int) value.Value {
 	return heapVars[scope][slot]
@@ -34,7 +39,6 @@ func CreateHeapScope() (scope int) {
 }
 
 func Allocate(obj object.Object) uint32 {
-
 	if obj.Type() == object.OBJ_STRING {
 		val := obj.String()
 		if ptr, found := strings[val]; found {

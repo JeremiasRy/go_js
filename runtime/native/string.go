@@ -74,7 +74,6 @@ func (osb *ObjStringBuilder) Concatenate(s string) {
 
 func (osb *ObjStringBuilder) Flush() *LightString {
 	str := NewLightString(osb.b.String())
-	osb.b = nil
 	return str
 }
 

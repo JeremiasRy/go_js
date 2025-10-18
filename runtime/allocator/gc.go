@@ -5,17 +5,15 @@ import (
 
 	"go_js/object"
 	"go_js/value"
-	"runtime"
 )
 
 type GarbageCollector struct {
 	roots              []value.Value
 	asyncWorkKeepAlive map[uintptr][]value.Value
 	greyStack          []object.Object
-	stats              *runtime.MemStats
 }
 
-var gc = &GarbageCollector{stats: &runtime.MemStats{}, asyncWorkKeepAlive: map[uintptr][]value.Value{}}
+var gc = &GarbageCollector{asyncWorkKeepAlive: map[uintptr][]value.Value{}}
 var debug = false
 
 func pushGrey(o object.Object) {
@@ -59,7 +57,6 @@ func markAndSweep(stackValues []value.Value) {
 	for current != nil {
 		for _, v := range current.GetReferencingValues() {
 			obj, _ := GetObject(v.GetHandle())
-
 			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
 				for _, v := range heapVars[fn.HeapScope] {
 					if v.IsObject() {
@@ -93,11 +90,18 @@ func (heap *Heap) sweep() {
 	}
 
 	if debug {
-		fmt.Printf("Cleaned up %d objects\n", len(heap.freeList)-count)
+		fmt.Printf("cleaned up %d objects #####\n", len(heap.freeList)-count)
 	}
 
-	defragment()
+	if len(heap.freeList)-count == 0 {
+		gcCycleDeterminator *= 2
+	} else {
+		gcCycleDeterminator /= 2
+	}
 
+	if len(heap.freeList) > 0 && len(heap.objects)/len(heap.freeList) > 1 {
+		defragment()
+	}
 }
 
 func defragment() {

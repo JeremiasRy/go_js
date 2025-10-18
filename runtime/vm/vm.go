@@ -523,7 +523,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		code := c.Code[ip]
 		ip++
 
-		vm.runGC()
+		if allocator.ShouldRunGCCycle() {
+			vm.runGC()
+		}
 
 		if vm.debug {
 			fmt.Println(f.fn.String())
