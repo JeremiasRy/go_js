@@ -66,7 +66,7 @@ func CreateHeapScope() (scope int) {
 }
 
 func (a *Heap) shouldRunGCCycle() bool {
-	return a.handleCount%uint32(a.gcCycleDeterminator) == 0
+	return a.handleCount%a.gcCycleDeterminator == 0
 }
 
 func (a *Heap) getHeapVar(scope, slot int) value.Value {
