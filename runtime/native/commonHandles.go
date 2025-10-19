@@ -23,6 +23,7 @@ var (
 	KEY_SHIFT   value.Value
 	KEY_REVERSE value.Value
 	KEY_LENGTH  value.Value
+	KEY_FILL    value.Value
 
 	// string
 	KEY_INCLUDES    value.Value
@@ -75,6 +76,7 @@ func createCommonHandles() {
 	KEY_JOIN = value.EncodeHandle(allocator.Allocate(NewLightString("join")))
 	KEY_REVERSE = value.EncodeHandle(allocator.Allocate(NewLightString("reverse")))
 	KEY_SHIFT = value.EncodeHandle(allocator.Allocate(NewLightString("shift")))
+	KEY_FILL = value.EncodeHandle(allocator.Allocate(NewLightString("fill")))
 	KEY_LENGTH = value.EncodeHandle(allocator.Allocate(NewLightString("length")))
 
 	KEY_TOSTRING = value.EncodeHandle(allocator.Allocate(NewLightString("toString")))

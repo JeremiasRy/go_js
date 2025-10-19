@@ -100,7 +100,7 @@ func String(v value.Value) string {
 			}
 		case *ObjArr:
 			{
-				return TypeDecoratedString(v)
+				return TypeDecoratedString(v, nil)
 			}
 		case *ObjObject:
 			{
@@ -112,7 +112,7 @@ func String(v value.Value) string {
 					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
-					fmt.Fprintf(&b, " %s: %s", k, TypeDecoratedString(v.Value))
+					fmt.Fprintf(&b, " %s: %s", k, TypeDecoratedString(v.Value, nil))
 					c++
 					if c < l {
 						fmt.Fprint(&b, ", ")
@@ -138,13 +138,23 @@ func String(v value.Value) string {
 	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
 }
 
-func TypeDecoratedString(v value.Value) string {
+func TypeDecoratedString(v value.Value, visited map[uint32]struct{}) string {
 	if v.IsObject() {
 		obj, err := allocator.GetObject(v.GetHandle())
 
 		if err != nil {
 			log.Fatalf("failed to fetch object '%s'", err)
 		}
+
+		if visited == nil {
+			visited = map[uint32]struct{}{}
+		}
+
+		if _, found := visited[allocator.GetPointer(v.GetHandle())]; found {
+			return ""
+		}
+
+		visited[allocator.GetPointer(v.GetHandle())] = struct{}{}
 
 		switch obj := obj.(type) {
 		case *ObjObject:
@@ -158,7 +168,7 @@ func TypeDecoratedString(v value.Value) string {
 						continue
 					}
 					c++
-					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
+					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value, visited))
 					if c < l {
 						fmt.Fprint(&b, ", ")
 					}
@@ -176,7 +186,7 @@ func TypeDecoratedString(v value.Value) string {
 				c := 0
 				for k, v := range obj.Members {
 					c++
-					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value))
+					fmt.Fprintf(&b, "%s: %s", k, TypeDecoratedString(v.Value, visited))
 					if l != c {
 						fmt.Fprint(&b, ",")
 					}
@@ -192,16 +202,20 @@ func TypeDecoratedString(v value.Value) string {
 		case *ObjArr:
 			{
 				var b strings.Builder
-				fmt.Fprint(&b, "[")
+				if len(obj.items) > 25 {
+					fmt.Fprintf(&b, "Array (%d)", len(obj.items))
+				} else {
+					fmt.Fprint(&b, "[")
 
-				for i, item := range obj.items {
-					fmt.Fprintf(&b, " %s", TypeDecoratedString(item))
-					if i < len(obj.items)-1 {
-						fmt.Fprint(&b, ",")
+					for i, item := range obj.items {
+						fmt.Fprintf(&b, " %s", TypeDecoratedString(item, visited))
+						if i < len(obj.items)-1 {
+							fmt.Fprint(&b, ",")
+						}
 					}
-				}
 
-				fmt.Fprint(&b, " ]")
+					fmt.Fprint(&b, " ]")
+				}
 				return b.String()
 			}
 		}

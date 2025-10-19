@@ -209,7 +209,7 @@ func printFunction(c value.ValueChunk) {
 func printStack(stack []value.Value) {
 	print("[")
 	for i, val := range stack {
-		fmt.Printf("%s", strings.ReplaceAll(native.TypeDecoratedString(val), "\n", "\\n"))
+		fmt.Printf("%s", strings.ReplaceAll(native.TypeDecoratedString(val, nil), "\n", "\\n"))
 		if i < len(stack)-1 {
 			fmt.Print(" | ")
 		}

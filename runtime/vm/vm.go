@@ -1474,6 +1474,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.Reverse(arr.(*native.ObjArr))
 						vm.push(thisCtx)
 					}
+				case *native.ArrayFill:
+					{
+						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+						arg := vm.pop()
+
+						fn.Fill(arr.(*native.ObjArr), arg)
+						vm.push(thisCtx)
+					}
 				case *native.StringStartsWith:
 					{
 						arg := vm.pop()

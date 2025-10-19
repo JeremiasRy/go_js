@@ -103,7 +103,7 @@ func (*ArrayConstructor) Type() object.ObjType {
 	return object.OBJ_ARRAY_CONSTRUCTOR
 }
 
-func (ac *ArrayConstructor) New(params ...any) *ObjArr {
+func (*ArrayConstructor) New(params ...any) (object.Object, error) {
 	length := 8 // default length
 
 	if len(params) == 1 {
@@ -112,8 +112,13 @@ func (ac *ArrayConstructor) New(params ...any) *ObjArr {
 		}
 	}
 
-	arr := NewArray(length)
-	return arr
+	from := make([]value.Value, length)
+	for i := range from {
+		from[i] = value.EMPTY_ARRAY_ITEM
+	}
+
+	arr := NewArrayFrom(from)
+	return arr, nil
 }
 
 type StringConstructor struct {

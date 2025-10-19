@@ -99,6 +99,7 @@ func initArrayPrototype() {
 	join := value.EncodeHandle(allocator.Allocate(NewArrayJoin()))
 	shift := value.EncodeHandle(allocator.Allocate(NewArrayShift()))
 	reverse := value.EncodeHandle(allocator.Allocate(NewArrayReverse()))
+	fill := value.EncodeHandle(allocator.Allocate(NewArrayFill()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -110,6 +111,7 @@ func initArrayPrototype() {
 	p.SetMember(KEY_JOIN, join)
 	p.SetMember(KEY_SHIFT, shift)
 	p.SetMember(KEY_REVERSE, reverse)
+	p.SetMember(KEY_FILL, fill)
 	p.SetMember(KEY_LENGTH, value.ValueFromFloat64(0))
 
 	PROTOTYPE_ARRAY = value.EncodeHandle(allocator.Allocate(p))
@@ -123,6 +125,7 @@ func initArrayPrototype() {
 		KEY_JOIN,
 		KEY_SHIFT,
 		KEY_REVERSE,
+		KEY_FILL,
 		KEY_LENGTH,
 	)
 }

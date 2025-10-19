@@ -211,3 +211,20 @@ func (*ArrayShift) Shift(arr *ObjArr) value.Value {
 
 	return v
 }
+
+type ArrayFill struct {
+	ObjNativeFn
+}
+
+func NewArrayFill() *ArrayFill {
+	f := &ArrayFill{}
+	f.name = "fill"
+	return f
+}
+
+func (*ArrayFill) Fill(arr *ObjArr, item value.Value) *ObjArr {
+	for i := range arr.items {
+		arr.items[i] = item
+	}
+	return arr
+}
