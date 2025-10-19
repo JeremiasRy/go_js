@@ -2,7 +2,7 @@ package native
 
 import (
 	"fmt"
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 )
@@ -66,14 +66,14 @@ func initObjectPrototype() {
 	}
 	p.Members = map[string]ObjectValueEntry{}
 
-	handle := value.EncodeHandle(allocator.Allocate(NewToString()))
+	handle := value.EncodeHandle(heap.Allocate(NewToString()))
 	p.SetMember(KEY_PROTO, value.NULL)
 
 	p.SetMember(KEY_TOSTRING, handle)
-	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(allocator.Allocate(NewHasOwnProperty())))
+	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(heap.Allocate(NewHasOwnProperty())))
 
-	PROTOTYPE_OBJECT = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_OBJECT = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_OBJECT,
 		KEY_PROTO,
 		KEY_TOSTRING,
@@ -91,14 +91,15 @@ func initArrayPrototype() {
 	}
 	p.Members = map[string]ObjectValueEntry{}
 
-	filter := value.EncodeHandle(allocator.Allocate(NewArrayFilter()))
-	push := value.EncodeHandle(allocator.Allocate(NewArrayPush()))
-	forEach := value.EncodeHandle(allocator.Allocate(NewArrayForEach()))
-	map_ := value.EncodeHandle(allocator.Allocate(NewArrayMap()))
-	reduce := value.EncodeHandle(allocator.Allocate(NewArrayReduce()))
-	join := value.EncodeHandle(allocator.Allocate(NewArrayJoin()))
-	shift := value.EncodeHandle(allocator.Allocate(NewArrayShift()))
-	reverse := value.EncodeHandle(allocator.Allocate(NewArrayReverse()))
+	filter := value.EncodeHandle(heap.Allocate(NewArrayFilter()))
+	push := value.EncodeHandle(heap.Allocate(NewArrayPush()))
+	forEach := value.EncodeHandle(heap.Allocate(NewArrayForEach()))
+	map_ := value.EncodeHandle(heap.Allocate(NewArrayMap()))
+	reduce := value.EncodeHandle(heap.Allocate(NewArrayReduce()))
+	join := value.EncodeHandle(heap.Allocate(NewArrayJoin()))
+	shift := value.EncodeHandle(heap.Allocate(NewArrayShift()))
+	reverse := value.EncodeHandle(heap.Allocate(NewArrayReverse()))
+	fill := value.EncodeHandle(heap.Allocate(NewArrayFill()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -110,10 +111,11 @@ func initArrayPrototype() {
 	p.SetMember(KEY_JOIN, join)
 	p.SetMember(KEY_SHIFT, shift)
 	p.SetMember(KEY_REVERSE, reverse)
+	p.SetMember(KEY_FILL, fill)
 	p.SetMember(KEY_LENGTH, value.ValueFromFloat64(0))
 
-	PROTOTYPE_ARRAY = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_ARRAY = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_ARRAY,
 		KEY_FILTER,
 		KEY_PUSH,
@@ -123,6 +125,7 @@ func initArrayPrototype() {
 		KEY_JOIN,
 		KEY_SHIFT,
 		KEY_REVERSE,
+		KEY_FILL,
 		KEY_LENGTH,
 	)
 }
@@ -138,11 +141,11 @@ func initStringPrototype() {
 
 	p.Members = map[string]ObjectValueEntry{}
 
-	includes := value.EncodeHandle(allocator.Allocate(NewStringIncludes()))
-	toUpperCase := value.EncodeHandle(allocator.Allocate(NewStringToUpperCase()))
-	replace := value.EncodeHandle(allocator.Allocate(NewStringReplace()))
-	split := value.EncodeHandle(allocator.Allocate(NewStringSplit()))
-	startsWith := value.EncodeHandle(allocator.Allocate(NewStringStartsWith()))
+	includes := value.EncodeHandle(heap.Allocate(NewStringIncludes()))
+	toUpperCase := value.EncodeHandle(heap.Allocate(NewStringToUpperCase()))
+	replace := value.EncodeHandle(heap.Allocate(NewStringReplace()))
+	split := value.EncodeHandle(heap.Allocate(NewStringSplit()))
+	startsWith := value.EncodeHandle(heap.Allocate(NewStringStartsWith()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -152,8 +155,8 @@ func initStringPrototype() {
 	p.SetMember(KEY_SPLIT, split)
 	p.SetMember(KEY_STARTS_WITH, startsWith)
 
-	PROTOTYPE_STRING = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_STRING = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_STRING,
 		KEY_INCLUDES,
 		KEY_TOUPPERCASE,
@@ -174,9 +177,9 @@ func initGeneratorPrototype() {
 
 	p.Members = map[string]ObjectValueEntry{}
 
-	next := value.EncodeHandle(allocator.Allocate(NewNext()))
-	throw := value.EncodeHandle(allocator.Allocate(NewThrow()))
-	return_ := value.EncodeHandle(allocator.Allocate(NewReturn()))
+	next := value.EncodeHandle(heap.Allocate(NewNext()))
+	throw := value.EncodeHandle(heap.Allocate(NewThrow()))
+	return_ := value.EncodeHandle(heap.Allocate(NewReturn()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -184,8 +187,8 @@ func initGeneratorPrototype() {
 	p.SetMember(KEY_THROW, throw)
 	p.SetMember(KEY_RETURN, return_)
 
-	PROTOTYPE_GENERATOR = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_GENERATOR = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_GENERATOR,
 		KEY_NEXT,
 		KEY_THROW,
@@ -204,18 +207,18 @@ func initMapPrototype() {
 
 	p.Members = map[string]ObjectValueEntry{}
 
-	mapHas := value.EncodeHandle(allocator.Allocate(NewMapHas()))
-	mapGet := value.EncodeHandle(allocator.Allocate(NewMapGet()))
-	mapSet := value.EncodeHandle(allocator.Allocate(NewMapSet()))
-	mapKeys := value.EncodeHandle(allocator.Allocate(NewMapKeys()))
+	mapHas := value.EncodeHandle(heap.Allocate(NewMapHas()))
+	mapGet := value.EncodeHandle(heap.Allocate(NewMapGet()))
+	mapSet := value.EncodeHandle(heap.Allocate(NewMapSet()))
+	mapKeys := value.EncodeHandle(heap.Allocate(NewMapKeys()))
 
 	p.SetMember(KEY_HAS, mapHas)
 	p.SetMember(KEY_SET, mapSet)
 	p.SetMember(KEY_GET, mapGet)
 	p.SetMember(KEY_KEYS, mapKeys)
 
-	PROTOTYPE_MAP = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_MAP = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_MAP,
 		KEY_HAS,
 		KEY_SET,
@@ -235,14 +238,14 @@ func initSetPrototype() {
 
 	p.Members = map[string]ObjectValueEntry{}
 
-	setHas := value.EncodeHandle(allocator.Allocate(NewSetHas()))
-	setAdd := value.EncodeHandle(allocator.Allocate(NewSetAdd()))
+	setHas := value.EncodeHandle(heap.Allocate(NewSetHas()))
+	setAdd := value.EncodeHandle(heap.Allocate(NewSetAdd()))
 
 	p.SetMember(KEY_HAS, setHas)
 	p.SetMember(KEY_ADD, setAdd)
 
-	PROTOTYPE_SET = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_SET = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_SET,
 		KEY_HAS,
 		KEY_ADD,
@@ -259,12 +262,12 @@ func initPromiseConstructorPrototype() {
 
 	p.Members = map[string]ObjectValueEntry{}
 
-	resolve := value.EncodeHandle(allocator.Allocate(NewResolve()))
+	resolve := value.EncodeHandle(heap.Allocate(NewResolve()))
 
 	p.SetMember(KEY_RESOLVE, resolve)
 
-	PROTOTYPE_PROMISE_CONSTRUCTOR = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_PROMISE_CONSTRUCTOR = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_PROMISE_CONSTRUCTOR,
 		KEY_RESOLVE,
 	)
@@ -281,12 +284,12 @@ func initPromisePrototype() {
 
 	p.Members = map[string]ObjectValueEntry{}
 
-	then := value.EncodeHandle(allocator.Allocate(NewThen()))
+	then := value.EncodeHandle(heap.Allocate(NewThen()))
 
 	p.SetMember(KEY_THEN, then)
 
-	PROTOTYPE_PROMISE = value.EncodeHandle(allocator.Allocate(p))
-	allocator.PushToRoots(
+	PROTOTYPE_PROMISE = value.EncodeHandle(heap.Allocate(p))
+	heap.PushToRoots(
 		PROTOTYPE_PROMISE,
 		KEY_THEN,
 	)

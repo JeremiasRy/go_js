@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"
+	"go_js/heap"
 	"go_js/native"
 	"go_js/object"
 	"go_js/value"
@@ -187,7 +187,7 @@ func printFunction(c value.ValueChunk) {
 
 	for _, value := range c.Constants {
 		if value.IsObject() {
-			obj, _ := allocator.GetObject(value.GetHandle())
+			obj, _ := heap.GetObject(value.GetHandle())
 
 			switch f := obj.(type) {
 			case nil:
@@ -209,7 +209,7 @@ func printFunction(c value.ValueChunk) {
 func printStack(stack []value.Value) {
 	print("[")
 	for i, val := range stack {
-		fmt.Printf("%s", strings.ReplaceAll(native.TypeDecoratedString(val), "\n", "\\n"))
+		fmt.Printf("%s", strings.ReplaceAll(native.TypeDecoratedString(val, nil), "\n", "\\n"))
 		if i < len(stack)-1 {
 			fmt.Print(" | ")
 		}

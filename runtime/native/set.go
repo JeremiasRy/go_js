@@ -2,7 +2,7 @@ package native
 
 import (
 	"fmt"
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 )
@@ -45,7 +45,7 @@ func NewSetAdd() *SetAdd {
 func (*SetAdd) Add(owner *Set, v value.Value) {
 	if v.IsObject() {
 		// decode handle to pointer
-		v = value.EncodeHandle(allocator.GetPointer(v.GetHandle()))
+		v = value.EncodeHandle(heap.GetPointer(v.GetHandle()))
 	}
 
 	owner.values[v] = struct{}{}
@@ -66,7 +66,7 @@ func NewSetHas() *SetHas {
 func (*SetHas) Has(owner *Set, v value.Value) value.Value {
 	if v.IsObject() {
 		// decode handle to pointer
-		v = value.EncodeHandle(allocator.GetPointer(v.GetHandle()))
+		v = value.EncodeHandle(heap.GetPointer(v.GetHandle()))
 	}
 
 	if _, found := owner.values[v]; found {

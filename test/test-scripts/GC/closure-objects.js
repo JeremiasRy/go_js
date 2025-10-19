@@ -8,6 +8,7 @@ function outer() {
     };
 }
 
-let closure = outer();
-
-closure = null; 
+for (let i = 0; i < 1000; i++) {
+    let closure = outer();
+    console.log(closure())
+}

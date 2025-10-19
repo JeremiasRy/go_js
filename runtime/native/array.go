@@ -1,7 +1,7 @@
 package native
 
 import (
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"slices"
@@ -172,7 +172,7 @@ func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
 	}
 
 	res := strings.Join(i, s)
-	return value.EncodeHandle(allocator.Allocate(NewLightString(res)))
+	return value.EncodeHandle(heap.Allocate(NewLightString(res)))
 }
 
 type ArrayReverse struct {
@@ -210,4 +210,21 @@ func (*ArrayShift) Shift(arr *ObjArr) value.Value {
 	arr.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(len(arr.items))))
 
 	return v
+}
+
+type ArrayFill struct {
+	ObjNativeFn
+}
+
+func NewArrayFill() *ArrayFill {
+	f := &ArrayFill{}
+	f.name = "fill"
+	return f
+}
+
+func (*ArrayFill) Fill(arr *ObjArr, item value.Value) *ObjArr {
+	for i := range arr.items {
+		arr.items[i] = item
+	}
+	return arr
 }

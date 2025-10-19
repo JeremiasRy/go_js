@@ -1,7 +1,7 @@
 package native
 
 import (
-	"go_js/allocator"
+	"go_js/heap"
 
 	"go_js/value"
 )
@@ -23,6 +23,7 @@ var (
 	KEY_SHIFT   value.Value
 	KEY_REVERSE value.Value
 	KEY_LENGTH  value.Value
+	KEY_FILL    value.Value
 
 	// string
 	KEY_INCLUDES    value.Value
@@ -64,47 +65,48 @@ var (
 )
 
 func createCommonHandles() {
-	KEY_PROTO = value.EncodeHandle(allocator.Allocate(NewLightString(PROTOTYPE_PROPERTY_STRING)))
-	KEY_LOG = value.EncodeHandle(allocator.Allocate(NewLightString("log")))
+	KEY_PROTO = value.EncodeHandle(heap.Allocate(NewLightString(PROTOTYPE_PROPERTY_STRING)))
+	KEY_LOG = value.EncodeHandle(heap.Allocate(NewLightString("log")))
 
-	KEY_FILTER = value.EncodeHandle(allocator.Allocate(NewLightString("filter")))
-	KEY_PUSH = value.EncodeHandle(allocator.Allocate(NewLightString("push")))
-	KEY_FOREACH = value.EncodeHandle(allocator.Allocate(NewLightString("forEach")))
-	KEY_MAP = value.EncodeHandle(allocator.Allocate(NewLightString("map")))
-	KEY_REDUCE = value.EncodeHandle(allocator.Allocate(NewLightString("reduce")))
-	KEY_JOIN = value.EncodeHandle(allocator.Allocate(NewLightString("join")))
-	KEY_REVERSE = value.EncodeHandle(allocator.Allocate(NewLightString("reverse")))
-	KEY_SHIFT = value.EncodeHandle(allocator.Allocate(NewLightString("shift")))
-	KEY_LENGTH = value.EncodeHandle(allocator.Allocate(NewLightString("length")))
+	KEY_FILTER = value.EncodeHandle(heap.Allocate(NewLightString("filter")))
+	KEY_PUSH = value.EncodeHandle(heap.Allocate(NewLightString("push")))
+	KEY_FOREACH = value.EncodeHandle(heap.Allocate(NewLightString("forEach")))
+	KEY_MAP = value.EncodeHandle(heap.Allocate(NewLightString("map")))
+	KEY_REDUCE = value.EncodeHandle(heap.Allocate(NewLightString("reduce")))
+	KEY_JOIN = value.EncodeHandle(heap.Allocate(NewLightString("join")))
+	KEY_REVERSE = value.EncodeHandle(heap.Allocate(NewLightString("reverse")))
+	KEY_SHIFT = value.EncodeHandle(heap.Allocate(NewLightString("shift")))
+	KEY_FILL = value.EncodeHandle(heap.Allocate(NewLightString("fill")))
+	KEY_LENGTH = value.EncodeHandle(heap.Allocate(NewLightString("length")))
 
-	KEY_TOSTRING = value.EncodeHandle(allocator.Allocate(NewLightString("toString")))
-	KEY_CREATE = value.EncodeHandle(allocator.Allocate(NewLightString("create")))
-	KEY_KEYS = value.EncodeHandle(allocator.Allocate(NewLightString("keys")))
-	KEY_VALUES = value.EncodeHandle(allocator.Allocate(NewLightString("values")))
-	KEY_HASOWNPROPERTY = value.EncodeHandle(allocator.Allocate(NewLightString("hasOwnProperty")))
+	KEY_TOSTRING = value.EncodeHandle(heap.Allocate(NewLightString("toString")))
+	KEY_CREATE = value.EncodeHandle(heap.Allocate(NewLightString("create")))
+	KEY_KEYS = value.EncodeHandle(heap.Allocate(NewLightString("keys")))
+	KEY_VALUES = value.EncodeHandle(heap.Allocate(NewLightString("values")))
+	KEY_HASOWNPROPERTY = value.EncodeHandle(heap.Allocate(NewLightString("hasOwnProperty")))
 
-	KEY_INCLUDES = value.EncodeHandle(allocator.Allocate(NewLightString("includes")))
-	KEY_TOUPPERCASE = value.EncodeHandle(allocator.Allocate(NewLightString("toUpperCase")))
-	KEY_SPLIT = value.EncodeHandle(allocator.Allocate(NewLightString("split")))
-	KEY_REPLACE = value.EncodeHandle(allocator.Allocate(NewLightString("replace")))
-	KEY_STARTS_WITH = value.EncodeHandle(allocator.Allocate(NewLightString("startsWith")))
+	KEY_INCLUDES = value.EncodeHandle(heap.Allocate(NewLightString("includes")))
+	KEY_TOUPPERCASE = value.EncodeHandle(heap.Allocate(NewLightString("toUpperCase")))
+	KEY_SPLIT = value.EncodeHandle(heap.Allocate(NewLightString("split")))
+	KEY_REPLACE = value.EncodeHandle(heap.Allocate(NewLightString("replace")))
+	KEY_STARTS_WITH = value.EncodeHandle(heap.Allocate(NewLightString("startsWith")))
 
-	KEY_CTOR = value.EncodeHandle(allocator.Allocate(NewLightString("constructor")))
+	KEY_CTOR = value.EncodeHandle(heap.Allocate(NewLightString("constructor")))
 
-	KEY_MESSAGE = value.EncodeHandle(allocator.Allocate(NewLightString("message")))
+	KEY_MESSAGE = value.EncodeHandle(heap.Allocate(NewLightString("message")))
 
-	KEY_THROW = value.EncodeHandle(allocator.Allocate(NewLightString("throw")))
-	KEY_NEXT = value.EncodeHandle(allocator.Allocate(NewLightString("next")))
-	KEY_RETURN = value.EncodeHandle(allocator.Allocate(NewLightString("return")))
-	KEY_VALUE = value.EncodeHandle(allocator.Allocate(NewLightString("value")))
-	KEY_DONE = value.EncodeHandle(allocator.Allocate(NewLightString("done")))
+	KEY_THROW = value.EncodeHandle(heap.Allocate(NewLightString("throw")))
+	KEY_NEXT = value.EncodeHandle(heap.Allocate(NewLightString("next")))
+	KEY_RETURN = value.EncodeHandle(heap.Allocate(NewLightString("return")))
+	KEY_VALUE = value.EncodeHandle(heap.Allocate(NewLightString("value")))
+	KEY_DONE = value.EncodeHandle(heap.Allocate(NewLightString("done")))
 
-	KEY_HAS = value.EncodeHandle(allocator.Allocate(NewLightString("has")))
-	KEY_GET = value.EncodeHandle(allocator.Allocate(NewLightString("get")))
-	KEY_SET = value.EncodeHandle(allocator.Allocate(NewLightString("set")))
-	KEY_SIZE = value.EncodeHandle(allocator.Allocate(NewLightString("size")))
-	KEY_ADD = value.EncodeHandle(allocator.Allocate(NewLightString("add")))
+	KEY_HAS = value.EncodeHandle(heap.Allocate(NewLightString("has")))
+	KEY_GET = value.EncodeHandle(heap.Allocate(NewLightString("get")))
+	KEY_SET = value.EncodeHandle(heap.Allocate(NewLightString("set")))
+	KEY_SIZE = value.EncodeHandle(heap.Allocate(NewLightString("size")))
+	KEY_ADD = value.EncodeHandle(heap.Allocate(NewLightString("add")))
 
-	KEY_RESOLVE = value.EncodeHandle(allocator.Allocate(NewLightString("resolve")))
-	KEY_THEN = value.EncodeHandle(allocator.Allocate(NewLightString("then")))
+	KEY_RESOLVE = value.EncodeHandle(heap.Allocate(NewLightString("resolve")))
+	KEY_THEN = value.EncodeHandle(heap.Allocate(NewLightString("then")))
 }

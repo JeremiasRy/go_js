@@ -2,10 +2,10 @@ package vm
 
 import (
 	"fmt"
-	"go_js/allocator"
 	"go_js/chunk"
 	"go_js/compiler"
 	"go_js/eventloop"
+	"go_js/heap"
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
@@ -107,7 +107,7 @@ func (vm *VM) getGlobal(global int) value.Value {
 
 func (vm *VM) concatenate(a, b value.Value) value.Value {
 	if !a.IsObject() && b.IsObject() {
-		a = value.EncodeHandle(allocator.Allocate(native.NewLightString(native.String(a))))
+		a = value.EncodeHandle(heap.Allocate(native.NewLightString(native.String(a))))
 	}
 
 	if a.IsObject() {
@@ -115,10 +115,10 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 		if !b.IsObject() {
 			bObj = native.NewLightString(native.String(b))
 		}
-		aObj, _ := allocator.GetObject(a.GetHandle())
+		aObj, _ := heap.GetObject(a.GetHandle())
 
 		if bObj == nil {
-			bObj, _ = allocator.GetObject(b.GetHandle())
+			bObj, _ = heap.GetObject(b.GetHandle())
 		}
 
 		switch aObj := aObj.(type) {
@@ -150,18 +150,18 @@ func (vm *VM) concatenate(a, b value.Value) value.Value {
 					}
 				}
 
-				return value.EncodeHandle(allocator.Allocate(builder))
+				return value.EncodeHandle(heap.Allocate(builder))
 			}
 		case *native.ObjString:
 			{
 				switch str := bObj.(type) {
 				case *native.ObjStringBuilder:
 					{
-						return value.EncodeHandle(allocator.Allocate(native.NewLightString(aObj.String() + str.Flush().String())))
+						return value.EncodeHandle(heap.Allocate(native.NewLightString(aObj.String() + str.Flush().String())))
 					}
 				default:
 					{
-						return value.EncodeHandle(allocator.Allocate(native.NewLightString(aObj.String() + bObj.String())))
+						return value.EncodeHandle(heap.Allocate(native.NewLightString(aObj.String() + bObj.String())))
 					}
 				}
 			}
@@ -269,8 +269,8 @@ func looseComparison(a, b value.Value) bool {
 	}
 
 	if a.IsObject() && b.IsObject() {
-		aObj, _ := allocator.GetObject(a.GetHandle())
-		bObj, _ := allocator.GetObject(b.GetHandle())
+		aObj, _ := heap.GetObject(a.GetHandle())
+		bObj, _ := heap.GetObject(b.GetHandle())
 
 		if (aObj.Type() == object.OBJ_STRING) && bObj.Type() == object.OBJ_STRING {
 			return aObj.String() == bObj.String()
@@ -284,7 +284,7 @@ func looseComparison(a, b value.Value) bool {
 			return compStringToObject(bObj, aObj)
 		}
 
-		return allocator.GetPointer(a.GetHandle()) == allocator.GetPointer(b.GetHandle())
+		return heap.GetPointer(a.GetHandle()) == heap.GetPointer(b.GetHandle())
 	}
 
 	if (a == value.NULL || a == value.UNDEFINED) && (b == value.NULL || b == value.UNDEFINED) {
@@ -292,7 +292,7 @@ func looseComparison(a, b value.Value) bool {
 	}
 
 	if a.IsObject() == !b.IsObject() {
-		obj, _ := allocator.GetObject(a.GetHandle())
+		obj, _ := heap.GetObject(a.GetHandle())
 		if b.IsNumber() {
 			return compNumToObject(b, obj)
 		}
@@ -303,7 +303,7 @@ func looseComparison(a, b value.Value) bool {
 	}
 
 	if !a.IsObject() == b.IsObject() {
-		bObj, _ := allocator.GetObject(b.GetHandle())
+		bObj, _ := heap.GetObject(b.GetHandle())
 
 		if a.IsNumber() {
 			return compNumToObject(a, bObj)
@@ -319,7 +319,7 @@ func looseComparison(a, b value.Value) bool {
 
 func truthyValue(v value.Value) bool {
 	if v.IsObject() {
-		obj, _ := allocator.GetObject(v.GetHandle())
+		obj, _ := heap.GetObject(v.GetHandle())
 
 		switch obj := obj.(type) {
 		case *native.ObjString:
@@ -351,7 +351,7 @@ func (vm *VM) popN(n int) []value.Value {
 
 func (vm *VM) CreateTemplateString(o *object.ObjTemplateLiteral) value.Value {
 	objStr := native.NewObjString(o.CreateString())
-	return value.EncodeHandle(allocator.Allocate(objStr))
+	return value.EncodeHandle(heap.Allocate(objStr))
 }
 
 func (vm *VM) peekN(i int) value.Value {
@@ -393,7 +393,7 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	if fn.HasArguments() {
 		items := vm.popN(argCount)
 		arr := native.NewArrayFrom(items)
-		v := value.EncodeHandle(allocator.Allocate(arr))
+		v := value.EncodeHandle(heap.Allocate(arr))
 		vm.push(v)
 	}
 
@@ -405,7 +405,7 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		for _, v := range arguments[:fn.GetArity()-1] {
 			vm.push(v)
 		}
-		v := value.EncodeHandle(allocator.Allocate(arr))
+		v := value.EncodeHandle(heap.Allocate(arr))
 		vm.push(v)
 	}
 
@@ -476,7 +476,7 @@ func (vm *VM) runGC() {
 
 	for _, v := range globals {
 		if v.IsObject() {
-			ptr := allocator.GetPointer(v.GetHandle())
+			ptr := heap.GetPointer(v.GetHandle())
 			g[ptr] = v
 		}
 	}
@@ -487,7 +487,7 @@ func (vm *VM) runGC() {
 		glob = append(glob, v)
 	}
 
-	allocator.RequestGC(append(vm.stack[:vm.stackTop], glob...))
+	heap.RequestGC(append(vm.stack[:vm.stackTop], glob...))
 }
 
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
@@ -505,7 +505,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			for _, v := range promise.State.Stack {
 				vm.push(v)
 			}
-			allocator.ClearAsyncFunctionStack(uintptr(unsafe.Pointer(promise)))
+			heap.ClearAsyncFunctionStack(uintptr(unsafe.Pointer(promise)))
 
 			ip = promise.State.Ip
 		}
@@ -523,7 +523,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		code := c.Code[ip]
 		ip++
 
-		if allocator.ShouldRunGCCycle() {
+		if heap.ShouldRunGCCycle() {
 			vm.runGC()
 		}
 
@@ -675,7 +675,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if b.IsObject() && a.IsObject() {
-					if allocator.GetPointer(b.GetHandle()) == allocator.GetPointer(a.GetHandle()) {
+					if heap.GetPointer(b.GetHandle()) == heap.GetPointer(a.GetHandle()) {
 						vm.push(value.TRUE)
 					} else {
 						vm.push(value.FALSE)
@@ -692,7 +692,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 
 				if b.IsObject() && a.IsObject() {
-					if allocator.GetPointer(b.GetHandle()) != allocator.GetPointer(a.GetHandle()) {
+					if heap.GetPointer(b.GetHandle()) != heap.GetPointer(a.GetHandle()) {
 						vm.push(value.TRUE)
 					} else {
 						vm.push(value.FALSE)
@@ -755,7 +755,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				has := value.FALSE
 
-				if obj, err := allocator.GetObject(obj.GetHandle()); err == nil {
+				if obj, err := heap.GetObject(obj.GetHandle()); err == nil {
 					v := obj.(object.Hashable).GetMember(prop)
 
 					if v != value.UNDEFINED {
@@ -797,7 +797,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if !v.IsObject() {
 					return value.UNDEFINED, fmt.Errorf("%v cannot be spread", native.String(v))
 				}
-				obj, _ := allocator.GetObject(v.GetHandle())
+				obj, _ := heap.GetObject(v.GetHandle())
 
 				switch obj := obj.(type) {
 				case *native.ObjArr:
@@ -838,15 +838,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					variable = vm.pop()
 					vm.pop() // pop this context
 				}
-				allocator.DefineHeapVar(f.fn.GetHeapScope(), variable)
+				heap.DefineHeapVar(f.fn.GetHeapScope(), variable)
 			}
 		case chunk.OP_GET_HEAP_VAR:
 			{
 				slot := c.Code[ip]
 				ip++
-				v := allocator.GetHeapVar(f.fn.GetHeapScope(), int(slot))
+				v := heap.GetHeapVar(f.fn.GetHeapScope(), int(slot))
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
@@ -865,7 +865,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				slot := c.Code[ip]
 				ip++
-				allocator.SetHeapVar(f.fn.GetHeapScope(), int(slot), vm.pop())
+				heap.SetHeapVar(f.fn.GetHeapScope(), int(slot), vm.pop())
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
@@ -875,7 +875,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.pop() // pop this context
 				}
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
@@ -884,12 +884,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					case *object.ObjFunction:
 						{
 							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								v = value.EncodeHandle(allocator.Allocate(obj.Clone()))
+								v = value.EncodeHandle(heap.Allocate(obj.Clone()))
 							}
 						}
 					case *native.ObjStringBuilder:
 						{
-							v = value.EncodeHandle(allocator.Allocate(obj.Flush()))
+							v = value.EncodeHandle(heap.Allocate(obj.Flush()))
 						}
 					}
 				}
@@ -902,7 +902,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.getGlobal(int(global))
 
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
@@ -923,7 +923,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 				v := vm.pop()
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
@@ -932,7 +932,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					case *object.ObjFunction:
 						{
 							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								v = value.EncodeHandle(allocator.Allocate(obj.Clone()))
+								v = value.EncodeHandle(heap.Allocate(obj.Clone()))
 							}
 						}
 					}
@@ -952,7 +952,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_LOCAL %s", err)
@@ -961,7 +961,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					case *object.ObjFunction:
 						{
 							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								vm.push(value.EncodeHandle(allocator.Allocate(obj.Clone())))
+								vm.push(value.EncodeHandle(heap.Allocate(obj.Clone())))
 								vm.pop()
 							}
 						}
@@ -981,7 +981,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.stack[f.localStart+slot]
 
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_LOCAL %e", err)
@@ -1002,7 +1002,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 				v := vm.pop()
 				if v.IsObject() {
-					obj, err := allocator.GetObject(v.GetHandle())
+					obj, err := heap.GetObject(v.GetHandle())
 
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
@@ -1011,12 +1011,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					case *object.ObjFunction:
 						{
 							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								v = value.EncodeHandle(allocator.Allocate(obj.Clone()))
+								v = value.EncodeHandle(heap.Allocate(obj.Clone()))
 							}
 						}
 					case *native.ObjStringBuilder:
 						{
-							v = value.EncodeHandle(allocator.Allocate(obj.Flush()))
+							v = value.EncodeHandle(heap.Allocate(obj.Flush()))
 						}
 					}
 				}
@@ -1025,7 +1025,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_CREATE_OBJECT:
 			{
 				objHash := native.NewObjectHash()
-				handle := allocator.Allocate(objHash)
+				handle := heap.Allocate(objHash)
 
 				vm.push(value.EncodeHandle(handle))
 			}
@@ -1043,22 +1043,22 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				if v.IsObject() {
-					obj, _ := allocator.GetObject(v.GetHandle())
+					obj, _ := heap.GetObject(v.GetHandle())
 
 					// check if we have a closure in hand
 					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-						v = value.EncodeHandle(allocator.Allocate(fn.Clone()))
+						v = value.EncodeHandle(heap.Allocate(fn.Clone()))
 					}
 				}
 
-				obj, _ := allocator.GetObject(handle)
+				obj, _ := heap.GetObject(handle)
 
 				if k.IsObject() {
-					keyObj, _ := allocator.GetObject(k.GetHandle())
+					keyObj, _ := heap.GetObject(k.GetHandle())
 
 					if b, ok := keyObj.(*native.ObjStringBuilder); ok {
 						key := b.Flush()
-						k = value.EncodeHandle(allocator.Allocate(key))
+						k = value.EncodeHandle(heap.Allocate(key))
 					}
 				}
 
@@ -1089,7 +1089,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					continue
 				}
 
-				obj, err := allocator.GetObject(objValue.GetHandle())
+				obj, err := heap.GetObject(objValue.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", native.String(objValue), err)
@@ -1105,7 +1105,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							v := obj.GetMember(member)
 
 							if v.IsObject() {
-								member, err := allocator.GetObject(v.GetHandle())
+								member, err := heap.GetObject(v.GetHandle())
 
 								if err != nil {
 									return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
@@ -1127,7 +1127,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						v := boxed.GetMember(member)
 
 						if v.IsObject() {
-							member, err := allocator.GetObject(v.GetHandle())
+							member, err := heap.GetObject(v.GetHandle())
 
 							if err != nil {
 								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
@@ -1147,7 +1147,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						v := boxed.GetMember(member)
 
 						if v.IsObject() {
-							member, err := allocator.GetObject(v.GetHandle())
+							member, err := heap.GetObject(v.GetHandle())
 
 							if err != nil {
 								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
@@ -1167,7 +1167,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						v := obj.GetMember(member)
 
 						if v.IsObject() {
-							member, err := allocator.GetObject(v.GetHandle())
+							member, err := heap.GetObject(v.GetHandle())
 
 							if err != nil {
 								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
@@ -1208,7 +1208,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					thisCtx = vm.pop()
 				}
 
-				fn, err := allocator.GetObject(callee.GetHandle())
+				fn, err := heap.GetObject(callee.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1221,7 +1221,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if !fn.ReturnArgumentIsPromise {
 							promise := native.NewPromise()
 							fn.SetPromise(promise)
-							handle := allocator.Allocate(promise)
+							handle := heap.Allocate(promise)
 							vm.push(value.EncodeHandle(handle))
 						}
 
@@ -1231,7 +1231,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.ObjGenerator:
 					{
 						gen := fn.Clone()
-						vm.push(value.EncodeHandle(allocator.Allocate(gen)))
+						vm.push(value.EncodeHandle(heap.Allocate(gen)))
 					}
 				case object.Callable:
 					{
@@ -1245,18 +1245,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 						promise := native.NewPromise()
 						fn.SetPromise(promise)
-						vm.push(value.EncodeHandle(allocator.Allocate(promise)))
+						vm.push(value.EncodeHandle(heap.Allocate(promise)))
 
 						f, c = vm.Call(fn, &ip, value.UNDEFINED, 0, calledWithSpread)
 						vm.push(v)
 					}
 				case *native.Then:
 					{
-						p, _ := allocator.GetObject(thisCtx.GetHandle())
+						p, _ := heap.GetObject(thisCtx.GetHandle())
 						v := p.(*native.ObjPromise).Value
 						callbackFn := vm.pop()
 
-						callback, _ := allocator.GetObject(callbackFn.GetHandle())
+						callback, _ := heap.GetObject(callbackFn.GetHandle())
 						fn := callback.(*object.ObjFunction)
 
 						queue.Enqueue(object.Callback{Fn: fn, ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
@@ -1265,14 +1265,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.MapGet:
 					{
 						arg := vm.pop()
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
 
 						vm.push(fn.Get(owner.(*native.Map), arg))
 					}
 				case *native.MapHas:
 					{
 						arg := vm.pop()
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
 
 						vm.push(fn.Has(owner.(*native.Map), arg))
 					}
@@ -1280,33 +1280,33 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						v := vm.pop()
 						k := vm.pop()
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
 
 						fn.Set(owner.(*native.Map), k, v)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.MapKeys:
 					{
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
 						keys := fn.Keys(owner.(*native.Map))
 
-						handle := allocator.Allocate(keys)
+						handle := heap.Allocate(keys)
 						vm.push(value.EncodeHandle(handle))
 					}
 				case *native.ArrayPush:
 					{
 						arg := vm.popN(argCount)
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Push(this.(*native.ObjArr), arg))
 					}
 				case *native.ArrayForEach:
 					{
 						callback := vm.pop()
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						iterator := object.NewValueIterator(this.(object.Iterable))
 						done := iterator.Next()
 
-						obj, err := allocator.GetObject(callback.GetHandle())
+						obj, err := heap.GetObject(callback.GetHandle())
 
 						if err != nil {
 							return value.UNDEFINED, err
@@ -1330,11 +1330,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.ArrayFilter:
 					{
 						callback := vm.pop()
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						iterator := object.NewValueIterator(this.(object.Iterable))
 						done := iterator.Next()
 
-						obj, err := allocator.GetObject(callback.GetHandle())
+						obj, err := heap.GetObject(callback.GetHandle())
 
 						if err != nil {
 							return value.UNDEFINED, err
@@ -1370,17 +1370,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							objArr.PushElement(item)
 						}
 
-						v := value.EncodeHandle(allocator.Allocate(objArr))
+						v := value.EncodeHandle(heap.Allocate(objArr))
 						vm.push(v)
 					}
 				case *native.ArrayMap:
 					{
 						callback := vm.pop()
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						iterator := object.NewValueIterator(this.(object.Iterable))
 						done := iterator.Next()
 
-						obj, err := allocator.GetObject(callback.GetHandle())
+						obj, err := heap.GetObject(callback.GetHandle())
 
 						if err != nil {
 							return value.UNDEFINED, err
@@ -1413,18 +1413,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							objArr.PushElement(item)
 						}
 
-						v := value.EncodeHandle(allocator.Allocate(objArr))
+						v := value.EncodeHandle(heap.Allocate(objArr))
 						vm.push(v)
 					}
 				case *native.ArrayReduce:
 					{
 						initialValue := vm.pop()
 						callback := vm.pop()
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						iterator := object.NewValueIterator(this.(object.Iterable))
 						done := iterator.Next()
 
-						obj, err := allocator.GetObject(callback.GetHandle())
+						obj, err := heap.GetObject(callback.GetHandle())
 
 						if err != nil {
 							return value.UNDEFINED, err
@@ -1459,46 +1459,54 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							s = vm.pop()
 						}
 
-						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+						arr, _ := heap.GetObject(thisCtx.GetHandle())
 
 						vm.push(fn.Join(arr.(*native.ObjArr), s))
 					}
 				case *native.ArrayShift:
 					{
-						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+						arr, _ := heap.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Shift(arr.(*native.ObjArr)))
 					}
 				case *native.ArrayReverse:
 					{
-						arr, _ := allocator.GetObject(thisCtx.GetHandle())
+						arr, _ := heap.GetObject(thisCtx.GetHandle())
 						fn.Reverse(arr.(*native.ObjArr))
+						vm.push(thisCtx)
+					}
+				case *native.ArrayFill:
+					{
+						arr, _ := heap.GetObject(thisCtx.GetHandle())
+						arg := vm.pop()
+
+						fn.Fill(arr.(*native.ObjArr), arg)
 						vm.push(thisCtx)
 					}
 				case *native.StringStartsWith:
 					{
 						arg := vm.pop()
-						pattern, _ := allocator.GetObject(arg.GetHandle())
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						pattern, _ := heap.GetObject(arg.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 
 						vm.push(fn.StartsWith(this, pattern.String()))
 					}
 				case *native.StringToUpperCase:
 					{
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
-						vm.push(value.EncodeHandle(allocator.Allocate(fn.ToUpperCase(this.String()))))
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(value.EncodeHandle(heap.Allocate(fn.ToUpperCase(this.String()))))
 					}
 				case *native.StringIncludes:
 					{
 						arg := vm.pop()
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Includes(this.String(), native.String(arg)))
 					}
 				case *native.StringSplit:
 					{
 						separator := vm.pop()
 
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
-						sep, _ := allocator.GetObject(separator.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						sep, _ := heap.GetObject(separator.GetHandle())
 						vm.push(fn.Split(owner, sep.String()))
 					}
 				case *native.StringReplace:
@@ -1506,16 +1514,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						replaceValue := vm.pop()
 						searchValue := vm.pop()
 
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
-						replace, _ := allocator.GetObject(replaceValue.GetHandle())
-						search, _ := allocator.GetObject(searchValue.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						replace, _ := heap.GetObject(replaceValue.GetHandle())
+						search, _ := heap.GetObject(searchValue.GetHandle())
 
 						vm.push(fn.Replace(owner, search.String(), replace.String()))
 					}
 				case *native.ToString:
 					{
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
-						handle := allocator.Allocate(native.NewObjString(fn.ToString(this)))
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						handle := heap.Allocate(native.NewObjString(fn.ToString(this)))
 						vm.push(value.EncodeHandle(handle))
 					}
 				case *native.Log:
@@ -1527,13 +1535,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.Next:
 					{
-						this, _ := allocator.GetObject(thisCtx.GetHandle())
+						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
 						// need to fix the -2, it's because OP_PUSH_UNDEFINED and OP_RETURN are currently added automatically to functions (if they are missing)
 						if generator.Ip == len(generator.ValueChunk().Code)-2 {
 							d := native.NewObjectHash()
 							d.SetMember(native.KEY_DONE, value.TRUE)
-							vm.push(value.EncodeHandle(allocator.Allocate(d)))
+							vm.push(value.EncodeHandle(heap.Allocate(d)))
 							continue
 						}
 
@@ -1555,7 +1563,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						arr := fn.Keys(arg)
 
 						objArr := native.NewArrayFrom(arr)
-						v := value.EncodeHandle(allocator.Allocate(objArr))
+						v := value.EncodeHandle(heap.Allocate(objArr))
 						vm.push(v)
 					}
 				case *native.ObjectValues:
@@ -1565,7 +1573,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						objArr := native.NewArrayFrom(arr)
 
-						v := value.EncodeHandle(allocator.Allocate(objArr))
+						v := value.EncodeHandle(heap.Allocate(objArr))
 						vm.push(v)
 					}
 				case *native.ResolveFunc:
@@ -1584,7 +1592,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						callback := vm.pop()
 
 						handle := callback.GetHandle()
-						obj, err := allocator.GetObject(handle)
+						obj, err := heap.GetObject(handle)
 
 						if err != nil {
 							return value.UNDEFINED, err
@@ -1602,7 +1610,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						arg := vm.pop()
 						o := native.NewObjectFromObject(arg)
-						vm.push(value.EncodeHandle(allocator.Allocate(o)))
+						vm.push(value.EncodeHandle(heap.Allocate(o)))
 					}
 				case *native.HasOwnProperty:
 					{
@@ -1617,21 +1625,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.SetAdd:
 					{
 						arg := vm.pop()
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
 						fn.Add(owner.(*native.Set), arg)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.SetHas:
 					{
 						arg := vm.pop()
-						owner, _ := allocator.GetObject(thisCtx.GetHandle())
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
 						vm.push(fn.Has(owner.(*native.Set), arg))
 					}
 				case *native.QueueMicroTask:
 					{
 						v := vm.pop()
 
-						fn, _ := allocator.GetObject(v.GetHandle())
+						fn, _ := heap.GetObject(v.GetHandle())
 						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
 					}
 				case *native.ParseInt:
@@ -1640,7 +1648,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if argCount == 2 {
 							arg := vm.pop()
 							if arg.IsObject() {
-								str, _ := allocator.GetObject(arg.GetHandle())
+								str, _ := heap.GetObject(arg.GetHandle())
 								baseArg, err := strconv.Atoi(str.String())
 								if err != nil {
 									return value.UNDEFINED, fmt.Errorf("invalid argument for parseInt %s", native.String(arg))
@@ -1653,7 +1661,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arg := vm.pop()
-						obj, _ := allocator.GetObject(arg.GetHandle())
+						obj, _ := heap.GetObject(arg.GetHandle())
 
 						v, _ := fn.ParseInteger(obj.String(), base)
 
@@ -1721,7 +1729,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				length := c.ReadInt(&ip)
 				arr := native.NewArray(length)
-				handle := allocator.Allocate(arr)
+				handle := heap.Allocate(arr)
 				vm.push(value.EncodeHandle(handle))
 			}
 		case chunk.OP_PUSH_ELEMENT:
@@ -1729,7 +1737,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				arr := vm.peek()
 
-				obj, err := allocator.GetObject(arr.GetHandle())
+				obj, err := heap.GetObject(arr.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1754,7 +1762,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iteratee))
 				}
 
-				obj, err := allocator.GetObject(iteratee.GetHandle())
+				obj, err := heap.GetObject(iteratee.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1780,7 +1788,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					iterator = object.NewValueIterator(iteratorObj)
 				}
 
-				vm.push(value.EncodeHandle(allocator.Allocate(iterator)))
+				vm.push(value.EncodeHandle(heap.Allocate(iterator)))
 			}
 		case chunk.OP_ITERATOR_NEXT:
 			{
@@ -1790,7 +1798,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iterator))
 				}
 
-				obj, err := allocator.GetObject(iterator.GetHandle())
+				obj, err := heap.GetObject(iterator.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1818,7 +1826,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iterator))
 				}
 
-				obj, err := allocator.GetObject(iterator.GetHandle())
+				obj, err := heap.GetObject(iterator.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1834,7 +1842,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
-				scope := allocator.CreateHeapScope()
+				scope := heap.CreateHeapScope()
 				setHeapScopes(f.fn.ValueChunk(), scope)
 				f.fn.SetHeapScope(scope)
 			}
@@ -1853,7 +1861,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				argCount := int(c.Code[ip])
 				ip++
 				callee := vm.pop()
-				obj, err := allocator.GetObject(callee.GetHandle())
+				obj, err := heap.GetObject(callee.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1865,7 +1873,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						instance := ctor.NewInstance()
 						ctor := instance.GetMember(native.KEY_CTOR)
 
-						obj, err := allocator.GetObject(ctor.GetHandle())
+						obj, err := heap.GetObject(ctor.GetHandle())
 
 						if err != nil {
 							return value.UNDEFINED, fmt.Errorf("contructor was not an object %s", native.String(ctor))
@@ -1875,7 +1883,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							builder := NewVM(vm.debug, false)
 							fn := object.NewFunction("builder", 0, nil)
 							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
-							instance := value.EncodeHandle(allocator.Allocate(instance))
+							instance := value.EncodeHandle(heap.Allocate(instance))
 
 							for _, v := range vm.popN(constructor.GetArity()) {
 								builder.push(v)
@@ -1908,14 +1916,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 
-						objHandle := allocator.Allocate(newObj)
+						objHandle := heap.Allocate(newObj)
 						vm.push(value.EncodeHandle(objHandle))
 					}
 				case *native.PromiseConstructor:
 					{
 						arg := vm.pop()
 						handle := arg.GetHandle()
-						executor, err := allocator.GetObject(handle)
+						executor, err := heap.GetObject(handle)
 
 						if err != nil {
 							return value.UNDEFINED, err
@@ -1923,7 +1931,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						promise := native.NewPromise()
 						resolve := native.NewResolveFunc(promise)
-						resolveHandle := allocator.Allocate(resolve)
+						resolveHandle := heap.Allocate(resolve)
 
 						if executor, ok := executor.(object.Callable); ok {
 							runner := NewVM(vm.debug, false)
@@ -1932,7 +1940,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							runner.run(f, c)
 						}
 
-						handle = allocator.Allocate(promise)
+						handle = heap.Allocate(promise)
 						vm.push(value.EncodeHandle(handle))
 					}
 				}
@@ -1953,7 +1961,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_AWAIT:
 			{
 				awaitee := vm.pop()
-				awaiteeObj, err := allocator.GetObject(awaitee.GetHandle())
+				awaiteeObj, err := heap.GetObject(awaitee.GetHandle())
 
 				if err != nil {
 					return value.FALSE, err
@@ -1966,7 +1974,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						copy(stack, append(vm.stack[f.localStart:vm.stackTop], awaitee))
 						curentAsyncFn.Pause(stack, ip)
 						curentAsyncFn.Await(promise)
-						allocator.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
+						heap.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
 
 						vm.frameCount--
 
@@ -1989,7 +1997,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					idx := int(c.Code[ip])
 					removeMap[idx] = true
 					ip++
-					allocator.DefineHeapVar(f.fn.GetHeapScope(), vm.stack[f.localStart+idx])
+					heap.DefineHeapVar(f.fn.GetHeapScope(), vm.stack[f.localStart+idx])
 				}
 
 				localCount := (vm.stackTop - f.localStart) - int(amount)
@@ -2012,14 +2020,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				name := vm.pop()
 
-				if n, err := allocator.GetObject(name.GetHandle()); err == nil && n.Type() == object.OBJ_STRING {
+				if n, err := heap.GetObject(name.GetHandle()); err == nil && n.Type() == object.OBJ_STRING {
 					name := n.String()
 
 					class := native.NewObjClass(name)
 					proto := native.NewPrototype(name)
 
-					vm.push(value.EncodeHandle(allocator.Allocate(class)))
-					vm.push(value.EncodeHandle(allocator.Allocate(proto)))
+					vm.push(value.EncodeHandle(heap.Allocate(class)))
+					vm.push(value.EncodeHandle(heap.Allocate(proto)))
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s is not a string", native.String(name))
 				}
@@ -2029,15 +2037,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				proto := vm.pop()
 				class := vm.peek()
 
-				classObj, _ := allocator.GetObject(class.GetHandle())
-				protoObj, _ := allocator.GetObject(proto.GetHandle())
+				classObj, _ := heap.GetObject(class.GetHandle())
+				protoObj, _ := heap.GetObject(proto.GetHandle())
 				protoObj.(*native.Prototype).SetMember(native.KEY_PROTO, native.PROTOTYPE_OBJECT)
 				classObj.(*native.ObjClass).SetPrototype(proto)
 			}
 		case chunk.OP_PUSH_METHOD:
 			{
 				method := vm.pop()
-				methodObj, err := allocator.GetObject(method.GetHandle())
+				methodObj, err := heap.GetObject(method.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(method))
@@ -2046,7 +2054,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if m, ok := methodObj.(object.Callable); ok {
 					if m.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
 						m = m.Clone()
-						method = value.EncodeHandle(allocator.Allocate(m))
+						method = value.EncodeHandle(heap.Allocate(m))
 					}
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s was not an function", native.String(method))
@@ -2055,7 +2063,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				key := vm.pop()
 				prototype := vm.peek()
 
-				protoObj, err := allocator.GetObject(prototype.GetHandle())
+				protoObj, err := heap.GetObject(prototype.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(prototype))
@@ -2074,7 +2082,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				class := vm.peekN(1)
 
-				classObj, err := allocator.GetObject(class.GetHandle())
+				classObj, err := heap.GetObject(class.GetHandle())
 
 				if err != nil {
 					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(class))
@@ -2115,12 +2123,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				vm.frameCount--
 				f = vm.currentFrame()
 				c = *f.fn.ValueChunk()
-				vm.push(value.EncodeHandle(allocator.Allocate(v)))
+				vm.push(value.EncodeHandle(heap.Allocate(v)))
 			}
 		case chunk.OP_IMPORT:
 			{
 				source := vm.pop()
-				src, _ := allocator.GetObject(source.GetHandle())
+				src, _ := heap.GetObject(source.GetHandle())
 
 				str := src.String()
 				prev := ROOT_SCRIPT_LOCATION
@@ -2141,7 +2149,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
 				importer.run(f, c)
 
-				imports[str] = value.EncodeHandle(allocator.Allocate(importer.exports))
+				imports[str] = value.EncodeHandle(heap.Allocate(importer.exports))
 				ROOT_SCRIPT_LOCATION = prev
 			}
 		case chunk.OP_EXPORT:
@@ -2173,7 +2181,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_CREATE_REST_OBJECT:
 			{
 				origin := vm.pop()
-				obj, _ := allocator.GetObject(origin.GetHandle())
+				obj, _ := heap.GetObject(origin.GetHandle())
 
 				amountOfExludedKeys := c.Code[ip]
 				ip++
@@ -2182,7 +2190,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				for range amountOfExludedKeys {
 					key := c.Constants[c.Code[ip]]
-					ptr := value.EncodeHandle(allocator.GetPointer(key.GetHandle()))
+					ptr := value.EncodeHandle(heap.GetPointer(key.GetHandle()))
 					exludeMap[ptr] = struct{}{}
 					ip++
 				}
@@ -2193,20 +2201,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if k == native.KEY_PROTO {
 						continue
 					}
-					ptr := value.EncodeHandle(allocator.GetPointer(k.GetHandle()))
+					ptr := value.EncodeHandle(heap.GetPointer(k.GetHandle()))
 					if _, found := exludeMap[ptr]; !found {
 						newObj.SetMember(k, obj.(*native.ObjObject).GetMember(k))
 					}
 				}
-				vm.push(value.EncodeHandle(allocator.Allocate(newObj)))
+				vm.push(value.EncodeHandle(heap.Allocate(newObj)))
 			}
 		case chunk.OP_SET_FROM_SPREAD:
 			{
 				source := vm.pop()
 				destination := vm.peek()
-				obj, _ := allocator.GetObject(source.GetHandle())
+				obj, _ := heap.GetObject(source.GetHandle())
 
-				dstObj, _ := allocator.GetObject(destination.GetHandle())
+				dstObj, _ := heap.GetObject(destination.GetHandle())
 
 				for _, k := range obj.(*native.ObjObject).Keys() {
 					if k == native.KEY_PROTO {
@@ -2223,7 +2231,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 func setHeapScopes(c *value.ValueChunk, heapScope int) error {
 	for _, v := range c.Constants {
 		if v.IsObject() {
-			obj, err := allocator.GetObject(v.GetHandle())
+			obj, err := heap.GetObject(v.GetHandle())
 
 			if err != nil {
 				return err

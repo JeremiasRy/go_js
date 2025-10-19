@@ -1,7 +1,7 @@
 package native
 
 import (
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"strconv"
@@ -74,19 +74,19 @@ func (o *ObjObject) Keys() []value.Value {
 		if k == PROTOTYPE_PROPERTY_STRING {
 			continue
 		}
-		keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
+		keys = append(keys, value.EncodeHandle(heap.Allocate(NewLightString(k))))
 	}
 
 	p := o.Members[PROTOTYPE_PROPERTY_STRING].Value
 
 	for p != value.NULL {
-		obj, _ := allocator.GetObject(p.GetHandle())
+		obj, _ := heap.GetObject(p.GetHandle())
 		if proto, ok := obj.(*ObjObject); ok {
 			for k := range proto.Members {
 				if k == PROTOTYPE_PROPERTY_STRING {
 					continue
 				}
-				keys = append(keys, value.EncodeHandle(allocator.Allocate(NewLightString(k))))
+				keys = append(keys, value.EncodeHandle(heap.Allocate(NewLightString(k))))
 			}
 		}
 		if obj, ok := obj.(object.Hashable); ok {
@@ -136,7 +136,7 @@ func NewHasOwnProperty() *HasOwnProperty {
 }
 
 func (*HasOwnProperty) HasOwn(obj value.Value, prop value.Value) bool {
-	o, err := allocator.GetObject(obj.GetHandle())
+	o, err := heap.GetObject(obj.GetHandle())
 	if err != nil {
 		return false
 	}
@@ -148,7 +148,7 @@ func (ts *ToString) ToString(obj object.Object) string {
 }
 
 func (obj *ObjObject) HasOwn(prop value.Value) bool {
-	property, err := allocator.GetObject(prop.GetHandle())
+	property, err := heap.GetObject(prop.GetHandle())
 
 	if err != nil || property.Type() != object.OBJ_STRING {
 		return false
@@ -166,10 +166,10 @@ func (obj *ObjObject) HasOwn(prop value.Value) bool {
 
 func (obj *ObjObject) GetMember(k value.Value) value.Value {
 	if k.IsObject() {
-		o, err := allocator.GetObject(k.GetHandle())
+		o, err := heap.GetObject(k.GetHandle())
 
 		if err != nil {
-			panic("coundn't receive object from allocator")
+			panic("coundn't receive object from heap")
 		}
 
 		if o.Type() == object.OBJ_STRING {
@@ -185,7 +185,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 				return value.UNDEFINED
 			}
 
-			protoObj, err := allocator.GetObject(proto.GetHandle())
+			protoObj, err := heap.GetObject(proto.GetHandle())
 
 			if err != nil {
 				panic("couldnt get prototype from object")
@@ -210,7 +210,7 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 			return value.UNDEFINED
 		}
 
-		protoObj, err := allocator.GetObject(proto.GetHandle())
+		protoObj, err := heap.GetObject(proto.GetHandle())
 
 		if err != nil {
 			panic("couldnt get prototype from object")
@@ -227,10 +227,10 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 
 func (obj *ObjObject) SetMember(k, v value.Value) {
 	if k.IsObject() {
-		o, err := allocator.GetObject(k.GetHandle())
+		o, err := heap.GetObject(k.GetHandle())
 
 		if err != nil {
-			panic("coundn't receive object from allocator")
+			panic("coundn't receive object from heap")
 		}
 
 		if o.Type() == object.OBJ_STRING {
@@ -274,10 +274,10 @@ func NewObjectValues() *ObjectValues {
 
 func (*ObjectValues) Values(o value.Value) []value.Value {
 	if o.IsObject() {
-		obj, err := allocator.GetObject(o.GetHandle())
+		obj, err := heap.GetObject(o.GetHandle())
 
 		if err != nil {
-			panic("couldn't receive object from allocator")
+			panic("couldn't receive object from heap")
 		}
 
 		switch obj := obj.(type) {
@@ -311,10 +311,10 @@ func NewObjectKeys() *ObjectKeys {
 func (*ObjectKeys) Keys(o value.Value) []value.Value {
 	r := []value.Value{}
 	if o.IsObject() {
-		obj, err := allocator.GetObject(o.GetHandle())
+		obj, err := heap.GetObject(o.GetHandle())
 
 		if err != nil {
-			panic("couldn't receive object from allocator")
+			panic("couldn't receive object from heap")
 		}
 
 		switch obj := obj.(type) {
@@ -325,7 +325,7 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 					if k == PROTOTYPE_PROPERTY_STRING {
 						continue
 					}
-					val := value.EncodeHandle(allocator.Allocate(NewLightString(k)))
+					val := value.EncodeHandle(heap.Allocate(NewLightString(k)))
 					r[v.init-1] = val
 				}
 				// remove __proto__

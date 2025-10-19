@@ -1,4 +1,4 @@
-const numObjects = 1000000;
+const numObjects = 100000;
 const objects = {};
 const startTime = Date.now();
 

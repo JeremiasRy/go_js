@@ -10,5 +10,9 @@ function createCircularReference() {
     console.log(obj1)
     console.log(obj2)
 }
+let i = 0
+while (i < 10) {
+    createCircularReference();
+    i++
+}
 
-createCircularReference();

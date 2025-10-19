@@ -1,7 +1,7 @@
 package native
 
 import (
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"math"
@@ -16,7 +16,7 @@ func NewDateConstructor() *DateConstructor {
 	oc := &DateConstructor{}
 	oc.Members = map[string]ObjectValueEntry{}
 
-	oc.Members["now"] = oc.NewValueEntry(value.EncodeHandle(allocator.Allocate(NewNow())))
+	oc.Members["now"] = oc.NewValueEntry(value.EncodeHandle(heap.Allocate(NewNow())))
 	return oc
 }
 
