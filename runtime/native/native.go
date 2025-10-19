@@ -2,7 +2,7 @@ package native
 
 import (
 	"fmt"
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"log"
@@ -87,7 +87,7 @@ func Init() {
 
 func String(v value.Value) string {
 	if v.IsObject() {
-		obj, err := allocator.GetObject(v.GetHandle())
+		obj, err := heap.GetObject(v.GetHandle())
 
 		if err != nil {
 			log.Fatalf("failed to fetch object '%s'", err)
@@ -140,7 +140,7 @@ func String(v value.Value) string {
 
 func TypeDecoratedString(v value.Value, visited map[uint32]struct{}) string {
 	if v.IsObject() {
-		obj, err := allocator.GetObject(v.GetHandle())
+		obj, err := heap.GetObject(v.GetHandle())
 
 		if err != nil {
 			log.Fatalf("failed to fetch object '%s'", err)
@@ -150,11 +150,11 @@ func TypeDecoratedString(v value.Value, visited map[uint32]struct{}) string {
 			visited = map[uint32]struct{}{}
 		}
 
-		if _, found := visited[allocator.GetPointer(v.GetHandle())]; found {
+		if _, found := visited[heap.GetPointer(v.GetHandle())]; found {
 			return ""
 		}
 
-		visited[allocator.GetPointer(v.GetHandle())] = struct{}{}
+		visited[heap.GetPointer(v.GetHandle())] = struct{}{}
 
 		switch obj := obj.(type) {
 		case *ObjObject:
@@ -241,7 +241,7 @@ func TypeDecoratedString(v value.Value, visited map[uint32]struct{}) string {
 func DebugString(v value.Value) string {
 	if v.IsObject() {
 		handle := v.GetHandle()
-		obj, _ := allocator.GetObject(handle)
+		obj, _ := heap.GetObject(handle)
 		return obj.String()
 
 	}

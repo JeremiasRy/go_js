@@ -2,7 +2,7 @@ package native
 
 import (
 	"fmt"
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 )
@@ -99,13 +99,13 @@ func NewMapSet() *MapSet {
 
 func (*MapSet) Set(owner *Map, k value.Value, v value.Value) {
 	if k.IsObject() {
-		keyPtr := allocator.GetPointer(k.GetHandle())
+		keyPtr := heap.GetPointer(k.GetHandle())
 
 		for k := range owner.values {
 			if !k.IsObject() {
 				continue
 			}
-			if allocator.GetPointer(k.GetHandle()) == keyPtr {
+			if heap.GetPointer(k.GetHandle()) == keyPtr {
 
 				entry := owner.values[k]
 				entry.Value = v
@@ -144,13 +144,13 @@ func NewMapGet() *MapGet {
 
 func (*MapGet) Get(owner *Map, k value.Value) value.Value {
 	if k.IsObject() {
-		kPtr := allocator.GetPointer(k.GetHandle())
+		kPtr := heap.GetPointer(k.GetHandle())
 
 		for k, v := range owner.values {
 			if !k.IsObject() {
 				continue
 			}
-			if allocator.GetPointer(k.GetHandle()) == kPtr {
+			if heap.GetPointer(k.GetHandle()) == kPtr {
 				return v.Value
 			}
 		}
@@ -174,13 +174,13 @@ func NewMapHas() *MapHas {
 func (*MapHas) Has(owner *Map, k value.Value) value.Value {
 
 	if k.IsObject() {
-		kPtr := allocator.GetPointer(k.GetHandle())
+		kPtr := heap.GetPointer(k.GetHandle())
 
 		for k := range owner.values {
 			if !k.IsObject() {
 				continue
 			}
-			if allocator.GetPointer(k.GetHandle()) == kPtr {
+			if heap.GetPointer(k.GetHandle()) == kPtr {
 				return value.TRUE
 			}
 		}

@@ -1,4 +1,4 @@
-package allocator
+package heap
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"go_js/value"
 )
 
-type Allocator struct {
+type Heap struct {
 	heapVars       map[int][]value.Value
 	heapScopeCount int
 
@@ -27,7 +27,7 @@ type Allocator struct {
 
 var debug = false
 
-var a = &Allocator{
+var a = &Heap{
 	heapVars:       map[int][]value.Value{},
 	heapScopeCount: 0,
 	handleLayer:    map[uint32]uint32{},
@@ -65,30 +65,30 @@ func CreateHeapScope() (scope int) {
 	return scope
 }
 
-func (a *Allocator) shouldRunGCCycle() bool {
+func (a *Heap) shouldRunGCCycle() bool {
 	return a.handleCount%uint32(a.gcCycleDeterminator) == 0
 }
 
-func (a *Allocator) getHeapVar(scope, slot int) value.Value {
+func (a *Heap) getHeapVar(scope, slot int) value.Value {
 	return a.heapVars[scope][slot]
 }
 
-func (a *Allocator) setHeapVar(scope, slot int, v value.Value) {
+func (a *Heap) setHeapVar(scope, slot int, v value.Value) {
 	a.heapVars[scope][slot] = v
 }
 
-func (a *Allocator) defineHeapVar(scope int, v value.Value) {
+func (a *Heap) defineHeapVar(scope int, v value.Value) {
 	a.heapVars[scope] = append(a.heapVars[scope], v)
 }
 
-func (a *Allocator) createHeapScope() (scope int) {
+func (a *Heap) createHeapScope() (scope int) {
 	a.heapScopeCount++
 	a.heapVars[a.heapScopeCount] = []value.Value{}
 	scope = a.heapScopeCount
 	return scope
 }
 
-func (a *Allocator) allocate(obj object.Object) (handle uint32) {
+func (a *Heap) allocate(obj object.Object) (handle uint32) {
 	if obj.Type() == object.OBJ_STRING {
 		val := obj.String()
 		if ptr, found := a.strings[val]; found {
@@ -112,7 +112,7 @@ func (a *Allocator) allocate(obj object.Object) (handle uint32) {
 	return handle
 }
 
-func (a *Allocator) heapAllocate(obj object.Object) (pointer uint32) {
+func (a *Heap) heapAllocate(obj object.Object) (pointer uint32) {
 	if len(a.freeList) > 0 {
 		for key := range a.freeList {
 			pointer = key
@@ -130,14 +130,14 @@ func (a *Allocator) heapAllocate(obj object.Object) (pointer uint32) {
 	return pointer
 }
 
-func (a *Allocator) getObject(handle uint32) (object.Object, error) {
+func (a *Heap) getObject(handle uint32) (object.Object, error) {
 	if ptr, found := a.handleLayer[handle]; found {
 		return a.objects[ptr], nil
 	}
 	return nil, fmt.Errorf("no pointer found for handle %d", handle)
 }
 
-func (a *Allocator) getPointer(handle uint32) (pointer uint32) {
+func (a *Heap) getPointer(handle uint32) (pointer uint32) {
 	pointer = a.handleLayer[handle]
 	return pointer
 }
@@ -204,7 +204,7 @@ func markAndSweep(stackValues []value.Value) {
 	}
 }
 
-func (a *Allocator) sweep() {
+func (a *Heap) sweep() {
 	count := len(a.freeList)
 
 	for i, obj := range a.objects {

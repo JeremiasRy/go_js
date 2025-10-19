@@ -2,7 +2,7 @@ package native
 
 import (
 	"fmt"
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 )
@@ -24,9 +24,9 @@ func NewObjectConsole() *Console {
 	c.Members = map[string]ObjectValueEntry{}
 	c.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
-	log := value.EncodeHandle(allocator.Allocate(NewLightString("log")))
+	log := value.EncodeHandle(heap.Allocate(NewLightString("log")))
 
-	c.SetMember(log, value.EncodeHandle(allocator.Allocate(NewLog())))
+	c.SetMember(log, value.EncodeHandle(heap.Allocate(NewLog())))
 	return c
 }
 

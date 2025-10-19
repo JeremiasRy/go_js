@@ -1,7 +1,7 @@
 package native
 
 import (
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"strings"
@@ -158,7 +158,7 @@ func NewStringReplace() *StringReplace {
 
 func (*StringReplace) Replace(owner object.Object, searchValue string, replaceValue string) value.Value {
 	result := strings.Replace(owner.String(), searchValue, replaceValue, 1)
-	return value.EncodeHandle(allocator.Allocate(NewLightString(result)))
+	return value.EncodeHandle(heap.Allocate(NewLightString(result)))
 }
 
 type StringSplit struct {
@@ -176,9 +176,9 @@ func (*StringSplit) Split(owner object.Object, separator string) value.Value {
 	items := []value.Value{}
 
 	for _, s := range strings.Split(owner.String(), separator) {
-		items = append(items, value.EncodeHandle(allocator.Allocate(NewLightString(s))))
+		items = append(items, value.EncodeHandle(heap.Allocate(NewLightString(s))))
 	}
-	return value.EncodeHandle(allocator.Allocate(NewArrayFrom(items)))
+	return value.EncodeHandle(heap.Allocate(NewArrayFrom(items)))
 }
 
 type StringStartsWith struct {

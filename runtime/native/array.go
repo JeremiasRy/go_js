@@ -1,7 +1,7 @@
 package native
 
 import (
-	"go_js/allocator"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"slices"
@@ -172,7 +172,7 @@ func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
 	}
 
 	res := strings.Join(i, s)
-	return value.EncodeHandle(allocator.Allocate(NewLightString(res)))
+	return value.EncodeHandle(heap.Allocate(NewLightString(res)))
 }
 
 type ArrayReverse struct {

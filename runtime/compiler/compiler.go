@@ -4,8 +4,8 @@ import (
 	"cmp"
 	"fmt"
 
-	"go_js/allocator"
 	"go_js/chunk"
+	"go_js/heap"
 	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
@@ -276,7 +276,7 @@ func (fs *FunctionScope) currentBlockVarCount() (int, bool) {
 
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := native.NewObjectConsole()
-	consoleHandle := allocator.Allocate(console)
+	consoleHandle := heap.Allocate(console)
 	symbolTable.addVariable(CONSOLE_OBJECT_NAME, CONST, false, nil)
 
 	main.ValueChunk().WriteConstant(value.EncodeHandle(consoleHandle))
@@ -285,7 +285,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 
 func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	objCtor := native.NewObjectConstructor()
-	objCtorHandle := allocator.Allocate(objCtor)
+	objCtorHandle := heap.Allocate(objCtor)
 
 	symbolTable.addVariable(native.OBJECT_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(objCtorHandle))
@@ -294,7 +294,7 @@ func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 
 func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	arrCtor := &native.ArrayConstructor{}
-	arrCtorHandle := allocator.Allocate(arrCtor)
+	arrCtorHandle := heap.Allocate(arrCtor)
 
 	symbolTable.addVariable(native.ARRAY_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(arrCtorHandle))
@@ -303,7 +303,7 @@ func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 
 func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	ctor := &native.ErrorConstructor{}
-	ctorHandle := allocator.Allocate(ctor)
+	ctorHandle := heap.Allocate(ctor)
 
 	symbolTable.addVariable(native.ERROR_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
@@ -312,7 +312,7 @@ func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 
 func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 	setTimeout := native.NewSetTimeout()
-	setTimeouthandle := allocator.Allocate(setTimeout)
+	setTimeouthandle := heap.Allocate(setTimeout)
 
 	symbolTable.addVariable(SET_TIMEOUT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(setTimeouthandle))
@@ -321,7 +321,7 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 
 func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	promiseCtor := native.NewPromiseConstructor()
-	promiseCtorHandle := allocator.Allocate(promiseCtor)
+	promiseCtorHandle := heap.Allocate(promiseCtor)
 
 	symbolTable.addVariable(native.PROMISE_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
@@ -330,7 +330,7 @@ func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 
 func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	dateCtor := native.NewDateConstructor()
-	dateCtorHandle := allocator.Allocate(dateCtor)
+	dateCtorHandle := heap.Allocate(dateCtor)
 
 	symbolTable.addVariable(native.DATE_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(dateCtorHandle))
@@ -339,7 +339,7 @@ func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope)
 
 func defineMapConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	mapCtor := native.NewMapConstructor()
-	mapCtorHandle := allocator.Allocate(mapCtor)
+	mapCtorHandle := heap.Allocate(mapCtor)
 
 	symbolTable.addVariable(native.MAP_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(mapCtorHandle))
@@ -348,7 +348,7 @@ func defineMapConstructor(main *object.ObjFunction, symbolTable *FunctionScope) 
 
 func defineSetConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	setCtor := native.NewSetConstructor()
-	setCtorHandle := allocator.Allocate(setCtor)
+	setCtorHandle := heap.Allocate(setCtor)
 
 	symbolTable.addVariable(native.SET_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(setCtorHandle))
@@ -357,7 +357,7 @@ func defineSetConstructor(main *object.ObjFunction, symbolTable *FunctionScope) 
 
 func defineQueueMicroTask(main *object.ObjFunction, symbolTable *FunctionScope) {
 	queueMicroTask := native.NewQueueMicroTask()
-	handle := allocator.Allocate(queueMicroTask)
+	handle := heap.Allocate(queueMicroTask)
 
 	symbolTable.addVariable(native.QUEUE_MICRO_TASK_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
@@ -366,7 +366,7 @@ func defineQueueMicroTask(main *object.ObjFunction, symbolTable *FunctionScope) 
 
 func defineParseInt(main *object.ObjFunction, symbolTable *FunctionScope) {
 	parseInt := native.NewParseInt()
-	handle := allocator.Allocate(parseInt)
+	handle := heap.Allocate(parseInt)
 
 	symbolTable.addVariable(native.PARSE_INT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
@@ -444,7 +444,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 			for _, variable := range functions {
 				if !variable.allocated {
-					fnValue := allocator.Allocate(variable.fn)
+					fnValue := heap.Allocate(variable.fn)
 
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 					if module {
@@ -539,7 +539,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							popReturnValue.pop()
 						} else {
 							str := native.NewLightString(current.Left.Property.Name)
-							handle := allocator.Allocate(str)
+							handle := heap.Allocate(str)
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 						}
 						popReturnValue.push(false)
@@ -612,7 +612,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			})
 
 			for _, variable := range functions {
-				fnValue := allocator.Allocate(variable.fn)
+				fnValue := heap.Allocate(variable.fn)
 
 				slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 
@@ -666,7 +666,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.SetHasArguments()
 			}
 
-			handle := allocator.Allocate(newFn)
+			handle := heap.Allocate(newFn)
 			v := value.EncodeHandle(handle)
 
 			functions := []*Variable{}
@@ -688,7 +688,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			})
 
 			for _, variable := range functions {
-				fnValue := allocator.Allocate(variable.fn)
+				fnValue := heap.Allocate(variable.fn)
 				slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 
 				if uint8(variable.slot) != slot {
@@ -740,7 +740,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			if symbolTable.hasRestParameter {
 				newFn.SetHasRestParameter()
 			}
-			handle := allocator.Allocate(newFn)
+			handle := heap.Allocate(newFn)
 			value := value.EncodeHandle(handle)
 
 			if current.IsExpression {
@@ -835,7 +835,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Computed {
 					generateByteCode(current.Property, symbolTable, fn)
 				} else {
-					handle := allocator.Allocate(native.NewLightString(current.Property.Name))
+					handle := heap.Allocate(native.NewLightString(current.Property.Name))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 				}
 			case parser.NODE_UNARY_EXPRESSION:
@@ -940,8 +940,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						name := prop.Value.(*parser.Node).Name
 						property, _ := symbolTable.findVariable(name)
 						var defineOp uint8
-						k := value.EncodeHandle(allocator.Allocate(native.NewLightString(prop.Key.Name)))
-						v := value.EncodeHandle(allocator.Allocate(native.NewLightString(name)))
+						k := value.EncodeHandle(heap.Allocate(native.NewLightString(prop.Key.Name)))
+						v := value.EncodeHandle(heap.Allocate(native.NewLightString(name)))
 
 						switch property.scope {
 						case LOCAL:
@@ -1074,7 +1074,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 			case []byte:
 				{
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(string(v)))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(string(v)))))
 				}
 			case bool:
 				{
@@ -1115,12 +1115,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			variable, _ := symbolTable.findVariable(current.Name)
 
 			if variable == nil {
-				msg := value.EncodeHandle(allocator.Allocate(native.NewLightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
+				msg := value.EncodeHandle(heap.Allocate(native.NewLightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
 
 				err := native.NewError()
 				err.SetMember(native.KEY_MESSAGE, msg)
 
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(err)))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
 				fn.ValueChunk().EmitByte(chunk.OP_THROW)
 				return
 			}
@@ -1384,7 +1384,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for _, property := range current.Properties {
 				switch property.Type {
 				case parser.NODE_PROPERTY:
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(property.Key.Name))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name))))
 					generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 					fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
 				case parser.NODE_SPREAD_ELEMENT:
@@ -1407,7 +1407,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	case parser.NODE_TEMPLATE_LITERAL:
 		{
 			start := native.NewLightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Raw)
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(start)))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(start)))
 
 			if len(current.Quasis) == 1 {
 				return
@@ -1423,7 +1423,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			for i < len(current.Quasis) {
 				quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
 
-				fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(quasi.Raw))))
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(quasi.Raw))))
 				fn.ValueChunk().EmitByte(chunk.OP_ADD)
 
 				if i < len(current.Expressions) {
@@ -1533,7 +1533,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		}
 	case parser.NODE_CLASS_DECLARATION:
 		{
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(current.Identifier.Name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Identifier.Name))))
 			fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
 
 			generateByteCode(current.BodyNode, symbolTable, fn)
@@ -1568,14 +1568,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 			}
 
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(name))))
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(method)))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(method)))
 			fn.ValueChunk().EmitByte(chunk.OP_PUSH_METHOD)
 		}
 	case parser.NODE_PROPERTY_DEFINITION:
 		{
 			name := current.Key.Name
-			fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(name))))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
 			generateByteCode(current.Value.(*parser.Node), symbolTable, fn)
 
 			fn.ValueChunk().EmitByte(chunk.OP_PUSH_PROPERTY)
@@ -1601,14 +1601,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					declarator := declaration.Declarations[0]
 					v, _ := symbolTable.findVariable(declarator.Identifier.Name)
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(declarator.Identifier.Name))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(declarator.Identifier.Name))))
 					fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
 				}
 			case parser.NODE_FUNCTION_DECLARATION:
 				{
 					v, _ := symbolTable.findVariable(declaration.Identifier.Name)
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(declaration.Identifier.Name))))
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(declaration.Identifier.Name))))
 					fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
 
 				}
@@ -1704,9 +1704,9 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 							}
 
 							if prop.Shorthand {
-								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(v))))
+								fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(v))))
 							} else {
-								fn.ValueChunk().WriteConstant(value.EncodeHandle(allocator.Allocate(native.NewLightString(k))))
+								fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(k))))
 
 							}
 
