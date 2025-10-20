@@ -46,7 +46,7 @@ As in any projects they really are never done, and things can be improved endles
 **Notable things to improve/add**
 1. Proper error handling for rejected promises
 2. Support `var`, parser already parses these so wouldn't be too much work to add it in
-3. (JIT)[https://en.wikipedia.org/wiki/Just-in-time_compilation] compilation, this is probably what I'm going for, at least for simple functions, so that naive fib(40) doesn't run for 10 seconds...
+3. [JIT](https://en.wikipedia.org/wiki/Just-in-time_compilation) compilation, this is probably what I'm going for, at least for simple functions, so that naive fib(40) doesn't run for 10 seconds...
 4. Http requests with `fetch()`
 5. A http server? Would just be a wrapper for go's `net/http`
 
