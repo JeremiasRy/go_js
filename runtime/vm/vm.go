@@ -6,6 +6,7 @@ import (
 	"go_js/compiler"
 	"go_js/eventloop"
 	"go_js/heap"
+	"go_js/jit"
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
@@ -22,6 +23,7 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
+const IS_HOT_PATH = 1
 
 var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
@@ -57,6 +59,7 @@ type VM struct {
 	stack          []value.Value
 	stackTop       int
 	exceptionStack []ExceptionState
+	callCounts     map[object.Callable]int
 
 	exports *native.ObjObject
 
@@ -76,6 +79,7 @@ func NewVM(debug bool, main bool) *VM {
 		exceptionStack: []ExceptionState{},
 		debug:          debug,
 		main:           main,
+		callCounts:     map[object.Callable]int{},
 	}
 }
 
@@ -375,6 +379,7 @@ func (vm *VM) findArgStart() []value.Value {
 func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCount int, calledWithSpread bool) (f CallFrame, c value.ValueChunk) {
 	localStart := max(vm.stackTop-argCount, 0)
 	returnIp := 0
+	vm.callCounts[fn]++
 
 	if currentIp != nil {
 		returnIp = *currentIp
@@ -383,12 +388,16 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	vm.frames[vm.frameCount].initCallFrame(fn, localStart, returnIp, this)
 	vm.frameCount++
 
+	f = vm.currentFrame()
+	c = *f.fn.ValueChunk()
+
+	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn) {
+		jit.Prologue(&vm.stack[f.localStart], &c.Constants[0])
+	}
+
 	if currentIp != nil {
 		*currentIp = 0
 	}
-
-	f = vm.currentFrame()
-	c = *f.fn.ValueChunk()
 
 	if fn.HasArguments() {
 		items := vm.popN(argCount)
