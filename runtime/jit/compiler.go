@@ -24,9 +24,6 @@ const (
 
 	PFX_REX = 0x40
 	REXW    = PFX_REX | 0x08
-	REXR    = PFX_REX | 0x04
-	REXX    = PFX_REX | 0x02
-	REXB    = PFX_REX | 0x01
 
 	RET byte = 0xC3
 )
@@ -35,10 +32,7 @@ var MOV_SD_LOAD = []byte{0xF2, 0x0F, 0x10}
 var MOV_SD_STORE = []byte{0xF2, 0x0F, 0x11}
 var ADD_SD = []byte{0xF2, 0x0F, 0x58}
 
-const (
-	LOCAL_START = 2
-	LOCAL_END   = LOCAL_START + 7
-)
+const LOCAL_START = 2
 
 var jittedFns = map[object.Callable]*Assembler{}
 var jittableFns = map[object.Callable]bool{}
@@ -73,8 +67,8 @@ func (asm *Assembler) emitUint64(val uint64) {
 	asm.offset += 8
 }
 
-func (asm *Assembler) modRm(mod, reg, rm byte) {
-	asm.emitBytes((mod << 6) | (reg << 3) | rm)
+func (asm *Assembler) modRm(mod, from, to byte) {
+	asm.emitBytes((mod << 6) | (from << 3) | to)
 }
 
 func (asm *Assembler) popFreeRegister() byte {
@@ -148,11 +142,8 @@ func NewAssembler() (*Assembler, error) {
 }
 
 func (asm *Assembler) patchLocalStart(start uint64) {
-	err := syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC)
+	syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC)
 
-	if err != nil {
-		panic("this should never happen (i hope)")
-	}
 	asm.buffer[LOCAL_START] = byte(start)
 	asm.buffer[LOCAL_START+1] = byte(start >> 8)
 	asm.buffer[LOCAL_START+2] = byte(start >> 16)
@@ -162,10 +153,7 @@ func (asm *Assembler) patchLocalStart(start uint64) {
 	asm.buffer[LOCAL_START+6] = byte(start >> 48)
 	asm.buffer[LOCAL_START+7] = byte(start >> 56)
 
-	err = syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_EXEC)
-	if err != nil {
-		panic("this should never happen (i hope)")
-	}
+	syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_EXEC)
 }
 
 func compileFunction(fn object.Callable, localStart *value.Value) (*Assembler, error) {
