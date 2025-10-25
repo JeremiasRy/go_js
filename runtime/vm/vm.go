@@ -23,7 +23,7 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const IS_HOT_PATH = 1
+const IS_HOT_PATH = 1000
 
 var ROOT_SCRIPT_LOCATION string
 var globals []value.Value
@@ -392,7 +392,20 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	c = *f.fn.ValueChunk()
 
 	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn) {
-		jit.Prologue(&vm.stack[f.localStart], &c.Constants[0])
+		if vm.debug {
+			fmt.Println("-- CALLING JIT FUNCTION --")
+		}
+		err := jit.JITFunction(&vm.stack[f.localStart], fn)
+
+		if err == nil {
+			*currentIp = f.returnIp
+
+			vm.frameCount--
+
+			f = vm.currentFrame()
+			c = *f.fn.ValueChunk()
+			return
+		}
 	}
 
 	if currentIp != nil {
@@ -427,7 +440,7 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		}
 	}
 
-	return f, c
+	return
 }
 
 func (vm *VM) Run(wg *sync.WaitGroup) {

@@ -4,7 +4,7 @@ function add2(n) {
 
 let i = 0
 
-while (i < 2) {
+while (i < 1002) {
     add2(i)
     i++
 }
