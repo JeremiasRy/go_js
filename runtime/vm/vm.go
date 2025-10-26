@@ -23,10 +23,11 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const IS_HOT_PATH = 1000
+const IS_HOT_PATH = 0
 
 var ROOT_SCRIPT_LOCATION string
-var globals []value.Value
+var globals = make([]value.Value, 30)
+var globalsCount = 0
 var imports = make(map[string]value.Value)
 
 type CallFrame struct {
@@ -102,7 +103,12 @@ func (vm *VM) pop() value.Value {
 }
 
 func (vm *VM) addGlobal(v value.Value) {
-	globals = append(globals, v)
+	if globalsCount >= len(globals) {
+		globals = append(globals, v)
+		return
+	}
+	globals[globalsCount] = v
+	globalsCount++
 }
 
 func (vm *VM) getGlobal(global int) value.Value {
@@ -391,11 +397,11 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn) {
+	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn, globals) {
 		if vm.debug {
 			fmt.Println("-- CALLING JIT FUNCTION --")
 		}
-		err := jit.JITFunction(&vm.stack[f.localStart], fn)
+		err := jit.JITFunction(&vm.stack[f.localStart], &globals[0], fn)
 
 		if err == nil {
 			*currentIp = f.returnIp
@@ -405,6 +411,10 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 			f = vm.currentFrame()
 			c = *f.fn.ValueChunk()
 			return
+		}
+
+		if vm.debug {
+			fmt.Printf("failed to run JIT code %s\n", err.Error())
 		}
 	}
 

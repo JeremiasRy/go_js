@@ -128,9 +128,9 @@ func printFunction(c value.ValueChunk) {
 			fmt.Printf("%04d | %d \n", ip*4, opCode[ip])
 			ip++
 			if opCode[ip] == 0 {
-				fmt.Printf("%04d | false \n", ip*4)
+				fmt.Printf("%04d | spread: false \n", ip*4)
 			} else {
-				fmt.Printf("%04d | true \n", ip*4)
+				fmt.Printf("%04d | spread: true \n", ip*4)
 			}
 		case chunk.OP_JUMP_IF_FALSE, chunk.OP_TRY_BLOCK_START,
 			chunk.OP_JUMP_IF_TRUE, chunk.OP_JUMP:

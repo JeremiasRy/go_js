@@ -1,10 +1,10 @@
-function add2(n) {
+function adder(n) {
     return n + 2
 }
 
 let i = 0
 
 while (i < 1002) {
-    add2(i)
+    adder(i)
     i++
 }
