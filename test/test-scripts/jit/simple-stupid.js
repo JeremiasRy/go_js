@@ -1,4 +1,7 @@
 function adder(n) {
+    if (n <= 1000) {
+        return n + 99
+    }
     return n + 2
 }
 

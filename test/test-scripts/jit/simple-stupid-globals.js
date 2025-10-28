@@ -4,7 +4,7 @@ function adder(n) {
     return n + i
 }
 
-while (i < 2) {
+while (i < 1001) {
     adder(i)
     i++
 }
