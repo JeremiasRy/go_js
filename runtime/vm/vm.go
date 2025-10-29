@@ -23,7 +23,7 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const IS_HOT_PATH = 0
+const IS_HOT_PATH = 1000
 
 var ROOT_SCRIPT_LOCATION string
 var globals = make([]value.Value, 30)
