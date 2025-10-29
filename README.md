@@ -31,12 +31,10 @@ flowchart TD
     D --> | task | G[Task Queue]
     C -->E[Virtual Machine]
 
-
     G --> |task| H{JIT}
     H --> |task| E
     E --> |setTimeout/promise| D
 ```
-
 
 ## Implementation Scope & A real world example
 
