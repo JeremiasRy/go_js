@@ -736,14 +736,3 @@ func checkJittability(fn object.Callable, globals []value.Value) (is bool, local
 
 	return true, localcount
 }
-
-/*
-53 55 41 54 41 55 48 bb  00 10 21 00 c0 00 00 00
-49 bc 00 20 18 00 c0 00  00 00 f2 0f 10 8b 00 00
-00 00 f2 0f 10 93 08 00  00 00 e8 0c 00 00 00 f2
-0f 11 43 00 41 5d 41 5c  5d 5b c3 55 48 8b ec 48
-81 ec 38 00 00 00 f2 0f  11 95 f8 ff ff ff f2 0f
-11 8d f0 ff ff ff f2 0f  10 8d f8 ff ff ff f2 0f
-10 95 f0 ff ff ff f2 0f  58 ca f2 0f 10 c1 48 8b
-e5 5d c3
-*/
