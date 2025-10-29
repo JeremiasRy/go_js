@@ -7,7 +7,7 @@ Not that he world needs another javaScript runtime, it's an educational project 
 - Event loop (setTimeout, async/await, micro/macro task queues)
 - [JIT](https://en.wikipedia.org/wiki/Just-in-time_compilation) compilation, pretty limited at the moment, but can handle recursive fibonacci for exanple. Check [jit-compiler](runtime/jit/compiler.go).
 - Closures
-- Garbage collection (not a language feature, but a tricky thing to implement)
+- Garbage collection (not a language feature, but can be a tricky thing to implement)
 
 ## How to run
 Requires go version `1.22.5`
