@@ -1,12 +1,12 @@
 package jit
 
 import (
-	"encoding/hex"
 	"fmt"
 	"go_js/chunk"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"slices"
 	"syscall"
 	"unsafe"
 )
@@ -56,7 +56,10 @@ var SUB_SD = []byte{0xF2, 0x0F, 0x5C}
 var UCOMISD = []byte{0x66, 0x0F, 0x2E}
 
 var jittedFns = map[object.Callable]*Assembler{}
-var jittableFns = map[object.Callable]bool{}
+var jittableFns = map[object.Callable]struct {
+	is     bool
+	locals int
+}{}
 var jumpstack = []struct {
 	when         int
 	bufferOffset uint32
@@ -74,7 +77,27 @@ type Assembler struct {
 	valueStack   []byte
 }
 
-type JittedFn func()
+func NewAssembler() (*Assembler, error) {
+	buffer, err := syscall.Mmap(
+		-1,
+		0,
+		PAGE_SIZE,
+		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
+		syscall.MAP_PRIVATE|syscall.MAP_ANON,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &Assembler{
+		buffer: buffer,
+		offset: 0,
+
+		freeRegister: []byte{XMM5, XMM4, XMM3, XMM2, XMM1},
+		valueStack:   []byte{},
+	}, nil
+}
 
 func (asm *Assembler) emitBytes(b ...byte) {
 	for _, b := range b {
@@ -187,28 +210,6 @@ func JITFunction(localStart *value.Value, globals *value.Value, fn object.Callab
 
 	asm.createJITFunction()()
 	return nil
-}
-
-func NewAssembler() (*Assembler, error) {
-	buffer, err := syscall.Mmap(
-		-1,
-		0,
-		PAGE_SIZE,
-		syscall.PROT_READ|syscall.PROT_WRITE|syscall.PROT_EXEC,
-		syscall.MAP_PRIVATE|syscall.MAP_ANON,
-	)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &Assembler{
-		buffer: buffer,
-		offset: 0,
-
-		freeRegister: []byte{XMM5, XMM4, XMM3, XMM2, XMM1, XMM0},
-		valueStack:   []byte{},
-	}, nil
 }
 
 func (asm *Assembler) patchLocalStart(ptr uint64) {
@@ -357,6 +358,8 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 
 	asm.patchInt32(patchCall, asm.offset-from)
 
+	fnStart := asm.offset
+
 	// FUNCTION CALL START
 	// Notes for myself to understand/remember this stuff:
 	// We have just called our jitted function RSP now points to the return address
@@ -370,8 +373,8 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	// our locals start at offset -8 from it
 	// 0x <return addr>
 	// 0x <Old RBP address>    <- RSP <- RBP
-	asm.emitSubimm32(RSP, int32(fn.GetArity())*0x08)
-	// Decrement rsp by the size of our arguments/locals whatever we want to call them "arity", let's imagine it's 2
+	asm.emitSubimm32(RSP, int32(fn.GetArity()+jittableFns[fn].locals+4)*0x08)
+	// Decrement rsp by the total size of our arguments + locals + spills, let's imagine it's 2
 	// now we have space for our variables
 	// 0x <return addr>
 	// 0x <Old RBP address>     <- RBP
@@ -415,6 +418,81 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 		i++
 
 		switch op {
+		case chunk.OP_CALL:
+			{
+				argCount := int(code[i])
+				i += 2                         // skip called with spread flag
+				r, _ := asm.popValueRegister() // popping callee from the virtual stack, it's not needed since we only support recursion
+				asm.pushFreeRegister(r)
+
+				args := []byte{}
+
+				for range argCount {
+					arg, _ := asm.popValueRegister()
+					args = append(args, arg)
+					asm.pushFreeRegister(arg)
+				}
+
+				spilled := []byte{}
+				spillStart := 0
+
+				if len(asm.valueStack) > 0 {
+					r, err = asm.popValueRegister()
+					spillStart = fn.GetArity() + jittableFns[fn].locals
+
+					offset := 1
+					for err == nil {
+						asm.emitBytes(MOV_SD_STORE...)
+						asm.modRm(MOD_MEMORY_32_BYTE_OFFSET, r, RBP)
+						asm.emitInt32(int32((-8 * spillStart) + (-8 * offset)))
+						offset++
+
+						asm.pushFreeRegister(r)
+						spilled = append(spilled, r)
+
+						r, err = asm.popValueRegister()
+					}
+				}
+
+				slices.Sort(asm.freeRegister)
+				slices.Reverse(asm.freeRegister)
+
+				for _, arg := range args {
+					dest, _ := asm.popFreeRegister()
+					asm.emitBytes(MOV_SD_LOAD...)
+					asm.modRm(MOD_REG_TO_REG, dest, arg)
+				}
+
+				asm.emitCall()
+				asm.patchInt32(asm.offset-4, fnStart-asm.offset)
+
+				slices.Reverse(spilled)
+
+				off := len(spilled)
+				for i, r := range spilled {
+					asm.emitBytes(MOV_SD_LOAD...)
+					asm.modRm(MOD_MEMORY_32_BYTE_OFFSET, r, RBP)
+					asm.emitInt32(int32((-8 * spillStart) + (-8 * (off - i))))
+
+					asm.pushValueRegister(r)
+				}
+
+				asm.freeRegister = []byte{}
+
+				for r := XMM5; r > XMM0; r-- {
+
+					if !slices.Contains(asm.valueStack, r) {
+						asm.freeRegister = append(asm.freeRegister, byte(r))
+					}
+				}
+
+				r, _ = asm.popFreeRegister()
+
+				asm.emitBytes(MOV_SD_LOAD...)
+				asm.modRm(MOD_REG_TO_REG, r, XMM0)
+
+				asm.pushValueRegister(r)
+			}
 		case chunk.OP_RETURN:
 			{
 				v, err := asm.popValueRegister()
@@ -440,6 +518,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 				// 0x <return addr> <- RSP
 
 				asm.emitBytes(RET)
+				asm.pushFreeRegister(v)
 			}
 		case chunk.OP_LESS_THAN_EQUAL:
 			{
@@ -570,17 +649,20 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 				asm.pushFreeRegister(b)
 			}
 		default:
-			jittableFns[fn] = false
+			jittableFns[fn] = struct {
+				is     bool
+				locals int
+			}{is: false}
 			return nil, fmt.Errorf("unimplemented op code %d", op)
 		}
 	}
 
 	err = syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_EXEC)
-
-	fmt.Println("Compiled assembly")
-	fmt.Printf("--HEX DUMP--\n\n%s\n", hex.Dump(asm.buffer))
-	fmt.Println("--HEX DUMP--")
-
+	/*
+		fmt.Println("Compiled assembly")
+		fmt.Printf("--HEX DUMP--\n\n%s\n", hex.Dump(asm.buffer))
+		fmt.Println("--HEX DUMP--")
+	*/
 	if err != nil {
 		return nil, fmt.Errorf("mprotect failed: %s", err.Error())
 	}
@@ -591,19 +673,22 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 
 func IsJittable(fn object.Callable, globals []value.Value) bool {
 	if is, found := jittableFns[fn]; found {
-		return is
+		return is.is
 	}
 
-	is := checkJittability(fn, globals)
-	jittableFns[fn] = is
+	is, localcount := checkJittability(fn, globals)
+	jittableFns[fn] = struct {
+		is     bool
+		locals int
+	}{is: is, locals: localcount}
 	return is
 }
 
-func checkJittability(fn object.Callable, globals []value.Value) bool {
+func checkJittability(fn object.Callable, globals []value.Value) (is bool, localcount int) {
 	c := fn.ValueChunk()
 	for _, constant := range c.Constants {
 		if !constant.IsNumber() {
-			return false
+			return false, 0
 		}
 	}
 	i := 0
@@ -613,6 +698,7 @@ func checkJittability(fn object.Callable, globals []value.Value) bool {
 		i++
 		switch code {
 		case chunk.OP_GET_LOCAL:
+			localcount = max(localcount, int(c.Code[i]))
 			i++
 		case chunk.OP_CONSTANT:
 			i++
@@ -628,11 +714,11 @@ func checkJittability(fn object.Callable, globals []value.Value) bool {
 					if obj.Type() == object.OBJ_FUNCTION && obj == fn {
 						continue
 					}
-					return false
+					return false, 0
 				}
 
 				if !global.IsNumber() {
-					return false
+					return false, 0
 				}
 			}
 		case chunk.OP_CALL:
@@ -644,9 +730,9 @@ func checkJittability(fn object.Callable, globals []value.Value) bool {
 				i += 4
 			}
 		default:
-			return false
+			return false, 0
 		}
 	}
 
-	return true
+	return true, localcount
 }
