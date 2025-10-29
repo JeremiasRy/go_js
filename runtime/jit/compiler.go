@@ -314,7 +314,6 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 		return nil, fmt.Errorf("failed to create assembler: %s", err.Error())
 	}
 
-	// ###### JIT STUB START
 	asm.emitPush(RBX)
 	asm.emitPush(RBP)
 	asm.emitPush(R12)
@@ -357,15 +356,10 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	asm.emitPop(R12)
 	asm.emitPop(RBP)
 	asm.emitPop(RBX)
-
 	asm.emitBytes(RET)
-	// ###### JIT STUB END
-
 	asm.patchInt32(patchCall, asm.offset-from)
 
 	fnStart := asm.offset
-
-	// FUNCTION CALL START
 	// Notes for myself to understand/remember this stuff:
 	// We have just called our jitted function RSP now points to the return address
 	// 0x0 <return addr> <- RSP
@@ -375,7 +369,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	// 0x <Old RBP value>    <- RSP
 	asm.emitMov(RBP, RSP)
 	// We now took the RSP's value and put it on RBP so our RBP is now anchored to the current stack top
-	// our locals start at offset -8 from it
+	// our locals start at offset -8 from it (down is up in assembly land)
 	// 0x <return addr>
 	// 0x <Old RBP address>    <- RSP <- RBP
 	asm.emitSubimm32(RSP, int32(fn.GetArity()+jittableFns[fn].locals+SPILLS_REQ_FOR_FIBO)*0x08)
@@ -426,7 +420,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 		case chunk.OP_CALL:
 			{
 				argCount := int(code[i])
-				i += 2                         // skip called with spread flag
+				i += 2                         // skip 'called with spread' flag
 				r, _ := asm.popValueRegister() // popping callee from the virtual stack, it's not needed since we only support recursion
 				asm.pushFreeRegister(r)
 
@@ -509,18 +503,8 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 				asm.emitBytes(MOV_SD_LOAD...)
 				asm.modRm(MOD_REG_TO_REG, XMM0, v)
 
-				// again some notes to, same situation as above (2 locals/arity):
-				// now we take the address of RBP and set it to RSP
-				// 0x <return addr>
-				// 0x <Old RBP address>     <- RBP
-				// 0x <slot>
-				// 0x <slot>                <- RSP
 				asm.emitMov(RSP, RBP)
-				// 0x <return addr>
-				// 0x <Old RBP address>     <- RBP <- RSP
 				asm.emitPop(RBP)
-				// RBP now contains the old address and RSP gets incremented
-				// 0x <return addr> <- RSP
 
 				asm.emitBytes(RET)
 				asm.pushFreeRegister(v)
@@ -558,8 +542,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 					asm.pushFreeRegister(a)
 					asm.pushFreeRegister(b)
 				} else {
-					asm.emitUCOMISD(a, b)
-					// todo push the nan boxed bool value to virtual stack
+					return nil, fmt.Errorf("unsupported op code sequence")
 				}
 			}
 		case chunk.OP_GET_GLOBAL:
