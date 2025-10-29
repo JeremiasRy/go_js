@@ -2,6 +2,7 @@ package heap
 
 import (
 	"fmt"
+	"go_js/flags"
 	"go_js/object"
 	"go_js/value"
 )
@@ -24,8 +25,6 @@ type Heap struct {
 	greyStack           []object.Object
 	gcCycleDeterminator uint32
 }
-
-var debug = false
 
 var a = &Heap{
 	heapVars:       map[int][]value.Value{},
@@ -157,7 +156,7 @@ func GetPointer(handle uint32) uint32 {
 
 // GARBAGE COLLECTION
 func markAndSweep(stackValues []value.Value) {
-	if debug {
+	if flags.Debug {
 		fmt.Println("-- GC DEBUG --")
 		fmt.Printf("Stack values %d\n", len(stackValues))
 	}
@@ -199,7 +198,7 @@ func markAndSweep(stackValues []value.Value) {
 	}
 	a.sweep()
 
-	if debug {
+	if flags.Debug {
 		fmt.Println("-- GC DEBUG END--")
 	}
 }
@@ -211,12 +210,12 @@ func (a *Heap) sweep() {
 		if obj.Marked() {
 			obj.Clear()
 		} else if _, found := a.freeList[uint32(i)]; !found {
-			if debug {
+			if flags.Debug {
 				fmt.Println("Cleaning up:", obj.String())
 			}
 			a.freeList[uint32(i)] = struct{}{}
 			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
-				if debug {
+				if flags.Debug {
 					fmt.Println("removing heap scope", fn.HeapScope)
 				}
 				delete(a.heapVars, fn.HeapScope)
@@ -224,17 +223,17 @@ func (a *Heap) sweep() {
 		}
 	}
 
-	if debug {
+	if flags.Debug {
 		fmt.Printf("cleaned up %d objects #####\n", len(a.freeList)-count)
 	}
 
 	if len(a.freeList)-count == 0 {
-		if debug {
+		if flags.Debug {
 			fmt.Println("Increasing GC CYCLE", a.gcCycleDeterminator*2)
 		}
 		a.gcCycleDeterminator *= 2
 	} else {
-		if debug {
+		if flags.Debug {
 			fmt.Println("Decreasing GC CYCLE", a.gcCycleDeterminator/2)
 		}
 		a.gcCycleDeterminator /= 2
@@ -309,10 +308,9 @@ func RequestGC(stackValues []value.Value) {
 	markAndSweep(stackValues)
 }
 
-func InitGC(roots []value.Value, d bool) {
+func InitGC(roots []value.Value) {
 	a.roots = append(a.roots, roots...)
 	a.init = true
-	debug = d
 }
 
 func PushToRoots(v ...value.Value) {

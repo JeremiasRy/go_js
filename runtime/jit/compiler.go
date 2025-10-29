@@ -1,8 +1,10 @@
 package jit
 
 import (
+	"encoding/hex"
 	"fmt"
 	"go_js/chunk"
+	"go_js/flags"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
@@ -47,6 +49,9 @@ const (
 	MOV  byte = 0x8B
 
 	IMM32 byte = 0x81
+
+	// yeah this is ugly I know..
+	SPILLS_REQ_FOR_FIBO = 4
 )
 
 var MOV_SD_LOAD = []byte{0xF2, 0x0F, 0x10}
@@ -373,7 +378,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	// our locals start at offset -8 from it
 	// 0x <return addr>
 	// 0x <Old RBP address>    <- RSP <- RBP
-	asm.emitSubimm32(RSP, int32(fn.GetArity()+jittableFns[fn].locals+4)*0x08)
+	asm.emitSubimm32(RSP, int32(fn.GetArity()+jittableFns[fn].locals+SPILLS_REQ_FOR_FIBO)*0x08)
 	// Decrement rsp by the total size of our arguments + locals + spills, let's imagine it's 2
 	// now we have space for our variables
 	// 0x <return addr>
@@ -658,11 +663,10 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	}
 
 	err = syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_EXEC)
-	/*
+	if flags.Debug {
 		fmt.Println("Compiled assembly")
-		fmt.Printf("--HEX DUMP--\n\n%s\n", hex.Dump(asm.buffer))
-		fmt.Println("--HEX DUMP--")
-	*/
+		fmt.Printf("\n%s\n", hex.Dump(asm.buffer[:asm.offset]))
+	}
 	if err != nil {
 		return nil, fmt.Errorf("mprotect failed: %s", err.Error())
 	}
@@ -685,12 +689,25 @@ func IsJittable(fn object.Callable, globals []value.Value) bool {
 }
 
 func checkJittability(fn object.Callable, globals []value.Value) (is bool, localcount int) {
+	if !flags.ENABLE_JIT {
+		return false, 0
+	}
+
+	if fn.HasArguments() || fn.HasRestParameter() {
+		return false, 0
+	}
+
 	c := fn.ValueChunk()
 	for _, constant := range c.Constants {
 		if !constant.IsNumber() {
 			return false, 0
 		}
 	}
+
+	if len(c.Code) <= 4 { // basically to limit op_const, 0, op_return type functions to be jitted, or runtime generated ctor calls
+		return false, 0
+	}
+
 	i := 0
 
 	for i < len(c.Code) {
@@ -736,3 +753,14 @@ func checkJittability(fn object.Callable, globals []value.Value) (is bool, local
 
 	return true, localcount
 }
+
+/*
+53 55 41 54 41 55 48 bb  00 10 21 00 c0 00 00 00
+49 bc 00 20 18 00 c0 00  00 00 f2 0f 10 8b 00 00
+00 00 f2 0f 10 93 08 00  00 00 e8 0c 00 00 00 f2
+0f 11 43 00 41 5d 41 5c  5d 5b c3 55 48 8b ec 48
+81 ec 38 00 00 00 f2 0f  11 95 f8 ff ff ff f2 0f
+11 8d f0 ff ff ff f2 0f  10 8d f8 ff ff ff f2 0f
+10 95 f0 ff ff ff f2 0f  58 ca f2 0f 10 c1 48 8b
+e5 5d c3
+*/

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/compiler"
 	"go_js/eventloop"
+	"go_js/flags"
 	"go_js/heap"
 	"go_js/native"
 	"go_js/parser"
@@ -20,7 +21,6 @@ var PROFILE = false
 var ROOT_FILE_OCATION string
 
 func main() {
-	var debug bool = false
 	if PROFILE {
 		f, err := os.Create("cpu.prof")
 		if err != nil {
@@ -43,7 +43,7 @@ func main() {
 	}
 
 	if len(os.Args) == 3 {
-		debug = os.Args[2] == "--debug"
+		flags.Debug = os.Args[2] == "--debug"
 	}
 
 	b, err := os.ReadFile(os.Args[1])
@@ -65,7 +65,7 @@ func main() {
 		log.Fatalf("Failed to parse javascript, %e", err)
 	}
 
-	if debug {
+	if flags.Debug {
 		println("### Abtract Syntax Tree ###")
 		parser.PrintNode(ast)
 		println()
@@ -73,7 +73,7 @@ func main() {
 	native.Init()
 
 	main, err := compiler.Compile(ast)
-	heap.InitGC(main.ValueChunk().Constants, debug)
+	heap.InitGC(main.ValueChunk().Constants)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
@@ -84,7 +84,7 @@ func main() {
 	queue.Init(&wg)
 	eventloop.Init(&wg)
 
-	vm := vm.NewVM(debug, true)
+	vm := vm.NewVM(true)
 
 	go eventloop.Start()
 	go vm.Run(&wg)
