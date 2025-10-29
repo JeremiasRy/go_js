@@ -2,6 +2,13 @@
 
 Not that he world needs another javaScript runtime, it's an educational project for me.
 
+**In short** (the "cool" stuff)
+
+- Event loop (setTimeout, async/await, micro/macro task queues)
+- [JIT](https://en.wikipedia.org/wiki/Just-in-time_compilation) compilation, pretty limited at the moment, but can handle recursive fibonacci for exanple. Check [jit-compiler](runtime/jit/compiler.go).
+- Closures
+- Garbage collection (not a language feature, but a tricky thing to implement)
+
 ## How to run
 Requires go version `1.22.5`
 1. `git clone` the repo
@@ -27,12 +34,6 @@ It can also handle a real program as shown in an [Advent Of Code](/test/aoc/solu
 
 I skipped `var` for the runtime implementation, also some quirks of javaScript are skipped, i.e `if(a = someFunc()) {}` type of stuff.
 
-**In short** (the "cool" or "impressive" stuff)
-
-- Event loop (setTimeout, async/await, micro/macro task queues)
-- Closures
-- Garbage collection (not a language feature, but a tricky thing to implement)
-
 ### Flow of execution / Design
 
 1. [Parse](runtime/parser/parser.go) javascript file into an [Abstract Syntax Tree](https://en.wikipedia.org/wiki/Abstract_syntax_tree)
@@ -46,7 +47,6 @@ As in any projects they really are never done, and things can be improved endles
 **Notable things to improve/add**
 1. Proper error handling for rejected promises
 2. Support `var`, parser already parses these so wouldn't be too much work to add it in
-3. [JIT](https://en.wikipedia.org/wiki/Just-in-time_compilation) compilation, this is probably what I'm going for, at least for simple functions, so that naive fib(40) doesn't run for 10 seconds...
 4. Http requests with `fetch()`
 5. A http server? Would just be a wrapper for go's `net/http`
 

@@ -5,6 +5,7 @@ import (
 	"go_js/chunk"
 	"go_js/compiler"
 	"go_js/eventloop"
+	"go_js/flags"
 	"go_js/heap"
 	"go_js/jit"
 	"go_js/native"
@@ -23,10 +24,11 @@ import (
 
 const STACK_MAX = math.MaxUint8
 const FRAMES_MAX = 64
-const IS_HOT_PATH = 1000
+const IS_HOT_PATH = 0
 
 var ROOT_SCRIPT_LOCATION string
-var globals []value.Value
+var globals = make([]value.Value, 30)
+var globalsCount = 0
 var imports = make(map[string]value.Value)
 
 type CallFrame struct {
@@ -63,11 +65,10 @@ type VM struct {
 
 	exports *native.ObjObject
 
-	debug bool
-	main  bool
+	main bool
 }
 
-func NewVM(debug bool, main bool) *VM {
+func NewVM(main bool) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
 
@@ -77,7 +78,6 @@ func NewVM(debug bool, main bool) *VM {
 		stack:          stack,
 		stackTop:       0,
 		exceptionStack: []ExceptionState{},
-		debug:          debug,
 		main:           main,
 		callCounts:     map[object.Callable]int{},
 	}
@@ -102,7 +102,12 @@ func (vm *VM) pop() value.Value {
 }
 
 func (vm *VM) addGlobal(v value.Value) {
-	globals = append(globals, v)
+	if globalsCount >= len(globals) {
+		globals = append(globals, v)
+		return
+	}
+	globals[globalsCount] = v
+	globalsCount++
 }
 
 func (vm *VM) getGlobal(global int) value.Value {
@@ -391,11 +396,12 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn) {
-		if vm.debug {
+	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn, globals) {
+		if flags.Debug {
 			fmt.Println("-- CALLING JIT FUNCTION --")
 		}
-		err := jit.JITFunction(&vm.stack[f.localStart], fn)
+
+		err := jit.JITFunction(&vm.stack[f.localStart], &globals[0], fn)
 
 		if err == nil {
 			*currentIp = f.returnIp
@@ -404,7 +410,18 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 
 			f = vm.currentFrame()
 			c = *f.fn.ValueChunk()
+
+			// jitted function writes to the start of locals, if this is more than one we need to pop the arguments
+			vm.popN(argCount - 1)
+
+			if flags.Debug {
+				fmt.Println("-- JIT CALL DONE --")
+			}
 			return
+		}
+
+		if flags.Debug {
+			fmt.Printf("failed to run JIT code %s\n", err.Error())
 		}
 	}
 
@@ -463,7 +480,7 @@ Run:
 		callback, errDequeue = queue.Dequeue()
 	}
 
-	if vm.debug {
+	if flags.Debug {
 		fmt.Println()
 		fmt.Println("-- QUEUE DRAINED --")
 	}
@@ -471,7 +488,7 @@ Run:
 	tick := time.NewTicker(100 * time.Millisecond)
 	hasWork := eventloop.HasWork()
 
-	if vm.debug {
+	if flags.Debug {
 		fmt.Printf("eventloop has work: %v\n", hasWork)
 	}
 	for hasWork {
@@ -518,7 +535,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 	if promise, ok := f.fn.(*native.ObjAsyncFunction); ok {
 
 		if promise.State != nil {
-			if vm.debug {
+			if flags.Debug {
 				fmt.Println()
 				fmt.Printf("-- RETURNING PROMISE %v --\n", promise.String())
 				printStack(promise.State.Stack)
@@ -533,7 +550,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		}
 	}
 
-	if vm.debug {
+	if flags.Debug {
 		fmt.Println()
 		fmt.Println("-- NEW RUNNER SPAWNED --")
 		fmt.Println()
@@ -549,7 +566,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			vm.runGC()
 		}
 
-		if vm.debug {
+		if flags.Debug {
 			fmt.Println(f.fn.String())
 			printStack(vm.stack[:vm.stackTop])
 			fmt.Println(opNames[code])
@@ -1333,7 +1350,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if err != nil {
 							return value.UNDEFINED, err
 						}
-						runner := NewVM(vm.debug, false)
+						runner := NewVM(false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1363,7 +1380,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(vm.debug, false)
+						runner := NewVM(false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1409,7 +1426,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(vm.debug, false)
+						runner := NewVM(false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1452,20 +1469,32 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 
-						runner := NewVM(vm.debug, false)
+						runner := NewVM(false)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 								item := iterator.Current()
-								runner.push(initialValue)
-								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
-								result, err := runner.run(f, c)
+								if jit.IsJittable(fn, globals) {
+									vm.push(initialValue)
+									vm.push(item)
 
-								if err != nil {
-									return value.UNDEFINED, err
+									jit.JITFunction(&vm.stack[vm.stackTop-2], &globals[0], fn)
+									vm.pop()
+									initialValue = vm.pop()
+
+								} else {
+									runner.push(initialValue)
+									runner.push(item)
+
+									f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
+									result, err := runner.run(f, c)
+
+									if err != nil {
+										return value.UNDEFINED, err
+									}
+
+									initialValue = result
 								}
 
-								initialValue = result
 								done = iterator.Next()
 							}
 						} else {
@@ -1708,7 +1737,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if vm.frameCount <= 0 {
 						vm.stackTop = 0
 
-						if vm.debug {
+						if flags.Debug {
 							fmt.Println("--")
 						}
 						return value, nil
@@ -1734,7 +1763,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if vm.frameCount <= 0 {
 						vm.stackTop = 0
 
-						if vm.debug {
+						if flags.Debug {
 							fmt.Println("--")
 						}
 						return value, nil
@@ -1902,7 +1931,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						if constructor, ok := obj.(object.Callable); ok {
-							builder := NewVM(vm.debug, false)
+							builder := NewVM(false)
 							fn := object.NewFunction("builder", 0, nil)
 							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
 							instance := value.EncodeHandle(heap.Allocate(instance))
@@ -1956,7 +1985,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						resolveHandle := heap.Allocate(resolve)
 
 						if executor, ok := executor.(object.Callable); ok {
-							runner := NewVM(vm.debug, false)
+							runner := NewVM(false)
 							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount, false)
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run(f, c)
@@ -2166,7 +2195,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("failed to parser module %e", err)
 				}
 
-				importer := NewVM(vm.debug, false)
+				importer := NewVM(false)
 
 				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
 				importer.run(f, c)
