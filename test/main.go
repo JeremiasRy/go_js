@@ -62,12 +62,14 @@ func main() {
 		got      string
 	}{}
 
-	for nth, script := range scripts {
+	count := 0
+	for _, script := range scripts {
 		if script.IsDir() {
 			continue
 		}
+		count++
 		name := script.Name()
-		fmt.Printf("%-50s %2d/%d... ", name, nth+1, len(scripts))
+		fmt.Printf("%-50s %02d/%d... ", name, count, len(scripts)-2) // there are two folders here
 
 		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, DIR_NAME_TEST_SCRIPTS+"/"+name)
 		out, err := cmd.CombinedOutput()
@@ -92,6 +94,7 @@ func main() {
 				got      string
 			}{test: name, expected: string(expected[name]), got: string(out)})
 		}
+
 	}
 
 	if len(fails) > 0 {
@@ -107,7 +110,7 @@ func main() {
 		}
 	}
 
-	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n\n\n", len(scripts)-len(fails), len(scripts))
+	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n\n\n", count-len(fails), len(scripts)-2)
 
 	fmt.Println("RUNNING AOC PUZZLE")
 	goJsCmd := exec.Command("./"+RUNTIME_BINARY_NAME, AOC_PUZZLE_LOCATION)
