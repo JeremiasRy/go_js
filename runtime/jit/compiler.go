@@ -369,7 +369,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	// 0x <Old RBP value>    <- RSP
 	asm.emitMov(RBP, RSP)
 	// We now took the RSP's value and put it on RBP so our RBP is now anchored to the current stack top
-	// our locals start at offset -8 from it
+	// our locals start at offset -8 from it (down is up in assembly land)
 	// 0x <return addr>
 	// 0x <Old RBP address>    <- RSP <- RBP
 	asm.emitSubimm32(RSP, int32(fn.GetArity()+jittableFns[fn].locals+SPILLS_REQ_FOR_FIBO)*0x08)
