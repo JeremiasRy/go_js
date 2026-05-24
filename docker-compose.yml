@@ -1,0 +1,15 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    volumes:
+      - app_data:/app/user-scripts
+    develop:
+      watch:
+        - action: rebuild
+          path: ./demo
+    ports:
+      - "8000:8000"
+volumes:
+  app_data:

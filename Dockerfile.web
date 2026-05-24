@@ -1,0 +1,30 @@
+FROM oven/bun:1 AS frontend_build
+WORKDIR /app
+
+COPY ./demo/frontend ./
+
+RUN bun install && bun run build
+
+FROM golang:1.26 AS runtime_builder
+
+WORKDIR /app
+
+COPY ./runtime/go.mod .
+COPY ./runtime .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o go_js .
+
+FROM golang:1.26 AS server
+
+WORKDIR /app
+
+COPY --from=runtime_builder ./app/go_js ./runtime/
+COPY ./demo/backend/go.mod ./
+COPY ./demo/backend ./
+COPY --from=frontend_build ./app/build ./static
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o web .
+EXPOSE 8000
+
+CMD ["./web"]
+

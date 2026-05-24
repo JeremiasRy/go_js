@@ -93,9 +93,4 @@ func main() {
 	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
-
-	if err != nil {
-		log.Fatalf("runtime error: %s", err.Error())
-	}
-
 }
