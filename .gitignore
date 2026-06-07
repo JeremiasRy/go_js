@@ -1,3 +1,5 @@
 *.prof
 .env
-user-scripts/*
+user-scripts
+/static/*
+!/static/favicon.ico

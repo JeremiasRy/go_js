@@ -19,6 +19,8 @@ const RESERVED_ARGUMENTS string = "arguments"
 const UNDEFINED_IDENTIFIER string = "undefined"
 const SET_TIMEOUT_NAME string = "setTimeout"
 
+var currentAstNode int = 0
+
 type VariableType uint8
 
 const (
@@ -428,6 +430,7 @@ func CompileModule(src string) (*object.ObjFunction, error) {
 }
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	currentAstNode = current.Id
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{

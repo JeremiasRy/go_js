@@ -3,6 +3,7 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 )
 
 type SourceType int
@@ -275,6 +276,7 @@ const (
 
 type Node struct {
 	// Base values
+	Id                 int      `json:"id"`
 	Start              int      `json:"start"`
 	End                int      `json:"end"`
 	Type               NodeType `json:"type"`
@@ -412,6 +414,8 @@ func (p *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Loc
 	if p.options.Ranges {
 		node._range[1] = pos
 	}
+
+	node.Id = int(rand.Int64())
 }
 
 func (p *Parser) finishNode(node *Node, finishType NodeType) *Node {

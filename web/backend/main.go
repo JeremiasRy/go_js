@@ -113,6 +113,7 @@ func handleGetScripts(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	err := os.Mkdir(filepath.Join(USER_SCRIPTS_DIR), 0750)
+
 	if err != nil && !os.IsExist(err) {
 		log.Fatal(err)
 	}
