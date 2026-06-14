@@ -1,25 +1,5 @@
 #!/bin/bash
 set -e
-apt-get update && apt-get install -y \
-    build-essential \
-    bc \
-    bison \
-    flex \
-    libssl-dev \
-    libelf-dev \
-    wget \
-    tar \
-    curl \
-    squashfs-tools \
-    openssh-client \
-    e2fsprogs 
-
-wget https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.1.tar.xz  
-tar -xvf linux-6.1.tar.xz
-cd linux-6.1 
-wget https://raw.githubusercontent.com/firecracker-microvm/firecracker/refs/heads/main/resources/guest_configs/microvm-kernel-ci-x86_64-6.1.config -O .config
-make olddefconfig
-make vmlinux -j$(echo $(nproc --all) / 2 | bc)
 
 ARCH="$(uname -m)"
 release_url="https://github.com/firecracker-microvm/firecracker/releases"
@@ -49,6 +29,10 @@ wget -O ubuntu-$ubuntu_version.squashfs.upstream "https://s3.amazonaws.com/spec.
 
 rm -rf squashfs-root 
 unsquashfs ubuntu-$ubuntu_version.squashfs.upstream
+mkdir -p squashfs-root/workspace
+
+cp ./go_js squashfs-root/usr/local/bin/go_js
+chmod +x squashfs-root/usr/local/bin/go_js
 
 ssh-keygen -f id_rsa -N ""
 cp -v id_rsa.pub squashfs-root/root/.ssh/authorized_keys
@@ -76,4 +60,3 @@ curl -L ${release_url}/download/${latest}/firecracker-${latest}-${ARCH}.tgz \
 | tar -xz
 
 mv release-${latest}-$(uname -m)/firecracker-${latest}-${ARCH} firecracker
-e2cp ./go_js $ROOTFS:/usr/local/bin/go_js

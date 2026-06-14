@@ -2,11 +2,10 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"go_js_demo/microvm"
 	"log"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -56,29 +55,11 @@ func handlePostInterpret(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	now := time.Now()
-	fileName := fmt.Sprintf("user-script-%d.js", now.UnixMilli())
-	file := filepath.Join(USER_SCRIPTS_DIR, fileName)
 
-	err = os.WriteFile(filepath.Join(USER_SCRIPTS_DIR, fileName), []byte(requestBody.Src), 0644)
-
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	cmd := exec.Command(filepath.Join(RUNTIME_DIR, RUNTIME_NAME), file, "--debug")
-	log.Printf("%v", cmd.String())
-	out, err := cmd.CombinedOutput()
-
-	if err != nil {
-		errMsg := fmt.Sprintf("Process failed with error: %v\nOutput: %s", err, string(out))
-		http.Error(w, errMsg, http.StatusInternalServerError)
-		return
-	}
+	output := microvm.RunCode(requestBody.Src, r.Context())
 
 	w.Header().Set("Content-Type", "application/json")
-	res, err := json.Marshal(string(out))
+	res, err := json.Marshal(output)
 
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -111,7 +92,12 @@ func handleGetScripts(w http.ResponseWriter, r *http.Request) {
 	w.Write(res)
 }
 
+const (
+	PORT = ":8000"
+)
+
 func main() {
+	microvm.Init()
 	err := os.Mkdir(filepath.Join(USER_SCRIPTS_DIR), 0750)
 
 	if err != nil && !os.IsExist(err) {
@@ -125,5 +111,6 @@ func main() {
 	mux.HandleFunc("/api/user-scripts", handleGetScripts)
 
 	wrap := Logger(mux)
+	log.Printf("Listening and serving from localhost%s", PORT)
 	http.ListenAndServe(":8000", wrap)
 }

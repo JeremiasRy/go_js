@@ -9,12 +9,16 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o go_js .
 
 FROM ubuntu:24.04 AS firecracker_builder
 
-RUN apt-get update && apt-get install -y e2tools && rm -rf /var/lib/apt/lists/*
-
+COPY ./bin/install-deps.sh ./
+COPY ./bin/build-vmlinux.sh ./
 COPY ./bin/build-firecracker.sh ./
 COPY --from=runtime_builder ./app/go_js ./
 
 RUN ["chmod",  "+x", "./build-firecracker.sh"]
+RUN ["chmod",  "+x", "./build-vmlinux.sh"]
+RUN ["chmod",  "+x", "./install-deps.sh"]
+RUN ["./install-deps.sh"]
+RUN ["./build-vmlinux.sh"]
 RUN ["./build-firecracker.sh"]
 
 FROM oven/bun:1 AS frontend_build
@@ -31,19 +35,16 @@ WORKDIR /app
 COPY --from=runtime_builder ./app/go_js ./runtime/
 COPY ./web/backend/go.mod ./
 COPY ./web/backend ./
+COPY ./bin/entrypoint.sh ./
+RUN chmod +x ./entrypoint.sh
 COPY --from=frontend_build ./app/build ./static
 COPY --from=firecracker_builder /linux-6.1/vmlinux ./vmlinux
-COPY --from=firecracker_builder /linux-6.1/ubuntu-*.ext4 ./rootfs.ext4
+COPY --from=firecracker_builder /ubuntu-*.ext4 ./rootfs.ext4
 RUN chmod 666 ./rootfs.ext4
-COPY --from=firecracker_builder /linux-6.1/firecracker ./firecracker
-COPY --from=firecracker_builder /linux-6.1/ubuntu-*.id_rsa ./id_rsa
+COPY --from=firecracker_builder /firecracker ./firecracker
+COPY --from=firecracker_builder /ubuntu-*.id_rsa ./id_rsa
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o web .
 
-#RUN apt-get update && apt-get install -y iproute2
-#RUN TAP_DEV="tap0" && \
-#    ip tuntap add dev $TAP_DEV mode tap && \
-#    ip link set dev $TAP_DEV up
-
 EXPOSE 8000
-CMD ["./web"]
+ENTRYPOINT [ "./entrypoint.sh" ]
