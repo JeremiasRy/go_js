@@ -26,10 +26,12 @@ const (
 	RUNTIME_PATH       = "/usr/local/bin/go_js"
 )
 
-func generateConfig(staticConfiguration *firecracker.StaticNetworkConfiguration, socketPath string) firecracker.Config {
+func generateConfig(staticConfiguration *firecracker.StaticNetworkConfiguration, socketPath string, ip string) firecracker.Config {
+	kernelArgs := fmt.Sprintf("reboot=k panic=1 pci=off ip=%s::172.16.0.1:255.255.255.0::eth0:off", ip)
 	return firecracker.Config{
 		SocketPath:      socketPath,
 		KernelImagePath: "/app/vmlinux",
+		KernelArgs:      kernelArgs,
 		MachineCfg: models.MachineConfiguration{
 			VcpuCount:  firecracker.Int64(1),
 			MemSizeMib: firecracker.Int64(512),
@@ -105,7 +107,7 @@ func RunCode(src string, ctx context.Context) string {
 	ip := createIpAddress(vmId)
 	mac := createMACAddress(vmId)
 	tap := createTapStr(vmId)
-	socket := strings.Replace(SOCKET_PATH, SOCKET_PLACEHOLDER, strconv.FormatInt(time.Now().UnixMilli(), 10), 1)
+	socket := strings.Replace(SOCKET_PATH, SOCKET_PLACEHOLDER, strconv.Itoa(vmId), 1)
 
 	log.Printf("Creating TAP interface: %s", tap)
 	createTap(tap)
@@ -116,12 +118,13 @@ func RunCode(src string, ctx context.Context) string {
 		HostDevName: tap,
 	}
 
-	config := generateConfig(staticConfiguration, socket)
+	config := generateConfig(staticConfiguration, socket, ip)
 
 	log.Println("Building VM command...")
 	cmd := firecracker.VMCommandBuilder{}.
 		WithBin(binPath).
 		WithSocketPath(socket).
+		WithStdout(os.Stdout).
 		WithStderr(os.Stderr).
 		Build(ctx)
 
