@@ -11,7 +11,7 @@
         view = new EditorView({
             doc: `
 // JS Editor -- Write your code snippet here and send it off to my interpreter for evaluation :)
-// // P.S. please don't hack me...
+// P.S. please don't hack me...
 function fib(n) {
     if (n <= 1) {
         return n;
