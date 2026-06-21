@@ -26,6 +26,20 @@ const (
 	RUNTIME_PATH       = "/usr/local/bin/go_js"
 )
 
+type MicroVMHandler struct {
+	ipPool chan int
+}
+
+func NewMicroVMHandler() *MicroVMHandler {
+	ipPool := make(chan int, 100)
+	for i := 2; i <= 101; i++ {
+		ipPool <- i
+	}
+	return &MicroVMHandler{
+		ipPool: ipPool,
+	}
+}
+
 func generateConfig(staticConfiguration *firecracker.StaticNetworkConfiguration, socketPath string, ip string) firecracker.Config {
 	kernelArgs := fmt.Sprintf("reboot=k panic=1 pci=off ip=%s::172.16.0.1:255.255.255.0::eth0:off", ip)
 	return firecracker.Config{
@@ -51,8 +65,6 @@ func generateConfig(staticConfiguration *firecracker.StaticNetworkConfiguration,
 		},
 	}
 }
-
-var ipPool chan int
 
 func createIpAddress(vmId int) string {
 	return fmt.Sprintf("%s%d", IP_PRE, vmId)
@@ -98,8 +110,8 @@ func runSSHCommand(client *ssh.Client, cmd string) ([]byte, error) {
 	return session.CombinedOutput(cmd)
 }
 
-func RunCode(src string, ctx context.Context) string {
-	vmId := <-ipPool
+func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, error) {
+	vmId := <-mvm.ipPool
 	ip := createIpAddress(vmId)
 	mac := createMACAddress(vmId)
 	tap := createTapStr(vmId)
@@ -122,21 +134,21 @@ func RunCode(src string, ctx context.Context) string {
 
 	m, err := firecracker.NewMachine(ctx, config, firecracker.WithProcessRunner(cmd))
 	if err != nil {
-		log.Fatalf("Failed to initialize machine: %v", err)
+		return "", fmt.Errorf("Failed to initialize machine: %v", err)
 	}
 
 	if err := m.Start(ctx); err != nil {
-		log.Fatalf("Failed to start machine: %v", err)
+		return "", fmt.Errorf("Failed to start machine: %v", err)
 	}
 
 	key, err := os.ReadFile("/app/id_rsa")
 	if err != nil {
-		log.Fatalf("Unable to read private key: %v", err)
+		return "", fmt.Errorf("Unable to read private key: %v", err)
 	}
 
 	signer, err := ssh.ParsePrivateKey(key)
 	if err != nil {
-		log.Fatalf("Unable to parse private key: %v", err)
+		return "", fmt.Errorf("Unable to parse private key: %v", err)
 	}
 
 	sshConfig := &ssh.ClientConfig{
@@ -161,13 +173,13 @@ func RunCode(src string, ctx context.Context) string {
 	}
 
 	if err != nil {
-		log.Fatalf("Failed to dial after %d attempts: %v", maxRetries, err)
+		return "", fmt.Errorf("Failed to dial after %d attempts: %v", maxRetries, err)
 	}
 	defer client.Close()
 
 	_, err = runSSHCommand(client, "mount -t tmpfs -o size=50M tmpfs /workspace")
 	if err != nil {
-		log.Fatalf("Failed to mount tmpfs: %v", err)
+		return "", fmt.Errorf("Failed to mount tmpfs: %v", err)
 	}
 
 	dst := make([]byte, base64.StdEncoding.EncodedLen(len(src)))
@@ -178,30 +190,23 @@ func RunCode(src string, ctx context.Context) string {
 
 	_, err = runSSHCommand(client, injectCmd)
 	if err != nil {
-		log.Fatalf("Failed to inject user code to vm's tmpfs: %v", err)
+		return "", fmt.Errorf("Failed to inject user code to vm's tmpfs: %v", err)
 	}
 
 	runCmd := fmt.Sprintf("%s /workspace/script.js", RUNTIME_PATH)
 	output, err := runSSHCommand(client, runCmd)
 	if err != nil {
-		log.Fatalf("Failed to run user script: %v\nOutput: %s", err, string(output))
+		return "", fmt.Errorf("Failed to run user script: %v\nOutput: %s", err, string(output))
 	}
 
 	err = m.StopVMM()
 	if err != nil {
-		log.Fatalf("Failed to stop VM: %v", err)
+		return "", fmt.Errorf("Failed to stop VM: %v", err)
 	}
 
 	clearTap(tap)
-	ipPool <- vmId
+	mvm.ipPool <- vmId
 	os.Remove(socket)
 
-	return string(output)
-}
-
-func Init() {
-	ipPool = make(chan int, 100)
-	for i := 2; i <= 101; i++ {
-		ipPool <- i
-	}
+	return string(output), nil
 }

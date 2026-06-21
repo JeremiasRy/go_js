@@ -3,8 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.web
-    volumes:
-      - app_data:/app/user-scripts
+    environment:
+      - DATABASE_URL=postgres://test_user:bagel@db:5432/go_js_web?sslmode=disable
     develop:
       watch:
         - action: rebuild
@@ -18,5 +18,31 @@ services:
       - net.ipv4.ip_forward=1
     ports:
       - "8000:8000"
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: postgres_db
+    restart: always
+    environment:
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: bagel
+      POSTGRES_DB: go_js_web
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U test_user -d go_js_web" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  migrations:
+    image: migrate/migrate
+    volumes:
+      - ./web/backend/db/migrations:/migrations
+    command: -path=./migrations/ -database "postgres://test_user:bagel@db:5432/go_js_web?sslmode=disable" up
+    depends_on:
+      db:
+        condition: service_healthy
+
 volumes:
-  app_data:
+  postgres_data:
