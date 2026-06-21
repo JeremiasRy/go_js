@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -43,6 +44,8 @@ func NewMicroVMHandler() *MicroVMHandler {
 func generateConfig(staticConfiguration *firecracker.StaticNetworkConfiguration, socketPath string, ip string) firecracker.Config {
 	kernelArgs := fmt.Sprintf("reboot=k panic=1 pci=off ip=%s::172.16.0.1:255.255.255.0::eth0:off", ip)
 	return firecracker.Config{
+		LogPath:         "/dev/null",
+		LogLevel:        models.LoggerLevelError,
 		SocketPath:      socketPath,
 		KernelImagePath: "/app/vmlinux",
 		KernelArgs:      kernelArgs,
@@ -130,6 +133,7 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 		WithBin(binPath).
 		WithSocketPath(socket).
 		WithStderr(os.Stderr).
+		WithStdout(io.Discard).
 		Build(ctx)
 
 	m, err := firecracker.NewMachine(ctx, config, firecracker.WithProcessRunner(cmd))

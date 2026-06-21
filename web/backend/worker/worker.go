@@ -28,14 +28,13 @@ func NewWorker(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal)
 
 func (w *Worker) Run(id int, ctx context.Context) {
 	for range w.sig {
-		log.Printf("Worker %d, waiting for work...", id)
 		select {
 		case <-ctx.Done():
 			return
 		default:
 			{
 
-				log.Printf("Worker %d, polling for work...", id)
+				log.Printf("Worker %d, querying for work...", id)
 				job, err := w.db.GetOldestPendingJob(ctx)
 				if errors.Is(err, pgx.ErrNoRows) {
 					log.Printf("No jobs")

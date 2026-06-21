@@ -42,22 +42,16 @@ func Logger(next http.Handler) http.Handler {
 const (
 	PORT         = ":8000"
 	WORKER_COUNT = 10
+	QUEUE_MAX    = 100
 )
 
 func main() {
 	db := db.NewDatabase()
 	mvm := microvm.NewMicroVMHandler()
-	sig := make(chan worker.HeartbeatSignal)
+	sig := make(chan worker.HeartbeatSignal, QUEUE_MAX)
 	ctr := controller.NewUserSriptsController(db, sig)
 	ctx := context.Background()
 	go worker.SpinUpWorkers(db, mvm, sig, WORKER_COUNT, ctx)
-	go func() {
-		tick := time.NewTicker(time.Second)
-		for range tick.C {
-			log.Println("Heartbeat...")
-			sig <- worker.HeartbeatSignal{}
-		}
-	}()
 
 	mux := http.NewServeMux()
 	dir := http.Dir("./static")

@@ -18,6 +18,8 @@ services:
       - net.ipv4.ip_forward=1
     ports:
       - "8000:8000"
+    depends_on:
+      - migrations
   db:
     image: pgvector/pgvector:pg16
     container_name: postgres_db

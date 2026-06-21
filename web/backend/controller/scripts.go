@@ -68,10 +68,7 @@ func (ctr *UserScriptsController) HandlePostInterpret(w http.ResponseWriter, r *
 		return
 	}
 
-	select {
-	case ctr.sig <- worker.HeartbeatSignal{}:
-	default:
-	}
+	ctr.sig <- worker.HeartbeatSignal{}
 	response, err := json.Marshal(interpretResponseBody{JobId: jobId})
 
 	if err != nil {
