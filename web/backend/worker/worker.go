@@ -10,15 +10,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type NewQuerySignal struct{}
+type HeartbeatSignal struct{}
 
 type Worker struct {
 	db  *db.Db
 	mvm *microvm.MicroVMHandler
-	sig chan NewQuerySignal
+	sig chan HeartbeatSignal
 }
 
-func NewWorker(db *db.Db, mvm *microvm.MicroVMHandler, sig chan NewQuerySignal) *Worker {
+func NewWorker(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal) *Worker {
 	return &Worker{
 		db,
 		mvm,
@@ -69,7 +69,7 @@ func (w *Worker) Run(id int, ctx context.Context) {
 	}
 }
 
-func SpinUpWorkers(db *db.Db, mvm *microvm.MicroVMHandler, sig chan NewQuerySignal, amount int, ctx context.Context) {
+func SpinUpWorkers(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal, amount int, ctx context.Context) {
 	for id := range amount {
 		w := NewWorker(db, mvm, sig)
 		go w.Run(id, ctx)

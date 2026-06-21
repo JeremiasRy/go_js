@@ -29,7 +29,7 @@ type userScriptJobResponse struct {
 
 type UserScriptsController struct {
 	db  *db.Db
-	sig chan worker.NewQuerySignal
+	sig chan worker.HeartbeatSignal
 }
 
 func userScriptJobFromDbToResponse(userScriptJob *db.UserScriptJob) *userScriptJobResponse {
@@ -44,7 +44,7 @@ func userScriptJobFromDbToResponse(userScriptJob *db.UserScriptJob) *userScriptJ
 	return &response
 }
 
-func NewUserSriptsController(db *db.Db, sig chan worker.NewQuerySignal) *UserScriptsController {
+func NewUserSriptsController(db *db.Db, sig chan worker.HeartbeatSignal) *UserScriptsController {
 	return &UserScriptsController{db, sig}
 }
 
@@ -68,7 +68,10 @@ func (ctr *UserScriptsController) HandlePostInterpret(w http.ResponseWriter, r *
 		return
 	}
 
-	ctr.sig <- worker.NewQuerySignal{}
+	select {
+	case ctr.sig <- worker.HeartbeatSignal{}:
+	default:
+	}
 	response, err := json.Marshal(interpretResponseBody{JobId: jobId})
 
 	if err != nil {

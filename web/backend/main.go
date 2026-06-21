@@ -41,13 +41,13 @@ func Logger(next http.Handler) http.Handler {
 
 const (
 	PORT         = ":8000"
-	WORKER_COUNT = 3
+	WORKER_COUNT = 10
 )
 
 func main() {
 	db := db.NewDatabase()
 	mvm := microvm.NewMicroVMHandler()
-	sig := make(chan worker.NewQuerySignal)
+	sig := make(chan worker.HeartbeatSignal)
 	ctr := controller.NewUserSriptsController(db, sig)
 	ctx := context.Background()
 	go worker.SpinUpWorkers(db, mvm, sig, WORKER_COUNT, ctx)
@@ -55,7 +55,7 @@ func main() {
 		tick := time.NewTicker(time.Second)
 		for range tick.C {
 			log.Println("Heartbeat...")
-			sig <- worker.NewQuerySignal{}
+			sig <- worker.HeartbeatSignal{}
 		}
 	}()
 
