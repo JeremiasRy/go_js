@@ -9,6 +9,7 @@ import (
 	"go_js/native"
 	"go_js/parser"
 	"go_js/queue"
+	structuredout "go_js/structuredOut"
 	"go_js/vm"
 	"log"
 	"os"
@@ -60,6 +61,7 @@ func main() {
 	}
 
 	ast, err := parser.GetAst(b, &parser.Options{SourceType: "module"}, 0)
+	structuredout.SetAstJSON(ast)
 
 	if err != nil {
 		log.Fatalf("Failed to parse javascript, %e", err)
@@ -73,6 +75,8 @@ func main() {
 	native.Init()
 
 	main, err := compiler.Compile(ast)
+	out, err := structuredout.ReturnStructuredOutput()
+	log.Printf("structure: %s", out)
 	heap.InitGC(main.ValueChunk().Constants)
 
 	if err != nil {

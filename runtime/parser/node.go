@@ -3,7 +3,6 @@ package parser
 import (
 	"encoding/json"
 	"fmt"
-	"math/rand/v2"
 )
 
 type SourceType int
@@ -12,6 +11,8 @@ const (
 	TYPE_SCRIPT SourceType = iota
 	TYPE_MODULE
 )
+
+var IdCount int = 0
 
 func (st *SourceType) MarshalJSON() ([]byte, error) {
 	if *st == TYPE_SCRIPT {
@@ -414,8 +415,8 @@ func (p *Parser) finishNodeAt(node *Node, finishType NodeType, pos int, loc *Loc
 	if p.options.Ranges {
 		node._range[1] = pos
 	}
-
-	node.Id = int(rand.Int64())
+	node.Id = IdCount
+	IdCount++
 }
 
 func (p *Parser) finishNode(node *Node, finishType NodeType) *Node {

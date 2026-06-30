@@ -2,6 +2,8 @@ package value
 
 import (
 	"go_js/chunk"
+	"go_js/flags"
+	structuredout "go_js/structuredOut"
 	"math"
 )
 
@@ -57,6 +59,7 @@ func (c ValueChunk) ReadInt(ip *int) int {
 func (c *ValueChunk) WriteConstant(v Value) uint8 {
 	arg := c.AddConstant(v)
 	c.EmitBytes(chunk.OP_CONSTANT, arg)
+
 	return arg
 }
 
@@ -66,18 +69,34 @@ func (c *ValueChunk) AddConstant(v Value) uint8 {
 }
 
 func (c *ValueChunk) PatchUint32(from uint32, u32 uint32) {
-	c.Code[from+3] = uint8(u32 & math.MaxUint8)
-	c.Code[from+2] = uint8(u32>>8) & math.MaxUint8
-	c.Code[from+1] = uint8(u32>>16) & math.MaxUint8
-	c.Code[from] = uint8(u32>>24) & math.MaxUint8
+	// the names are wrong... I don't have the patience to fix, but I'll still spend some time to write this comment
+	first := uint8(u32 & math.MaxUint8)
+	second := uint8(u32>>8) & math.MaxUint8
+	third := uint8(u32>>16) & math.MaxUint8
+	fourth := uint8(u32>>24) & math.MaxUint8
+
+	c.Code[from+3] = first
+	c.Code[from+2] = second
+	c.Code[from+1] = third
+	c.Code[from] = fourth
+
+	if flags.STRUCTURED_OUTPUT {
+		structuredout.PatchOpCodes(int(from), []uint8{fourth, third, second, first})
+	}
 }
 
 func (c *ValueChunk) EmitByte(b uint8) {
 	c.Code = append(c.Code, b)
+	if flags.STRUCTURED_OUTPUT {
+		structuredout.AppendOpCode(b)
+	}
 }
 
 func (c *ValueChunk) EmitBytes(b ...uint8) {
 	c.Code = append(c.Code, b...)
+	if flags.STRUCTURED_OUTPUT {
+		structuredout.AppendOpCode(b...)
+	}
 }
 
 func (c *ValueChunk) EmitUint32(u32 uint32) {
@@ -86,6 +105,9 @@ func (c *ValueChunk) EmitUint32(u32 uint32) {
 	second := uint8(u32>>16) & math.MaxUint8
 	first := uint8(u32>>24) & math.MaxUint8
 	c.Code = append(c.Code, first, second, third, fourth)
+	if flags.STRUCTURED_OUTPUT {
+		structuredout.AppendOpCode(first, second, third, fourth)
+	}
 }
 
 func (v Value) IsObject() bool {

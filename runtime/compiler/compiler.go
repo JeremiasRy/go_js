@@ -5,10 +5,12 @@ import (
 	"fmt"
 
 	"go_js/chunk"
+	"go_js/flags"
 	"go_js/heap"
 	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
+	structuredout "go_js/structuredOut"
 	"go_js/value"
 	"log"
 	"slices"
@@ -18,8 +20,6 @@ const CONSOLE_OBJECT_NAME string = "console"
 const RESERVED_ARGUMENTS string = "arguments"
 const UNDEFINED_IDENTIFIER string = "undefined"
 const SET_TIMEOUT_NAME string = "setTimeout"
-
-var currentAstNode int = 0
 
 type VariableType uint8
 
@@ -397,6 +397,9 @@ func (p *PopRValue) pop() {
 }
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
+	if flags.STRUCTURED_OUTPUT {
+		structuredout.SetCurrentFn(object.MAIN_FN_NAME)
+	}
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 
 	defineObjectConstructor(main, global)
@@ -430,10 +433,12 @@ func CompileModule(src string) (*object.ObjFunction, error) {
 }
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
-	currentAstNode = current.Id
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
+			if flags.STRUCTURED_OUTPUT {
+				structuredout.SetCurrentAstId(current.Id)
+			}
 			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
 				if variable.type_ == FUNCTION {
