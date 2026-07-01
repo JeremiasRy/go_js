@@ -569,7 +569,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		if flags.Debug {
 			fmt.Println(f.fn.String())
 			printStack(vm.stack[:vm.stackTop])
-			fmt.Println(opNames[code])
+			fmt.Println(chunk.OpNames[code])
 		}
 
 		switch code {

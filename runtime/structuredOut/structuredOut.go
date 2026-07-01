@@ -2,8 +2,10 @@ package structuredout
 
 import (
 	"encoding/json"
+	"fmt"
 	"go_js/parser"
 	"log"
+	"strings"
 )
 
 type StructuredOutputEntry struct {
@@ -14,6 +16,7 @@ type StructuredOutputEntry struct {
 type StructuredOutput struct {
 	Ast     *parser.Node                       `json:"ast"`
 	OpCodes map[string][]StructuredOutputEntry `json:"op_codes"`
+	Output  string                             `json:"output"`
 }
 
 const UNINITIALIZED_AST_ID = -1
@@ -22,9 +25,10 @@ var currentFn = ""
 var currentAstId = UNINITIALIZED_AST_ID
 var astOp = map[string][]StructuredOutputEntry{}
 var astJSON *parser.Node = nil
+var outputBuffer *strings.Builder = &strings.Builder{}
 
 func AppendOpCode(op ...uint8) {
-	if _, ok := astOp[currentFn]; !ok {
+	if _, ok := astOp[currentFn]; !ok || currentAstId == UNINITIALIZED_AST_ID {
 		log.Fatalf("most prob un-initialized structured output situation %s", currentFn)
 	}
 	entries := []StructuredOutputEntry{}
@@ -39,6 +43,10 @@ func PatchOpCodes(from int, code []uint8) {
 	for idx, op := range code {
 		astOp[currentFn][from+idx] = StructuredOutputEntry{Op: op, AstId: currentAstId}
 	}
+}
+
+func WriteToOutputBuffer(i string) {
+	fmt.Fprintf(outputBuffer, "%s\n", i)
 }
 
 func SetCurrentFn(fn string) {
@@ -58,5 +66,6 @@ func ReturnStructuredOutput() ([]byte, error) {
 	return json.Marshal(StructuredOutput{
 		Ast:     astJSON,
 		OpCodes: astOp,
+		Output:  outputBuffer.String(),
 	})
 }

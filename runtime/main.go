@@ -75,8 +75,6 @@ func main() {
 	native.Init()
 
 	main, err := compiler.Compile(ast)
-	out, err := structuredout.ReturnStructuredOutput()
-	log.Printf("structure: %s", out)
 	heap.InitGC(main.ValueChunk().Constants)
 
 	if err != nil {
@@ -97,4 +95,12 @@ func main() {
 	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
+
+	if flags.STRUCTURED_OUTPUT {
+		out, err := structuredout.ReturnStructuredOutput()
+		if err != nil {
+			log.Fatalf("Failed to print out structured output")
+		}
+		log.Printf("%s", out)
+	}
 }

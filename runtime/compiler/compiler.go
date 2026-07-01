@@ -399,6 +399,7 @@ func (p *PopRValue) pop() {
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	if flags.STRUCTURED_OUTPUT {
 		structuredout.SetCurrentFn(object.MAIN_FN_NAME)
+		structuredout.SetCurrentAstId(ast.Id)
 	}
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 
@@ -436,9 +437,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{
-			if flags.STRUCTURED_OUTPUT {
-				structuredout.SetCurrentAstId(current.Id)
-			}
 			functions := []*Variable{}
 			for _, variable := range symbolTable.vars {
 				if variable.type_ == FUNCTION {
