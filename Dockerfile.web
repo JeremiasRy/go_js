@@ -38,7 +38,7 @@ COPY ./web/backend ./
 COPY ./bin/entrypoint.sh ./
 RUN chmod +x ./entrypoint.sh
 COPY --from=frontend_build ./app/build ./static
-COPY --from=firecracker_builder /linux-6.1/vmlinux ./vmlinux
+COPY --from=firecracker_builder /linux-6.1.176/vmlinux ./vmlinux
 COPY --from=firecracker_builder /ubuntu-*.ext4 ./rootfs.ext4
 RUN chmod 666 ./rootfs.ext4
 COPY --from=firecracker_builder /firecracker ./firecracker

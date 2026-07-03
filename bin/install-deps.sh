@@ -11,4 +11,5 @@ apt-get update && apt-get install -y \
     tar \
     curl \
     squashfs-tools \
-    openssh-client 
+    openssh-client \
+    git

@@ -197,7 +197,7 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 		return "", fmt.Errorf("Failed to inject user code to vm's tmpfs: %v", err)
 	}
 
-	runCmd := fmt.Sprintf("%s /workspace/script.js", RUNTIME_PATH)
+	runCmd := fmt.Sprintf("%s --structured /workspace/script.js", RUNTIME_PATH)
 	output, err := runSSHCommand(client, runCmd)
 	if err != nil {
 		return "", fmt.Errorf("Failed to run user script: %v\nOutput: %s", err, string(output))
@@ -212,5 +212,11 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	mvm.ipPool <- vmId
 	os.Remove(socket)
 
-	return string(output), nil
+	out, err := base64.StdEncoding.DecodeString(string(output))
+
+	if err != nil {
+		return "", fmt.Errorf("failed to parse script output %v", err)
+	}
+
+	return string(out), nil
 }
