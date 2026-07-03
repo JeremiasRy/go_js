@@ -62,17 +62,19 @@ type VM struct {
 	stackTop       int
 	exceptionStack []ExceptionState
 	callCounts     map[object.Callable]int
+	output         *strings.Builder
 
 	exports *native.ObjObject
 
 	main bool
 }
 
-func NewVM(main bool) *VM {
+func NewVM(main bool, output *strings.Builder) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_MAX)
 
 	return &VM{
+		output:         output,
 		frames:         frames,
 		frameCount:     0,
 		stack:          stack,
@@ -1350,7 +1352,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if err != nil {
 							return value.UNDEFINED, err
 						}
-						runner := NewVM(false)
+						runner := NewVM(false, vm.output)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1380,7 +1382,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(false)
+						runner := NewVM(false, vm.output)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1426,7 +1428,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						arr := []value.Value{}
-						runner := NewVM(false)
+						runner := NewVM(false, vm.output)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 
@@ -1469,7 +1471,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 
-						runner := NewVM(false)
+						runner := NewVM(false, vm.output)
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							for !done {
 								item := iterator.Current()
@@ -1581,7 +1583,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 
 						args := vm.popN(argCount)
-						fn.Log(args)
+						fn.Log(args, vm.output)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.Next:
@@ -1931,7 +1933,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						if constructor, ok := obj.(object.Callable); ok {
-							builder := NewVM(false)
+							builder := NewVM(false, vm.output)
 							fn := object.NewFunction("builder", 0, nil)
 							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
 							instance := value.EncodeHandle(heap.Allocate(instance))
@@ -1985,7 +1987,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						resolveHandle := heap.Allocate(resolve)
 
 						if executor, ok := executor.(object.Callable); ok {
-							runner := NewVM(false)
+							runner := NewVM(false, vm.output)
 							f, c := runner.Call(executor, nil, value.UNDEFINED, argCount, false)
 							runner.push(value.EncodeHandle(resolveHandle))
 							runner.run(f, c)
@@ -2195,7 +2197,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("failed to parser module %e", err)
 				}
 
-				importer := NewVM(false)
+				importer := NewVM(false, vm.output)
 
 				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
 				importer.run(f, c)

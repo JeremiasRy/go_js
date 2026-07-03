@@ -2,11 +2,10 @@ package native
 
 import (
 	"fmt"
-	"go_js/flags"
 	"go_js/heap"
 	"go_js/object"
-	structuredout "go_js/structuredOut"
 	"go_js/value"
+	"strings"
 )
 
 type Console struct {
@@ -42,7 +41,7 @@ func NewLog() *Log {
 	return log
 }
 
-func (*Log) Log(values []value.Value) {
+func (*Log) Log(values []value.Value, sb *strings.Builder) {
 	for i, v := range values {
 		notLast := i < len(values)-1
 		pad := ""
@@ -50,11 +49,15 @@ func (*Log) Log(values []value.Value) {
 			pad = " "
 		}
 
-		if flags.STRUCTURED_OUTPUT {
-			structuredout.WriteToOutputBuffer(fmt.Sprintf("%v%s", String(v), pad))
+		if sb != nil {
+			fmt.Fprintf(sb, "%v%s", String(v), pad)
 		} else {
 			fmt.Printf("%v%s", String(v), pad)
 		}
 	}
-	fmt.Println()
+	if sb != nil {
+		fmt.Fprintln(sb)
+	} else {
+		fmt.Println()
+	}
 }

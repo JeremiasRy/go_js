@@ -10,7 +10,6 @@ import (
 	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
-	structuredout "go_js/structuredOut"
 	"go_js/value"
 	"log"
 	"slices"
@@ -397,9 +396,8 @@ func (p *PopRValue) pop() {
 }
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
-	if flags.STRUCTURED_OUTPUT {
-		structuredout.SetCurrentFn(object.MAIN_FN_NAME)
-		structuredout.SetCurrentAstId(ast.Id)
+	if flags.StructuredOutput {
+		value.SetCompTimeAstId(ast.Id)
 	}
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 
@@ -434,6 +432,9 @@ func CompileModule(src string) (*object.ObjFunction, error) {
 }
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	if flags.StructuredOutput {
+		value.SetCompTimeAstId(current.Id)
+	}
 	switch current.Type {
 	case parser.NODE_PROGRAM:
 		{

@@ -3,9 +3,13 @@ package value
 import (
 	"go_js/chunk"
 	"go_js/flags"
-	structuredout "go_js/structuredOut"
+	"log"
 	"math"
 )
+
+const UN_INITIALIZED_COMPTIME_AST_ID = -1
+
+var comptTimeAstId = UN_INITIALIZED_COMPTIME_AST_ID
 
 type Value uint64
 
@@ -25,19 +29,25 @@ const (
 )
 
 type ValueChunk struct {
-	Code      []uint8
-	Constants []Value
+	AstNodeRange map[int][2]int
+	Code         []uint8
+	Constants    []Value
 }
 
 func NewChunk() *ValueChunk {
 	return &ValueChunk{
-		Code:      []uint8{},
-		Constants: []Value{},
+		AstNodeRange: map[int][2]int{},
+		Code:         []uint8{},
+		Constants:    []Value{},
 	}
 }
 
+func SetCompTimeAstId(id int) {
+	comptTimeAstId = id
+}
+
 // read uint32 and incerement ip
-func (c ValueChunk) ReadInt(ip *int) int {
+func (c *ValueChunk) ReadInt(ip *int) int {
 	start := *ip
 
 	fourth := int(c.Code[start]) << 24
@@ -79,23 +89,54 @@ func (c *ValueChunk) PatchUint32(from uint32, u32 uint32) {
 	c.Code[from+2] = second
 	c.Code[from+1] = third
 	c.Code[from] = fourth
-
-	if flags.STRUCTURED_OUTPUT {
-		structuredout.PatchOpCodes(int(from), []uint8{fourth, third, second, first})
-	}
 }
 
 func (c *ValueChunk) EmitByte(b uint8) {
+	if flags.StructuredOutput {
+
+		if _, found := c.AstNodeRange[comptTimeAstId]; !found {
+			if comptTimeAstId == UN_INITIALIZED_COMPTIME_AST_ID {
+				log.Fatal("uninitialized ast id")
+			}
+			c.AstNodeRange[comptTimeAstId] = [2]int{-1, 0}
+		}
+
+		t := c.AstNodeRange[comptTimeAstId]
+		if t[0] == -1 {
+			t[0] = min(0, len(c.Code))
+			c.AstNodeRange[comptTimeAstId] = t
+		}
+	}
+
 	c.Code = append(c.Code, b)
-	if flags.STRUCTURED_OUTPUT {
-		structuredout.AppendOpCode(b)
+	if flags.StructuredOutput {
+		t := c.AstNodeRange[comptTimeAstId]
+		t[1] = len(c.Code)
+		c.AstNodeRange[comptTimeAstId] = t
 	}
 }
 
 func (c *ValueChunk) EmitBytes(b ...uint8) {
+	if flags.StructuredOutput {
+		if _, found := c.AstNodeRange[comptTimeAstId]; !found {
+			if comptTimeAstId == UN_INITIALIZED_COMPTIME_AST_ID {
+				log.Fatal("uninitialized ast id")
+			}
+			c.AstNodeRange[comptTimeAstId] = [2]int{-1, 0}
+		}
+
+		t := c.AstNodeRange[comptTimeAstId]
+		if t[0] == -1 {
+			t[0] = min(0, len(c.Code))
+			c.AstNodeRange[comptTimeAstId] = t
+		}
+	}
+
 	c.Code = append(c.Code, b...)
-	if flags.STRUCTURED_OUTPUT {
-		structuredout.AppendOpCode(b...)
+	if flags.StructuredOutput {
+		t := c.AstNodeRange[comptTimeAstId]
+		t[1] = len(c.Code)
+		c.AstNodeRange[comptTimeAstId] = t
 	}
 }
 
@@ -105,9 +146,6 @@ func (c *ValueChunk) EmitUint32(u32 uint32) {
 	second := uint8(u32>>16) & math.MaxUint8
 	first := uint8(u32>>24) & math.MaxUint8
 	c.Code = append(c.Code, first, second, third, fourth)
-	if flags.STRUCTURED_OUTPUT {
-		structuredout.AppendOpCode(first, second, third, fourth)
-	}
 }
 
 func (v Value) IsObject() bool {
