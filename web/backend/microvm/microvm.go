@@ -212,11 +212,9 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	mvm.ipPool <- vmId
 	os.Remove(socket)
 
-	out, err := base64.StdEncoding.DecodeString(string(output))
-
 	if err != nil {
 		return "", fmt.Errorf("failed to parse script output %v", err)
 	}
 
-	return string(out), nil
+	return string(output), nil
 }

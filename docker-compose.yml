@@ -8,7 +8,7 @@ services:
     develop:
       watch:
         - action: rebuild
-          path: ./web
+          path: ./web/backend
     cap_add:
       - NET_ADMIN
     devices:

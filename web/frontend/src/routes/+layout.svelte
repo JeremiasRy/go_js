@@ -2,6 +2,7 @@
 	export const ssr = false;
 	export const prerender = true;
 	import favicon from "$lib/assets/favicon.svg";
+	import "../app.css";
 
 	let { children } = $props();
 </script>

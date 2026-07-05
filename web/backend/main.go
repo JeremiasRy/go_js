@@ -45,6 +45,19 @@ const (
 	QUEUE_MAX    = 100
 )
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	db := db.NewDatabase()
 	mvm := microvm.NewMicroVMHandler()
@@ -60,7 +73,7 @@ func main() {
 	mux.HandleFunc("/api/interpret", ctr.HandlePostInterpret)
 	mux.HandleFunc("/api/jobs/{job_id}", ctr.HandleGetJobById)
 
-	wrap := Logger(mux)
+	wrap := corsMiddleware(Logger(mux))
 	log.Printf("Listening and serving from localhost%s", PORT)
 	err := http.ListenAndServe(PORT, wrap)
 
