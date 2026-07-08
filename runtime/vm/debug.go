@@ -9,8 +9,19 @@ import (
 	"go_js/heap"
 	"go_js/native"
 	"go_js/object"
+	"go_js/parser"
 	"go_js/value"
 )
+
+type ChunkDetail struct {
+	AstId int    `json:"ast_id"`
+	Op    string `json:"Op"`
+}
+type StructuredOut struct {
+	Output string        `json:"output"`
+	Code   []ChunkDetail `json:"code"`
+	Ast    *parser.Node  `json:"ast"`
+}
 
 const NO_MORE_OPS = -1
 
@@ -115,8 +126,7 @@ func PrintFunction(c value.ValueChunk, sb *strings.Builder) {
 			obj, _ := heap.GetObject(value.GetHandle())
 			switch f := obj.(type) {
 			case object.Callable:
-				fmt.Fprintf(sb, "%s\n", f.String())
-				PrintFunction(c, sb)
+				PrintFunction(*f.ValueChunk(), sb)
 			}
 		}
 	}
@@ -128,8 +138,8 @@ func PrintChunk(c value.ValueChunk) {
 	println(sb.String())
 }
 
-func StructureOutput(c value.ValueChunk, sb *strings.Builder) map[int]string {
-	r := map[int]string{}
+func StructureOutput(c value.ValueChunk) []ChunkDetail {
+	r := []ChunkDetail{}
 
 	for astId, ran := range c.AstNodeRange {
 		start := ran[0]
@@ -141,12 +151,13 @@ func StructureOutput(c value.ValueChunk, sb *strings.Builder) map[int]string {
 			Constants: c.Constants,
 		}
 		ip := 0
+		sb := &strings.Builder{}
 		for ip != NO_MORE_OPS {
 			ip = ReadOp(ip, c, sb)
+			r = append(r, ChunkDetail{AstId: astId, Op: sb.String()})
+			sb.Reset()
 		}
 
-		r[astId] = sb.String()
-		sb.Reset()
 	}
 
 	for _, value := range c.Constants {
@@ -154,7 +165,7 @@ func StructureOutput(c value.ValueChunk, sb *strings.Builder) map[int]string {
 			obj, _ := heap.GetObject(value.GetHandle())
 			switch f := obj.(type) {
 			case object.Callable:
-				StructureOutput(*f.ValueChunk(), sb)
+				StructureOutput(*f.ValueChunk())
 			}
 		}
 	}

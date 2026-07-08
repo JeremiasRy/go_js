@@ -23,12 +23,6 @@ import (
 var PROFILE = false
 var ROOT_FILE_OCATION string
 
-type structuredOut struct {
-	Output string         `json:"output"`
-	Code   map[int]string `json:"code"`
-	Ast    *parser.Node   `json:"ast"`
-}
-
 func main() {
 	if PROFILE {
 		f, err := os.Create("cpu.prof")
@@ -120,10 +114,9 @@ func main() {
 	wg.Wait()
 
 	if flags.StructuredOutput {
-		sb := &strings.Builder{}
-		r := virtualMachine.StructureOutput(*main.ValueChunk(), sb)
+		r := virtualMachine.StructureOutput(*main.ValueChunk())
 
-		out := structuredOut{
+		out := virtualMachine.StructuredOut{
 			Output: output.String(),
 			Code:   r,
 			Ast:    ast,
