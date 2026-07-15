@@ -13,23 +13,18 @@ import (
 	"go_js/value"
 )
 
-type ChunkDetail struct {
-	AstId int    `json:"ast_id"`
-	Op    string `json:"Op"`
-}
 type StructuredOut struct {
-	Output string        `json:"output"`
-	Code   []ChunkDetail `json:"code"`
-	Ast    *parser.Node  `json:"ast"`
+	Output string                `json:"output"`
+	Code   map[string][]OpDetail `json:"code"`
+	Ast    *parser.Node          `json:"ast"`
 }
 
 const NO_MORE_OPS = -1
 
-func ReadOp(ip int, c value.ValueChunk, sb *strings.Builder) int {
+func ReadOp(ip int, c value.ValueChunk, sb *strings.Builder) (int, bool) {
 	opCode := c.Code
 	if ip >= int(len(opCode)) {
-		sb.WriteString("\n")
-		return NO_MORE_OPS
+		return ip, false
 	}
 	code := opCode[ip]
 
@@ -112,14 +107,16 @@ func ReadOp(ip int, c value.ValueChunk, sb *strings.Builder) int {
 		}
 	}
 	ip++
-	return ip
+	return ip, true
 }
 
 func PrintFunction(c value.ValueChunk, sb *strings.Builder) {
-	ip := 0
-	for ip != NO_MORE_OPS {
-		ip = ReadOp(ip, c, sb)
+	ip, more := ReadOp(0, c, sb)
+	for more {
+		ip, more = ReadOp(ip, c, sb)
 	}
+
+	fmt.Fprintln(sb)
 
 	for _, value := range c.Constants {
 		if value.IsObject() {
@@ -138,26 +135,25 @@ func PrintChunk(c value.ValueChunk) {
 	println(sb.String())
 }
 
-func StructureOutput(c value.ValueChunk) []ChunkDetail {
-	r := []ChunkDetail{}
+type OpDetail struct {
+	Op    string `json:"op"`
+	AstId int    `json:"ast_id"`
+}
 
-	for astId, ran := range c.AstNodeRange {
-		start := ran[0]
-		end := ran[1]
-		chunkRange := c.Code[start:end]
+func StructureOutput(c value.ValueChunk, r map[string][]OpDetail) map[string][]OpDetail {
+	r[c.FnName] = []OpDetail{}
+	ip := 0
+	sb := &strings.Builder{}
 
-		c := value.ValueChunk{
-			Code:      chunkRange,
-			Constants: c.Constants,
+	for {
+		if len(c.Code) <= ip {
+			break
 		}
-		ip := 0
-		sb := &strings.Builder{}
-		for ip != NO_MORE_OPS {
-			ip = ReadOp(ip, c, sb)
-			r = append(r, ChunkDetail{AstId: astId, Op: sb.String()})
-			sb.Reset()
-		}
+		astId := c.AstId[ip]
+		ip, _ = ReadOp(ip, c, sb)
 
+		r[c.FnName] = append(r[c.FnName], OpDetail{Op: sb.String(), AstId: astId})
+		sb.Reset()
 	}
 
 	for _, value := range c.Constants {
@@ -165,7 +161,7 @@ func StructureOutput(c value.ValueChunk) []ChunkDetail {
 			obj, _ := heap.GetObject(value.GetHandle())
 			switch f := obj.(type) {
 			case object.Callable:
-				StructureOutput(*f.ValueChunk())
+				StructureOutput(*f.ValueChunk(), r)
 			}
 		}
 	}

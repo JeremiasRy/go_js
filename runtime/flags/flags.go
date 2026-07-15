@@ -4,6 +4,6 @@ import "runtime"
 
 var (
 	Debug            = false
-	EnableJIT        = runtime.GOOS == "linux"
+	EnableJIT        = runtime.GOARCH == "amd64"
 	StructuredOutput = true
 )

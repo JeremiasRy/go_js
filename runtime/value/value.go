@@ -2,8 +2,6 @@ package value
 
 import (
 	"go_js/chunk"
-	"go_js/flags"
-	"log"
 	"math"
 )
 
@@ -29,21 +27,24 @@ const (
 )
 
 type ValueChunk struct {
-	AstNodeRange map[int][2]int
+	CurrentAstId int
 	Code         []uint8
+	AstId        []int
 	Constants    []Value
+	FnName       string
 }
 
-func NewChunk() *ValueChunk {
+func NewChunk(fnName string) *ValueChunk {
 	return &ValueChunk{
-		AstNodeRange: map[int][2]int{},
-		Code:         []uint8{},
-		Constants:    []Value{},
+		AstId:     []int{},
+		Code:      []uint8{},
+		Constants: []Value{},
+		FnName:    fnName,
 	}
 }
 
-func SetCompTimeAstId(id int) {
-	comptTimeAstId = id
+func (c *ValueChunk) SetCompTimeAstId(id int) {
+	c.CurrentAstId = id
 }
 
 // read uint32 and incerement ip
@@ -92,51 +93,14 @@ func (c *ValueChunk) PatchUint32(from uint32, u32 uint32) {
 }
 
 func (c *ValueChunk) EmitByte(b uint8) {
-	if flags.StructuredOutput {
-
-		if _, found := c.AstNodeRange[comptTimeAstId]; !found {
-			if comptTimeAstId == UN_INITIALIZED_COMPTIME_AST_ID {
-				log.Fatal("uninitialized ast id")
-			}
-			c.AstNodeRange[comptTimeAstId] = [2]int{-1, 0}
-		}
-
-		t := c.AstNodeRange[comptTimeAstId]
-		if t[0] == -1 {
-			t[0] = min(0, len(c.Code))
-			c.AstNodeRange[comptTimeAstId] = t
-		}
-	}
-
 	c.Code = append(c.Code, b)
-	if flags.StructuredOutput {
-		t := c.AstNodeRange[comptTimeAstId]
-		t[1] = len(c.Code)
-		c.AstNodeRange[comptTimeAstId] = t
-	}
+	c.AstId = append(c.AstId, c.CurrentAstId)
 }
 
 func (c *ValueChunk) EmitBytes(b ...uint8) {
-	if flags.StructuredOutput {
-		if _, found := c.AstNodeRange[comptTimeAstId]; !found {
-			if comptTimeAstId == UN_INITIALIZED_COMPTIME_AST_ID {
-				log.Fatal("uninitialized ast id")
-			}
-			c.AstNodeRange[comptTimeAstId] = [2]int{-1, 0}
-		}
-
-		t := c.AstNodeRange[comptTimeAstId]
-		if t[0] == -1 {
-			t[0] = min(0, len(c.Code))
-			c.AstNodeRange[comptTimeAstId] = t
-		}
-	}
-
-	c.Code = append(c.Code, b...)
-	if flags.StructuredOutput {
-		t := c.AstNodeRange[comptTimeAstId]
-		t[1] = len(c.Code)
-		c.AstNodeRange[comptTimeAstId] = t
+	for _, b := range b {
+		c.Code = append(c.Code, b)
+		c.AstId = append(c.AstId, c.CurrentAstId)
 	}
 }
 
@@ -146,6 +110,7 @@ func (c *ValueChunk) EmitUint32(u32 uint32) {
 	second := uint8(u32>>16) & math.MaxUint8
 	first := uint8(u32>>24) & math.MaxUint8
 	c.Code = append(c.Code, first, second, third, fourth)
+	c.AstId = append(c.AstId, c.CurrentAstId, c.CurrentAstId, c.CurrentAstId, c.CurrentAstId)
 }
 
 func (v Value) IsObject() bool {

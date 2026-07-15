@@ -38,6 +38,7 @@ const (
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
+const SETUP_FN_NAME = "INTERNAL_SETUP"
 
 func IsValueObject(v value.Value) (bool, uint32) {
 	if v&value.TAG_OBJ == value.TAG_OBJ {
