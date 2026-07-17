@@ -7,8 +7,8 @@ export interface AstNode {
   ast_train: number[];
 }
 
-export type HighlightType = {
-  from: number;
-  to: number;
-  ast_ids: number[];
+export type HighlightStatus = {
+  source: "ast" | "op_code";
+  astId: number;
+  astIds: number[];
 };

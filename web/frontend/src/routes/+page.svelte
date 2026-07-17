@@ -8,11 +8,12 @@
         StateField,
     } from "@codemirror/state";
     import { javascript } from "@codemirror/lang-javascript";
-    import { onMount } from "svelte";
+    import { onMount, setContext } from "svelte";
     import fibo from "$lib/examples/fibonacci?raw";
-    import type { AstNode, HighlightType } from "../types";
+    import type { AstNode, HighlightStatus } from "../types";
     import AstTree from "./AstTree.svelte";
     import ByteCode from "./ByteCode.svelte";
+    import { generateLookUp } from "$lib/util";
 
     type PageStatus = "input" | "submitting" | "polling" | "error" | "done";
     type JobStatus = "Success" | "Failed" | "Pending" | "Processing";
@@ -41,7 +42,27 @@
             interpretResult.result !== null,
     );
     let lookUp = $state<Record<number, AstNode>>({});
-    let highlight = $state.raw<HighlightType>({ ast_ids: [], from: 0, to: 0 });
+    let highlight = $state.raw<HighlightStatus | null>(null);
+    const setHighlight = (
+        opts: {
+            astId: number;
+            source: HighlightStatus["source"];
+        } | null,
+    ) => {
+        if (opts === null) {
+            highlight = null;
+            return;
+        }
+
+        const { source, astId } = opts;
+
+        highlight = {
+            source,
+            astId,
+            astIds: [astId, ...(lookUp[astId].ast_train || [])],
+        };
+        return;
+    };
 
     const OUTPUT_TITLES: Record<PageStatus, string> = {
         input: "Results will appear here...",
@@ -49,10 +70,6 @@
         polling: "Runnning code...",
         error: "Oops, something went seriously wrong :/",
         done: "no-op",
-    };
-
-    const setHighlight = (h: HighlightType) => {
-        highlight = h;
     };
 
     const addHighlight = StateEffect.define<{ from: number; to: number }>();
@@ -128,6 +145,7 @@
                         result: JSON.parse(atob(json.result)),
                     };
 
+                    lookUp = generateLookUp(interpretResult.result!.ast);
                     pageState = "done";
                     return;
                 }
@@ -173,8 +191,17 @@
     });
 
     $effect(() => {
+        if (highlight === null) {
+            view.dispatch({
+                effects: addHighlight.of({ from: 0, to: 0 }),
+            });
+            return;
+        }
+
+        const { start: from, end: to } = lookUp[highlight.astId];
+
         view.dispatch({
-            effects: addHighlight.of(highlight),
+            effects: addHighlight.of({ from, to }),
         });
     });
 

@@ -1,5 +1,9 @@
+<script module lang="ts">
+    const _hoverState: { [key: number]: Boolean } = $state({});
+</script>
+
 <script lang="ts">
-    import type { HighlightType } from "../types";
+    import type { HighlightStatus } from "../types";
 
     let {
         code,
@@ -13,21 +17,27 @@
                 op: string;
             }[]
         >;
-        highlight: HighlightType;
-        setHighlight: (highlight: HighlightType) => void;
+        highlight: HighlightStatus | null;
+        setHighlight: (
+            opts: {
+                astId: number;
+                source: "ast" | "op_code";
+            } | null,
+        ) => void;
     } = $props();
 
     const isNotInternal = (entries: [string, object]) => {
         return entries[0] !== "INTERNAL_SETUP";
     };
 
-    const onMouseEnter = (ast_id: number) => {
-        setHighlight({ ast_ids: [ast_id], from: 0, to: 0 });
+    const onMouseEnter = (e: Event, astId: number) => {
+        e.stopPropagation();
+        setHighlight({ astId, source: "op_code" });
     };
 
     const onMouseLeave = (e: Event) => {
         e.stopPropagation();
-        setHighlight({ ast_ids: [], from: 0, to: 0 });
+        setHighlight(null);
     };
 </script>
 
@@ -38,12 +48,24 @@
             .filter((op) => op !== "")
             .map((code) => ({ ast_id, op: code }))) as { ast_id, op }}
         <p
-            onmouseenter={(e) => {
-                e.stopPropagation();
-                onMouseEnter(ast_id);
+            onmouseover={(e) => {
+                e.currentTarget.style = "font-weight: 400;";
+                onMouseEnter(e, ast_id);
             }}
-            class={String(ast_id)}
-            style={`font-weight: ${highlight.ast_ids.includes(ast_id) ? "400" : "200"}`}
+            onmouseout={(e) => {
+                e.stopPropagation();
+                e.currentTarget.style = "font-weight: 200;";
+                setHighlight(null);
+            }}
+            onfocus={() => {}}
+            onblur={() => {}}
+            style={`font-weight: ${
+                highlight !== null &&
+                highlight.source === "ast" &&
+                highlight.astIds.includes(ast_id)
+                    ? "400"
+                    : "200"
+            }`}
         >
             {op}
         </p>

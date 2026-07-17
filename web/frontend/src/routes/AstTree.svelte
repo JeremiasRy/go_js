@@ -3,21 +3,30 @@
 </script>
 
 <script lang="ts">
+    type PropsType = {
+        node: AstNode;
+        setHighlight: (
+            opts: {
+                astId: number;
+                source: "ast" | "op_code";
+            } | null,
+        ) => void;
+        highlight: HighlightStatus | null;
+    };
     import { slide } from "svelte/transition";
-    import type { AstNode, HighlightType } from "../types";
+    import type { AstNode, HighlightStatus } from "../types";
     import AstTree from "./AstTree.svelte";
     import Arrow from "./Arrow.svelte";
+    import { objectIsAstNode } from "$lib/util";
 
-    let {
-        node,
-        setHighlight,
-        highlight,
-    }: {
-        node: AstNode;
-        setHighlight: (highlight: HighlightType) => void;
-        highlight: HighlightType;
-    } = $props();
+    let { node, setHighlight, highlight }: PropsType = $props();
     let expanded = $derived(_expansionState[node.id] || false);
+
+    $effect(() => {
+        if (highlight !== null && highlight.source === "op_code") {
+            expanded = true;
+        }
+    });
 
     const camelToCapital = (str: string) => {
         return str
@@ -32,52 +41,30 @@
         expanded = _expansionState[node.id] = !expanded;
     };
 
-    const propIsAstNode = (prop: unknown): boolean => {
-        if (typeof prop === "object" && prop !== null) {
-            return (
-                "id" in prop &&
-                "type" in prop &&
-                "start" in prop &&
-                "end" in prop
-            );
-        }
-
-        return false;
-    };
-
     const skipProp = ([prop]: [string, unknown]): boolean => {
         return !["type", "start", "end", "id", "ast_train"].includes(prop);
     };
 
     const onMouseEnter = (e: Event) => {
         e.stopPropagation();
-        setHighlight({
-            ast_ids: [...(node.ast_train ?? []), node.id],
-            from: node.start,
-            to: node.end,
-        });
+        setHighlight({ source: "ast", astId: node.id });
     };
 
     const onMouseLeave = (e: Event) => {
         e.stopPropagation();
-        setHighlight({ ast_ids: [], from: 0, to: 0 });
+        setHighlight(null);
     };
 
-    $effect(() => {
+    const determineHighlightStatus = () => {
         if (
-            highlight.ast_ids.length === 1 &&
-            highlight.from === 0 &&
-            highlight.to === 0 &&
-            node.start !== 0 &&
-            node.end !== 0
+            highlight !== null &&
+            highlight.source === "op_code" &&
+            highlight.astId === node.id
         ) {
-            setHighlight({
-                ast_ids: highlight.ast_ids,
-                from: node.start,
-                to: node.end,
-            });
+            return "border-color: #3b82f6; background-color: #eff6ff;";
         }
-    });
+        return "";
+    };
 </script>
 
 <ul
@@ -86,6 +73,7 @@
     onmouseleave={onMouseLeave}
     onfocus={() => {}}
     onblur={() => {}}
+    style={determineHighlightStatus()}
 >
     <li>
         <button onclick={toggleExpansion}>
@@ -99,7 +87,7 @@
                     {#if Array.isArray(value)}
                         <i class="my-2">{camelToCapital(key)}</i>
                         {#each value as possibleNode}
-                            {#if propIsAstNode(possibleNode as object)}
+                            {#if objectIsAstNode(possibleNode)}
                                 <AstTree
                                     node={possibleNode as AstNode}
                                     {highlight}
@@ -107,7 +95,7 @@
                                 />
                             {/if}
                         {/each}
-                    {:else if propIsAstNode(value as object)}
+                    {:else if objectIsAstNode(value)}
                         <i>{camelToCapital(key)}</i>
                         <AstTree
                             node={value as AstNode}
