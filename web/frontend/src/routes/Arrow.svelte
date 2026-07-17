@@ -1,5 +1,5 @@
 <script lang="ts">
-    const {direction}: {direction: "right" | "down"} = $props()
+    const { direction }: { direction: "right" | "down" } = $props();
 </script>
 
 {#if direction === "down"}
