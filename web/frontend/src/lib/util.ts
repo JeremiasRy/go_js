@@ -13,23 +13,24 @@ export function objectIsAstNode(prop: unknown): boolean {
     return false;
 };
 
-export function generateLookUp(node: AstNode): Record<number, AstNode> {
-    const lookUp: Record<number, AstNode> = {}
-    const recurse = (node: AstNode) => {
-        lookUp[node.id] = node
-        for (const obj of Object.values(node)) {
-            if (Array.isArray(obj)) {
-                for (const node of obj) {
-                    recurse(node)
-                }
-                continue;
-            }
-            if (objectIsAstNode(obj)) {
-                recurse(obj as AstNode)
-            }
+export function generateLookUp(node: AstNode): Map<number, AstNode> {
+    const lookUp: Map<number, AstNode> = new Map();
+    const recurse = (node: unknown) => {
+        if (!objectIsAstNode(node)) {
+            return
         }
 
+        const astNode = node as AstNode
+        if (!lookUp.has(astNode.id)) {
+            lookUp.set(astNode.id, astNode)
+        }
+        for (const obj of Object.values(astNode)) {
+            Array.isArray(obj)
+                ? obj.forEach(recurse)
+                : recurse(obj)
+        }
     }
     recurse(node)
+    console.log(lookUp)
     return lookUp
 }

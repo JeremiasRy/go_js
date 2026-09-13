@@ -8,12 +8,12 @@
         StateField,
     } from "@codemirror/state";
     import { javascript } from "@codemirror/lang-javascript";
-    import { onMount, setContext } from "svelte";
+    import { onMount } from "svelte";
     import fibo from "$lib/examples/fibonacci?raw";
     import type { AstNode, HighlightStatus } from "../types";
     import AstTree from "./AstTree.svelte";
-    import ByteCode from "./ByteCode.svelte";
     import { generateLookUp } from "$lib/util";
+    import Code from "./Code.svelte";
 
     type PageStatus = "input" | "submitting" | "polling" | "error" | "done";
     type JobStatus = "Success" | "Failed" | "Pending" | "Processing";
@@ -41,7 +41,7 @@
             interpretResult.jobStatus === "Success" &&
             interpretResult.result !== null,
     );
-    let lookUp = $state<Record<number, AstNode>>({});
+    let lookUp = $state<Map<number, AstNode> | null>(null);
     let highlight = $state.raw<HighlightStatus | null>(null);
     const setHighlight = (
         opts: {
@@ -56,12 +56,17 @@
 
         const { source, astId } = opts;
 
+        if (highlight?.astId === astId && highlight.source === "ast") {
+            return;
+        }
+
         highlight = {
             source,
             astId,
-            astIds: [astId, ...(lookUp[astId].ast_train || [])],
+            astIds: [astId, ...(lookUp?.get(astId)?.ast_train ?? [])],
         };
-        return;
+
+        console.log($state.snapshot(highlight));
     };
 
     const OUTPUT_TITLES: Record<PageStatus, string> = {
@@ -139,13 +144,15 @@
                 const json = await result.json();
 
                 if (json.job_status === "Success") {
+                    const interpretDetails = JSON.parse(atob(json.result));
+                    console.log(interpretDetails);
                     jobId = null;
                     interpretResult = {
                         jobStatus: "Success",
-                        result: JSON.parse(atob(json.result)),
+                        result: interpretDetails,
                     };
 
-                    lookUp = generateLookUp(interpretResult.result!.ast);
+                    lookUp = generateLookUp(interpretDetails.ast);
                     pageState = "done";
                     return;
                 }
@@ -156,8 +163,8 @@
                     pageState = "done";
                     return;
                 }
-            } catch {
-                console.log("errored");
+            } catch (e) {
+                console.error(e);
                 pageState = "error";
             }
         }, 500);
@@ -198,7 +205,10 @@
             return;
         }
 
-        const { start: from, end: to } = lookUp[highlight.astId];
+        const { start: from, end: to } = lookUp?.get(highlight.astId) ?? {
+            start: 0,
+            end: 0,
+        };
 
         view.dispatch({
             effects: addHighlight.of({ from, to }),
@@ -208,8 +218,6 @@
     async function submitCode() {
         const src = view.state.doc.toString();
         pageState = "submitting";
-
-        jobId = "123";
 
         try {
             const result = await fetch("http://localhost:8000/api/interpret", {
@@ -232,18 +240,24 @@
     }
 </script>
 
-<div class="w-full h-full flex flex-row gap-4 p-4">
+<div
+    class="w-full h-screen overflow-hidden flex flex-row gap-4 p-4 bg-slate-50"
+>
     <div
-        class="w-1/2 h-full bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col"
+        class="w-1/2 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
     >
         <div
-            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600"
+            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
         >
             Editor
         </div>
-        <div bind:this={editorContainer} class="h-full w-full p-2"></div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto relative">
+            <div bind:this={editorContainer} class="absolute inset-0 p-2"></div>
+        </div>
+
         <div
-            class="p-4 border-t border-slate-100 flex flex-row gap-2 justify-between"
+            class="p-4 border-t border-slate-100 flex flex-row gap-2 justify-between shrink-0"
         >
             <button
                 onclick={submitCode}
@@ -264,23 +278,24 @@
     </div>
 
     <div
-        class="w-1/2 h-full bg-white border border-slate-200 rounded-xl shadow-sm overflow-scroll flex flex-col"
+        class="w-1/2 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
     >
         <div
-            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600"
+            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
         >
             Output
         </div>
 
         {#if showResults}
-            <div class="flex flex-col w-full">
-                <div class="p-6 text-slate-500 whitespace-pre-wrap">
+            <div class="flex flex-col w-full flex-1 min-h-0 overflow-y-auto">
+                <div class="p-6 text-slate-500 whitespace-pre-wrap shrink-0">
                     {interpretResult!.result?.output}
                 </div>
-                <div class="flex flex-row w-full p-2 gap-2">
-                    <div class="p-2 w-1/2 flex flex-col gap-2">
+
+                <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
+                    <div class="p-2 w-1/2 flex flex-col gap-2 overflow-y-auto">
                         <div
-                            class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600"
+                            class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
                             ECMATree
                         </div>
@@ -290,13 +305,13 @@
                             {setHighlight}
                         />
                     </div>
-                    <div class="p-2 w-1/2 flex flex-col gap-2">
+                    <div class="p-2 w-1/2 flex flex-col gap-2 overflow-y-auto">
                         <div
-                            class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600"
+                            class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
                             Byte Code
                         </div>
-                        <ByteCode
+                        <Code
                             code={interpretResult!.result!.code}
                             {highlight}
                             {setHighlight}
@@ -305,7 +320,7 @@
                 </div>
             </div>
         {:else}
-            <div class="p-6 text-slate-500">
+            <div class="p-6 text-slate-500 flex-1 overflow-y-auto">
                 {OUTPUT_TITLES[pageState]}
             </div>
         {/if}

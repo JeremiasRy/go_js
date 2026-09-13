@@ -19,14 +19,8 @@
     import Arrow from "./Arrow.svelte";
     import { objectIsAstNode } from "$lib/util";
 
-    let { node, setHighlight, highlight }: PropsType = $props();
+    const { node, setHighlight, highlight }: PropsType = $props();
     let expanded = $derived(_expansionState[node.id] || false);
-
-    $effect(() => {
-        if (highlight !== null && highlight.source === "op_code") {
-            expanded = true;
-        }
-    });
 
     const camelToCapital = (str: string) => {
         return str
