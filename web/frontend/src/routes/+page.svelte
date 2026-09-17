@@ -92,10 +92,12 @@
                 const { from, to } = value;
                 if (from === 0 && to === 0) {
                     decorations = Decoration.none;
-                } else {
+                } else if (from < to) {
                     decorations = Decoration.set([
                         highlightMark.range(from, to),
                     ]);
+                } else {
+                    decorations = Decoration.none;
                 }
             }
             return decorations;
