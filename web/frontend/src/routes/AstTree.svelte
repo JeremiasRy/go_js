@@ -1,7 +1,3 @@
-<script module lang="ts">
-    const _expansionState: { [key: number]: Boolean } = $state({});
-</script>
-
 <script lang="ts">
     type PropsType = {
         node: AstNode;
@@ -12,6 +8,7 @@
             } | null,
         ) => void;
         highlight: HighlightStatus | null;
+        registerThySelf: (opts: { id: number; el: HTMLElement }) => void;
     };
     import { slide } from "svelte/transition";
     import type { AstNode, HighlightStatus } from "../types";
@@ -19,8 +16,8 @@
     import Arrow from "./Arrow.svelte";
     import { objectIsAstNode } from "$lib/util";
 
-    const { node, setHighlight, highlight }: PropsType = $props();
-    let expanded = $derived(_expansionState[node.id] || false);
+    const { node, setHighlight, highlight, registerThySelf }: PropsType =
+        $props();
 
     const camelToCapital = (str: string) => {
         return str
@@ -29,10 +26,6 @@
     };
     const splitCapitalCase = (str: string) => {
         return str.replace(/(?<!^)(?=[A-Z])/g, " ");
-    };
-
-    const toggleExpansion = () => {
-        expanded = _expansionState[node.id] = !expanded;
     };
 
     const skipProp = ([prop]: [string, unknown]): boolean => {
@@ -68,48 +61,52 @@
     onfocus={() => {}}
     onblur={() => {}}
     style={determineHighlightStatus()}
+    bind:this={
+        () => {},
+        (el) => {
+            registerThySelf({ id: Number(node.id), el });
+        }
+    }
 >
     <li>
-        <button onclick={toggleExpansion}>
-            <Arrow direction={expanded ? "down" : "right"} />
-            <span class="font-semibold">{splitCapitalCase(node.type)}</span>
-        </button>
+        <Arrow direction={"down"} />
+        <span class="font-semibold">{splitCapitalCase(node.type)}</span>
 
-        {#if expanded}
-            <ul transition:slide class="ml-4">
-                {#each Object.entries(node).filter(skipProp) as [key, value]}
-                    {#if Array.isArray(value)}
-                        <i class="my-2">{camelToCapital(key)}</i>
-                        {#each value as possibleNode}
-                            {#if objectIsAstNode(possibleNode)}
-                                <AstTree
-                                    node={possibleNode as AstNode}
-                                    {highlight}
-                                    {setHighlight}
-                                />
-                            {/if}
+        <ul transition:slide class="ml-4">
+            {#each Object.entries(node).filter(skipProp) as [key, value]}
+                {#if Array.isArray(value)}
+                    <i class="my-2">{camelToCapital(key)}</i>
+                    {#each value as possibleNode}
+                        {#if objectIsAstNode(possibleNode)}
+                            <AstTree
+                                node={possibleNode as AstNode}
+                                {highlight}
+                                {setHighlight}
+                                {registerThySelf}
+                            />
+                        {/if}
+                    {/each}
+                {:else if objectIsAstNode(value)}
+                    <i>{camelToCapital(key)}</i>
+                    <AstTree
+                        node={value as AstNode}
+                        {highlight}
+                        {setHighlight}
+                        {registerThySelf}
+                    />
+                {:else if typeof value === "object" && value !== null}
+                    <div>
+                        {#each Object.entries(value) as [k, v]}
+                            <p>{camelToCapital(k)}: <i>{v}</i></p>
                         {/each}
-                    {:else if objectIsAstNode(value)}
-                        <i>{camelToCapital(key)}</i>
-                        <AstTree
-                            node={value as AstNode}
-                            {highlight}
-                            {setHighlight}
-                        />
-                    {:else if typeof value === "object" && value !== null}
-                        <div>
-                            {#each Object.entries(value) as [k, v]}
-                                <p>{camelToCapital(k)}: <i>{v}</i></p>
-                            {/each}
-                        </div>
-                    {:else}
-                        <div>
-                            <span>{camelToCapital(key)}: <b>{value}</b></span>
-                        </div>
-                    {/if}
-                {/each}
-            </ul>
-        {/if}
+                    </div>
+                {:else}
+                    <div>
+                        <span>{camelToCapital(key)}: <b>{value}</b></span>
+                    </div>
+                {/if}
+            {/each}
+        </ul>
     </li>
 </ul>
 
@@ -117,6 +114,7 @@
     .ast-node {
         border-color: #e5e7eb;
         background-color: transparent;
+        scroll-margin-top: 0.5em;
     }
 
     .ast-node:hover:not(:has(.ast-node:hover)) {

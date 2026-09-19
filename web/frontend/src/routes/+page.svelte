@@ -30,6 +30,9 @@
     };
 
     const readOnlyCompartment = new Compartment();
+    const astElements = $state(new Map<number, HTMLElement>());
+    const lookUp = $state(new Map<number, AstNode>());
+
     let editorContainer: HTMLElement;
     let view: EditorView;
     let jobId = $state<null | string>(null);
@@ -41,8 +44,8 @@
             interpretResult.jobStatus === "Success" &&
             interpretResult.result !== null,
     );
-    let lookUp = $state<Map<number, AstNode> | null>(null);
     let highlight = $state.raw<HighlightStatus | null>(null);
+    let timeout = $state.raw<number | null>(null);
     const setHighlight = (
         opts: {
             astId: number;
@@ -65,8 +68,6 @@
             astId,
             astIds: [astId, ...(lookUp?.get(astId)?.ast_train ?? [])],
         };
-
-        console.log($state.snapshot(highlight));
     };
 
     const OUTPUT_TITLES: Record<PageStatus, string> = {
@@ -147,14 +148,16 @@
 
                 if (json.job_status === "Success") {
                     const interpretDetails = JSON.parse(atob(json.result));
-                    console.log(interpretDetails);
                     jobId = null;
                     interpretResult = {
                         jobStatus: "Success",
                         result: interpretDetails,
                     };
 
-                    lookUp = generateLookUp(interpretDetails.ast);
+                    generateLookUp({
+                        node: interpretDetails.ast,
+                        target: lookUp,
+                    });
                     pageState = "done";
                     return;
                 }
@@ -215,6 +218,44 @@
         view.dispatch({
             effects: addHighlight.of({ from, to }),
         });
+
+        if (highlight.source === "op_code") {
+            timeout = setTimeout(() => {
+                if (highlight === null) {
+                    return;
+                }
+                const elements: HTMLElement[] = highlight.astIds
+                    .filter((n) => astElements.has(n))
+                    .map((n) => astElements.get(n)) as HTMLElement[];
+
+                const firstElement = elements.reduce<HTMLElement | null>(
+                    (earliest, current) => {
+                        if (!earliest) return current;
+
+                        const position =
+                            earliest.compareDocumentPosition(current);
+                        if (position & Node.DOCUMENT_POSITION_PRECEDING) {
+                            return current;
+                        }
+
+                        return earliest;
+                    },
+                    null,
+                );
+
+                firstElement?.scrollIntoView({
+                    behavior: "smooth",
+                    block: "start",
+                });
+            }, 100);
+        }
+
+        return () => {
+            if (timeout !== null) {
+                clearTimeout(timeout);
+                timeout = null;
+            }
+        };
     });
 
     async function submitCode() {
@@ -239,6 +280,10 @@
         pageState = "input";
         jobId = null;
         interpretResult = null;
+    }
+
+    function registerThySelf({ id, el }: { id: number; el: HTMLElement }) {
+        astElements.set(id, el);
     }
 </script>
 
@@ -305,6 +350,7 @@
                             node={interpretResult!.result!.ast}
                             {highlight}
                             {setHighlight}
+                            {registerThySelf}
                         />
                     </div>
                     <div class="p-2 w-1/2 flex flex-col gap-2 overflow-y-auto">

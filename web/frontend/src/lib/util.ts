@@ -13,16 +13,15 @@ export function objectIsAstNode(prop: unknown): boolean {
     return false;
 };
 
-export function generateLookUp(node: AstNode): Map<number, AstNode> {
-    const lookUp: Map<number, AstNode> = new Map();
+export function generateLookUp({ node, target }: { node: AstNode, target: Map<number, AstNode> }) {
     const recurse = (node: unknown) => {
         if (!objectIsAstNode(node)) {
             return
         }
 
         const astNode = node as AstNode
-        if (!lookUp.has(astNode.id)) {
-            lookUp.set(astNode.id, astNode)
+        if (!target.has(astNode.id)) {
+            target.set(astNode.id, astNode)
         }
         for (const obj of Object.values(astNode)) {
             Array.isArray(obj)
@@ -31,6 +30,4 @@ export function generateLookUp(node: AstNode): Map<number, AstNode> {
         }
     }
     recurse(node)
-    console.log(lookUp)
-    return lookUp
 }
