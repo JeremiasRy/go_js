@@ -1,0 +1,8 @@
+github.com/can1357/gengo v0.2.0 h1:ekg3RWWDKaUCmb2Ib+gAYqT0v6v3xSwZreiI133+DMc=
+github.com/can1357/gengo v0.2.0/go.mod h1:XX6FcockCfPXg1ixiUQiU2Nm7gowrIm3YFO2VANLsMA=
+github.com/ebitengine/purego v0.11.0 h1:jhp/D+Nyv7UUW8HAcmcjt2N2rYrYi9m3SL21k0Ua/NI=
+github.com/ebitengine/purego v0.11.0/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
+github.com/zyantific/zydis-go v1.2.1 h1:HJYpJEzJWY6I08bB2Y2RU5kv1wGjv5VsbkZAe2sJEUM=
+github.com/zyantific/zydis-go v1.2.1/go.mod h1:y3wiZIxeK7YFBXkAqOBcsuCn50SfB/qOoUmuO56eess=
+golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
+golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=

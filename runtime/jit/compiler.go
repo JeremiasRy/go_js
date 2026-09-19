@@ -1,6 +1,7 @@
 package jit
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"go_js/chunk"
@@ -11,6 +12,8 @@ import (
 	"slices"
 	"syscall"
 	"unsafe"
+
+	"github.com/zyantific/zydis-go"
 )
 
 const (
@@ -652,6 +655,27 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	}
 	if err != nil {
 		return nil, fmt.Errorf("mprotect failed: %s", err.Error())
+	}
+
+	j := 0
+	insn := zydis.DisassembledInstruction{}
+	runtimeAddress := uintptr(0)
+	for j < len(asm.buffer[:asm.offset]) {
+		status := zydis.DisassembleIntel(
+			zydis.MACHINE_MODE_LONG_64,
+			uint64(runtimeAddress),
+			unsafe.Pointer(&asm.buffer[j]),
+			uint64(len(asm.buffer[:asm.offset])-j),
+			&insn,
+		)
+		if !zydis.Ok(status) {
+			break
+		}
+
+		textEnd := bytes.IndexByte(insn.Text[:], 0)
+		fmt.Printf("%016X  %s\n", runtimeAddress, string(insn.Text[:textEnd]))
+		j += int(insn.Info.Length)
+		runtimeAddress += uintptr(insn.Info.Length)
 	}
 
 	jittedFns[fn] = asm
