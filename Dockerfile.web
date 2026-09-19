@@ -1,0 +1,50 @@
+FROM golang:1.26 AS runtime_builder
+
+WORKDIR /app
+
+COPY ./runtime/go.mod .
+COPY ./runtime .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o go_js .
+
+FROM ubuntu:24.04 AS firecracker_builder
+
+COPY ./bin/install-deps.sh ./
+COPY ./bin/build-vmlinux.sh ./
+COPY ./bin/build-firecracker.sh ./
+COPY --from=runtime_builder ./app/go_js ./
+
+RUN ["chmod",  "+x", "./build-firecracker.sh"]
+RUN ["chmod",  "+x", "./build-vmlinux.sh"]
+RUN ["chmod",  "+x", "./install-deps.sh"]
+RUN ["./install-deps.sh"]
+RUN ["./build-vmlinux.sh"]
+RUN ["./build-firecracker.sh"]
+
+FROM oven/bun:1 AS frontend_build
+WORKDIR /app
+
+COPY ./web/frontend ./
+
+RUN bun install && bun run build
+
+FROM golang:1.26
+
+WORKDIR /app
+
+COPY --from=runtime_builder ./app/go_js ./runtime/
+COPY ./web/backend/go.mod ./
+COPY ./web/backend ./
+COPY ./bin/entrypoint.sh ./
+RUN chmod +x ./entrypoint.sh
+COPY --from=frontend_build ./app/build ./static
+COPY --from=firecracker_builder /linux-6.1.176/vmlinux ./vmlinux
+COPY --from=firecracker_builder /ubuntu-*.ext4 ./rootfs.ext4
+RUN chmod 666 ./rootfs.ext4
+COPY --from=firecracker_builder /firecracker ./firecracker
+COPY --from=firecracker_builder /ubuntu-*.id_rsa ./id_rsa
+
+RUN CGO_ENABLED=0 GOOS=linux go build -o web .
+
+EXPOSE 8000
+ENTRYPOINT [ "./entrypoint.sh" ]

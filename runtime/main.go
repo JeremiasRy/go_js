@@ -1,6 +1,9 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"go_js/compiler"
 	"go_js/eventloop"
@@ -9,7 +12,7 @@ import (
 	"go_js/native"
 	"go_js/parser"
 	"go_js/queue"
-	"go_js/vm"
+	virtualMachine "go_js/vm"
 	"log"
 	"os"
 	"runtime/pprof"
@@ -37,21 +40,31 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	if len(os.Args) < 2 {
-		println("Usage: go run main.go <input>")
+	flag.Usage = func() {
+		fmt.Fprintf(os.Stderr, "Usage: %s [options] <input_file>\n", os.Args[0])
+		flag.PrintDefaults()
+	}
+
+	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug mode")
+	flag.BoolVar(&flags.StructuredOutput, "structured", false, "Enable structured output")
+
+	flag.Parse()
+
+	args := flag.Args()
+
+	if len(args) < 1 {
+		fmt.Println("Usage: go run main.go [options] <input>")
+		flag.PrintDefaults()
 		os.Exit(1)
 	}
+	input := args[0]
 
-	if len(os.Args) == 3 {
-		flags.Debug = os.Args[2] == "--debug"
-	}
-
-	b, err := os.ReadFile(os.Args[1])
-	split := strings.Split(os.Args[1], "/")
+	b, err := os.ReadFile(input)
+	split := strings.Split(input, "/")
 
 	rootFileLocation := strings.Join(split[:len(split)-1], "/")
 
-	vm.InitFileRoot(rootFileLocation)
+	virtualMachine.InitFileRoot(rootFileLocation)
 	compiler.InitRootScriptLocation(rootFileLocation)
 
 	if err != nil {
@@ -84,7 +97,13 @@ func main() {
 	queue.Init(&wg)
 	eventloop.Init(&wg)
 
-	vm := vm.NewVM(true)
+	var output *strings.Builder
+
+	if flags.StructuredOutput {
+		output = &strings.Builder{}
+	}
+
+	vm := virtualMachine.NewVM(true, output)
 
 	go eventloop.Start()
 	go vm.Run(&wg)
@@ -94,8 +113,23 @@ func main() {
 
 	wg.Wait()
 
-	if err != nil {
-		log.Fatalf("runtime error: %s", err.Error())
-	}
+	if flags.StructuredOutput {
+		r := virtualMachine.StructureOutput(*main.ValueChunk(), map[string][]virtualMachine.OpDetail{})
 
+		out := virtualMachine.StructuredOut{
+			Output: output.String(),
+			Code:   r,
+			Ast:    ast,
+		}
+
+		res, err := json.Marshal(out)
+
+		if err != nil {
+			log.Fatalf("Failed to marshal output %s", err.Error())
+		}
+
+		str := base64.StdEncoding.EncodeToString(res)
+
+		fmt.Printf("%s", str)
+	}
 }

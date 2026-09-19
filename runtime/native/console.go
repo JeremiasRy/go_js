@@ -5,6 +5,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"strings"
 )
 
 type Console struct {
@@ -40,13 +41,23 @@ func NewLog() *Log {
 	return log
 }
 
-func (*Log) Log(values []value.Value) {
+func (*Log) Log(values []value.Value, sb *strings.Builder) {
 	for i, v := range values {
-		fmt.Printf("%v", String(v))
+		notLast := i < len(values)-1
+		pad := ""
+		if notLast {
+			pad = " "
+		}
 
-		if i < len(values)-1 {
-			fmt.Print(" ")
+		if sb != nil {
+			fmt.Fprintf(sb, "%v%s", String(v), pad)
+		} else {
+			fmt.Printf("%v%s", String(v), pad)
 		}
 	}
-	fmt.Println()
+	if sb != nil {
+		fmt.Fprintln(sb)
+	} else {
+		fmt.Println()
+	}
 }

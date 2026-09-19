@@ -16,7 +16,7 @@ type ObjGenerator struct {
 
 func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
 	if chunk == nil {
-		chunk = value.NewChunk()
+		chunk = value.NewChunk(name)
 	}
 	g := &ObjGenerator{}
 	g.Name = name

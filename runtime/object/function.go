@@ -26,7 +26,7 @@ const NOT_IN_HEAP_SCOPE int = -1
 
 func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 	if chunk == nil {
-		chunk = value.NewChunk()
+		chunk = value.NewChunk(name)
 	}
 	return &ObjFunction{
 		Name:      name,

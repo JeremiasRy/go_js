@@ -22,7 +22,7 @@ type ObjAsyncFunction struct {
 
 func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsyncFunction {
 	if chunk == nil {
-		chunk = value.NewChunk()
+		chunk = value.NewChunk(name)
 	}
 
 	asyncFn := &ObjAsyncFunction{}

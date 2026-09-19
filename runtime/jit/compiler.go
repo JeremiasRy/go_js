@@ -672,7 +672,7 @@ func IsJittable(fn object.Callable, globals []value.Value) bool {
 }
 
 func checkJittability(fn object.Callable, globals []value.Value) (is bool, localcount int) {
-	if !flags.ENABLE_JIT {
+	if !flags.EnableJIT {
 		return false, 0
 	}
 

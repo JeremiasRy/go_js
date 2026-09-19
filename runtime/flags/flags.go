@@ -2,5 +2,8 @@ package flags
 
 import "runtime"
 
-var Debug = false
-var ENABLE_JIT = runtime.GOOS == "linux"
+var (
+	Debug            = false
+	EnableJIT        = runtime.GOARCH == "amd64"
+	StructuredOutput = true
+)

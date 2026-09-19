@@ -12,6 +12,8 @@ const (
 	TYPE_MODULE
 )
 
+var IdCount int = 0
+
 func (st *SourceType) MarshalJSON() ([]byte, error) {
 	if *st == TYPE_SCRIPT {
 		return json.Marshal("TYPE_SCRIPT")
@@ -275,6 +277,9 @@ const (
 
 type Node struct {
 	// Base values
+	Id                 int      `json:"id"`
+	AstTrain           []*Node  `json:"-"`
+	AstTrainIds        []int    `json:"ast_train"`
 	Start              int      `json:"start"`
 	End                int      `json:"end"`
 	Type               NodeType `json:"type"`
@@ -375,10 +380,14 @@ func (n Node) MarshalJSON() ([]byte, error) {
 
 func NewNode(parser *Parser, pos int, loc *Location) *Node {
 	node := &Node{
-		Type:  NODE_UNTYPED,
-		Start: pos,
-		End:   0,
+		Id:       IdCount,
+		Type:     NODE_UNTYPED,
+		Start:    pos,
+		End:      0,
+		AstTrain: []*Node{},
 	}
+
+	IdCount++
 
 	if parser.options.Locations {
 		node.Location = NewSourceLocation(parser, loc, nil)
@@ -431,6 +440,8 @@ func (p *Parser) copyNode(node *Node) (*Node, error) {
 	}
 	var copyNode Node
 	err = json.Unmarshal(data, &copyNode)
+	copyNode.Id = IdCount
+	IdCount++
 	if err != nil {
 		return nil, err
 	}
