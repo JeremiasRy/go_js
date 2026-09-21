@@ -114,11 +114,12 @@ func main() {
 	wg.Wait()
 
 	if flags.StructuredOutput {
-		r := virtualMachine.StructureOutput(*main.ValueChunk(), map[string][]virtualMachine.OpDetail{})
+		info := map[string]*virtualMachine.DebugInfo{}
+		virtualMachine.StructureOutput(*main.ValueChunk(), info)
 
 		out := virtualMachine.StructuredOut{
 			Output: output.String(),
-			Code:   r,
+			Code:   info,
 			Ast:    ast,
 		}
 

@@ -1,8 +1,12 @@
 <script lang="ts">
-    import type { HighlightStatus } from "../types";
+    import type {
+        DisassembledByteCode,
+        FunctionName,
+        HighlightStatus,
+    } from "../types";
 
     type PropsType = {
-        code: Record<string, { ast_id: number; op: string }[]>;
+        debugInfo: Record<FunctionName, DisassembledByteCode>;
         setHighlight: (
             opts: {
                 astId: number;
@@ -12,12 +16,9 @@
         highlight: HighlightStatus | null;
     };
     const opElements = new Map<number, HTMLElement>();
-    const { code, setHighlight, highlight }: PropsType = $props();
+    const { debugInfo, setHighlight, highlight }: PropsType = $props();
 
-    const isNotInternalSetup = ([fnName]: [
-        string,
-        { ast_id: number; op: string }[],
-    ]) => {
+    const isNotInternalSetup = ([fnName]: [string, DisassembledByteCode]) => {
         return fnName !== "INTERNAL_SETUP";
     };
 
@@ -50,9 +51,9 @@
 </script>
 
 <div class="op-code border-solid border-l p-2 mb-1 rounded-md">
-    {#each Object.entries(code).filter(isNotInternalSetup) as [fn, operands]}
+    {#each Object.entries(debugInfo).filter(isNotInternalSetup) as [fn, debug]}
         <p><b>{fn === "PROGRAM_MAIN" ? "Main" : fn}</b></p>
-        {#each operands as { ast_id, op }}
+        {#each debug.byte_code as { op, ast_id }}
             <p
                 onmouseover={() => {
                     setHighlight({ astId: ast_id, source: "op_code" });

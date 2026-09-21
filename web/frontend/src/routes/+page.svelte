@@ -10,24 +10,15 @@
     import { javascript } from "@codemirror/lang-javascript";
     import { onMount } from "svelte";
     import fibo from "$lib/examples/fibonacci?raw";
-    import type { AstNode, HighlightStatus } from "../types";
+    import type {
+        AstNode,
+        HighlightStatus,
+        PageStatus,
+        InterpretResult,
+    } from "../types";
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
     import Code from "./Code.svelte";
-
-    type PageStatus = "input" | "submitting" | "polling" | "error" | "done";
-    type JobStatus = "Success" | "Failed" | "Pending" | "Processing";
-    type FunctionName = string;
-
-    type InterpretDetails = {
-        output: string;
-        code: Record<FunctionName, { ast_id: number; op: string }[]>;
-        ast: AstNode;
-    };
-    type InterpretResult = {
-        jobStatus: JobStatus;
-        result: InterpretDetails | null;
-    };
 
     const readOnlyCompartment = new Compartment();
     const astElements = $state(new Map<number, HTMLElement>());
@@ -360,7 +351,7 @@
                             Byte Code
                         </div>
                         <Code
-                            code={interpretResult!.result!.code}
+                            debugInfo={interpretResult!.result!.debug_info}
                             {highlight}
                             {setHighlight}
                         />

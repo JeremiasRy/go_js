@@ -29,7 +29,9 @@ wget -O ubuntu-$ubuntu_version.squashfs.upstream "https://s3.amazonaws.com/spec.
 
 rm -rf squashfs-root 
 unsquashfs ubuntu-$ubuntu_version.squashfs.upstream
+
 mkdir -p squashfs-root/workspace
+mkdir -p squashfs-root/root/.cache
 
 cp ./go_js squashfs-root/usr/local/bin/go_js
 chmod +x squashfs-root/usr/local/bin/go_js
