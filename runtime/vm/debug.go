@@ -139,6 +139,7 @@ func PrintChunk(c value.ValueChunk) {
 type OpDetail struct {
 	Op    string `json:"op"`
 	AstId int    `json:"ast_id"`
+	OpPtr int    `json:"op_ptr"`
 }
 
 type DebugInfo struct {
@@ -158,9 +159,10 @@ func StructureOutput(c value.ValueChunk, r map[string]*DebugInfo) {
 		if len(c.Code) <= ip {
 			break
 		}
+		opcodeIp := ip
 		astId := c.AstId[ip]
 		ip, _ = ReadOp(ip, c, sb)
-		r[c.FnName].ByteCode = append(r[c.FnName].ByteCode, OpDetail{Op: sb.String(), AstId: astId})
+		r[c.FnName].ByteCode = append(r[c.FnName].ByteCode, OpDetail{Op: sb.String(), AstId: astId, OpPtr: opcodeIp})
 
 		sb.Reset()
 	}
