@@ -10,24 +10,16 @@
     import { javascript } from "@codemirror/lang-javascript";
     import { onMount } from "svelte";
     import fibo from "$lib/examples/fibonacci?raw";
-    import type { AstNode, HighlightStatus } from "../types";
+    import type {
+        AstNode,
+        HighlightStatus,
+        PageStatus,
+        InterpretResult,
+        SetHighlightStatusParams,
+    } from "../types";
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
     import Code from "./Code.svelte";
-
-    type PageStatus = "input" | "submitting" | "polling" | "error" | "done";
-    type JobStatus = "Success" | "Failed" | "Pending" | "Processing";
-    type FunctionName = string;
-
-    type InterpretDetails = {
-        output: string;
-        code: Record<FunctionName, { ast_id: number; op: string }[]>;
-        ast: AstNode;
-    };
-    type InterpretResult = {
-        jobStatus: JobStatus;
-        result: InterpretDetails | null;
-    };
 
     const readOnlyCompartment = new Compartment();
     const astElements = $state(new Map<number, HTMLElement>());
@@ -46,27 +38,46 @@
     );
     let highlight = $state.raw<HighlightStatus | null>(null);
     let timeout = $state.raw<number | null>(null);
-    const setHighlight = (
-        opts: {
-            astId: number;
-            source: HighlightStatus["source"];
-        } | null,
-    ) => {
-        if (opts === null) {
+
+    const isSameHighlight = (opts: SetHighlightStatusParams) => {
+        if (highlight === null || opts === null) {
+            return false;
+        }
+
+        if (highlight.source !== opts.source || highlight.astId !== opts.astId) {
+            return false;
+        }
+
+        if (opts.source === "ast") {
+            return true;
+        }
+
+        return highlight.fn === opts.fn && highlight.opCodePtr === opts.opCodePtr;
+    };
+
+    const setHighlight = (opts: SetHighlightStatusParams) => {
+        if (opts === null || isSameHighlight(opts)) {
             highlight = null;
             return;
         }
 
-        const { source, astId } = opts;
-
-        if (highlight?.astId === astId && highlight.source === "ast") {
+        if (opts.source === "asm") {
+            highlight = {
+                source: "asm",
+                astId: opts.astId,
+                astIds: [opts.astId],
+                opCodePtr: opts.opCodePtr,
+                fn: opts.fn,
+            };
             return;
         }
 
         highlight = {
-            source,
-            astId,
-            astIds: [astId, ...(lookUp?.get(astId)?.ast_train ?? [])],
+            source: opts.source,
+            astId: opts.astId,
+            astIds: [opts.astId, ...(lookUp?.get(opts.astId)?.ast_train ?? [])],
+            fn: opts.source === "op_code" ? opts.fn : "",
+            opCodePtr: opts.source === "op_code" ? opts.opCodePtr : -1,
         };
     };
 
@@ -219,7 +230,7 @@
             effects: addHighlight.of({ from, to }),
         });
 
-        if (highlight.source === "op_code") {
+        if (highlight.source === "op_code" || highlight.source === "asm") {
             timeout = setTimeout(() => {
                 if (highlight === null) {
                     return;
@@ -245,7 +256,7 @@
 
                 firstElement?.scrollIntoView({
                     behavior: "smooth",
-                    block: "start",
+                    block: "center",
                 });
             }, 100);
         }
@@ -325,7 +336,7 @@
     </div>
 
     <div
-        class="w-1/2 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+        class="w-1/2 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col"
     >
         <div
             class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
@@ -334,13 +345,13 @@
         </div>
 
         {#if showResults}
-            <div class="flex flex-col w-full flex-1 min-h-0 overflow-y-auto">
+            <div class="flex flex-col w-full flex-1 min-h-0">
                 <div class="p-6 text-slate-500 whitespace-pre-wrap shrink-0">
                     {interpretResult!.result?.output}
                 </div>
 
                 <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
-                    <div class="p-2 w-1/2 flex flex-col gap-2 overflow-y-auto">
+                    <div class="p-2 w-1/2 flex flex-col gap-2">
                         <div
                             class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
@@ -353,14 +364,14 @@
                             {registerThySelf}
                         />
                     </div>
-                    <div class="p-2 w-1/2 flex flex-col gap-2 overflow-y-auto">
+                    <div class="p-2 w-1/2 flex flex-col gap-2">
                         <div
                             class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
                             Byte Code
                         </div>
                         <Code
-                            code={interpretResult!.result!.code}
+                            debugInfo={interpretResult!.result!.debug_info}
                             {highlight}
                             {setHighlight}
                         />

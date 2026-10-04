@@ -7,6 +7,7 @@ import (
 	"go_js/chunk"
 	"go_js/compiler"
 	"go_js/heap"
+	"go_js/jit"
 	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
@@ -15,7 +16,7 @@ import (
 
 type StructuredOut struct {
 	Output string                `json:"output"`
-	Code   map[string][]OpDetail `json:"code"`
+	Code   map[string]*DebugInfo `json:"debug_info"`
 	Ast    *parser.Node          `json:"ast"`
 }
 
@@ -138,10 +139,19 @@ func PrintChunk(c value.ValueChunk) {
 type OpDetail struct {
 	Op    string `json:"op"`
 	AstId int    `json:"ast_id"`
+	OpPtr int    `json:"op_ptr"`
 }
 
-func StructureOutput(c value.ValueChunk, r map[string][]OpDetail) map[string][]OpDetail {
-	r[c.FnName] = []OpDetail{}
+type DebugInfo struct {
+	Jit      []jit.JitDetail `json:"jit"`
+	ByteCode []OpDetail      `json:"byte_code"`
+}
+
+func StructureOutput(c value.ValueChunk, r map[string]*DebugInfo) {
+	r[c.FnName] = &DebugInfo{
+		Jit:      []jit.JitDetail{},
+		ByteCode: []OpDetail{},
+	}
 	ip := 0
 	sb := &strings.Builder{}
 
@@ -149,10 +159,11 @@ func StructureOutput(c value.ValueChunk, r map[string][]OpDetail) map[string][]O
 		if len(c.Code) <= ip {
 			break
 		}
+		opcodeIp := ip
 		astId := c.AstId[ip]
 		ip, _ = ReadOp(ip, c, sb)
+		r[c.FnName].ByteCode = append(r[c.FnName].ByteCode, OpDetail{Op: sb.String(), AstId: astId, OpPtr: opcodeIp})
 
-		r[c.FnName] = append(r[c.FnName], OpDetail{Op: sb.String(), AstId: astId})
 		sb.Reset()
 	}
 
@@ -162,11 +173,12 @@ func StructureOutput(c value.ValueChunk, r map[string][]OpDetail) map[string][]O
 			switch f := obj.(type) {
 			case object.Callable:
 				StructureOutput(*f.ValueChunk(), r)
+				if found, disassembly := jit.GetJittedDisassemblyIfPossible(f); found {
+					r[f.ValueChunk().FnName].Jit = disassembly
+				}
 			}
 		}
 	}
-
-	return r
 }
 
 func printStack(stack []value.Value) {

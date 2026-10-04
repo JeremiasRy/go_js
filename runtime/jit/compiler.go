@@ -1,7 +1,7 @@
 package jit
 
 import (
-	"encoding/hex"
+	"bytes"
 	"fmt"
 	"go_js/chunk"
 	"go_js/flags"
@@ -11,6 +11,8 @@ import (
 	"slices"
 	"syscall"
 	"unsafe"
+
+	"github.com/zyantific/zydis-go"
 )
 
 const (
@@ -52,6 +54,8 @@ const (
 
 	// yeah this is ugly I know..
 	SPILLS_REQ_FOR_FIBO = 4
+
+	PROLOGUE_POINTER = -1
 )
 
 var MOV_SD_LOAD = []byte{0xF2, 0x0F, 0x10}
@@ -71,8 +75,16 @@ var jumpstack = []struct {
 	from         int
 }{}
 
+var debugs = map[*Assembler]*struct {
+	opCodePointers []int
+	astIds         []int
+}{}
+
 type Assembler struct {
 	buffer               []byte
+	disassembled         []JitDetail
+	currentAstId         int
+	currentOpCodePointer int
 	offset               int
 	localsPatchOffset    int
 	globalsPatchOffset   int
@@ -80,6 +92,17 @@ type Assembler struct {
 
 	freeRegister []byte
 	valueStack   []byte
+
+	closure struct {
+		trampoline uintptr
+		jitcode    uintptr
+	}
+}
+
+type JitDetail struct {
+	Inst      string `json:"inst"`
+	OpCodePtr int    `json:"op_code_ptr"`
+	AstId     int    `json:"ast_id"`
 }
 
 func NewAssembler() (*Assembler, error) {
@@ -95,19 +118,43 @@ func NewAssembler() (*Assembler, error) {
 		return nil, err
 	}
 
-	return &Assembler{
-		buffer: buffer,
-		offset: 0,
+	asm := &Assembler{
+		buffer:               buffer,
+		offset:               0,
+		disassembled:         []JitDetail{},
+		currentOpCodePointer: PROLOGUE_POINTER,
+		currentAstId:         PROLOGUE_POINTER,
 
 		freeRegister: []byte{XMM5, XMM4, XMM3, XMM2, XMM1},
 		valueStack:   []byte{},
-	}, nil
+	}
+
+	if flags.StructuredOutput {
+		debugs[asm] = &struct {
+			opCodePointers []int
+			astIds         []int
+		}{opCodePointers: []int{}, astIds: []int{}}
+	}
+
+	return asm, nil
 }
 
 func (asm *Assembler) emitBytes(b ...byte) {
 	for _, b := range b {
 		asm.buffer[asm.offset] = b
 		asm.offset++
+	}
+
+	if flags.StructuredOutput {
+		l := len(b)
+		astIds := make([]int, l)
+		opPtrs := make([]int, l)
+		for i := range b {
+			astIds[i] = asm.currentAstId
+			opPtrs[i] = asm.currentOpCodePointer
+		}
+		debugs[asm].astIds = append(debugs[asm].astIds, astIds...)
+		debugs[asm].opCodePointers = append(debugs[asm].opCodePointers, opPtrs...)
 	}
 }
 
@@ -193,17 +240,12 @@ func (asm *Assembler) popValueRegister() (byte, error) {
 
 func (asm *Assembler) createJITFunction() func() {
 	dummy := jitcall
-	jit := uintptr((unsafe.Pointer(&asm.buffer[0])))
+	asm.closure.trampoline = **(**uintptr)(unsafe.Pointer(&dummy))
+	asm.closure.jitcode = uintptr(unsafe.Pointer(&asm.buffer[0]))
 
-	fn := &struct {
-		trampoline uintptr
-		jitcode    uintptr
-	}{
-		trampoline: **(**uintptr)(unsafe.Pointer(&dummy)),
-		jitcode:    jit,
-	}
+	p := unsafe.Pointer(&asm.closure)
 
-	return (*(*func())(unsafe.Pointer(&fn)))
+	return *(*func())(unsafe.Pointer(&p))
 }
 
 func JITFunction(localStart *value.Value, globals *value.Value, fn object.Callable) error {
@@ -398,6 +440,8 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	code := fn.ValueChunk().Code
 
 	for i < len(code) {
+		asm.currentOpCodePointer = i
+		asm.currentAstId = fn.ValueChunk().AstId[i]
 		op := code[i]
 
 		if len(jumpstack) > 0 && jumpstack[len(jumpstack)-1].when == i {
@@ -529,6 +573,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 					asm.emitJA(0)
 
 					target := int(code[i+3]) | int(code[i+2])<<8 | int(code[i+1])<<16 | int(code[i])<<24
+					i += 4
 					jumpstack = append(jumpstack, struct {
 						when         int
 						bufferOffset uint32
@@ -646,12 +691,37 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	}
 
 	err = syscall.Mprotect(asm.buffer, syscall.PROT_READ|syscall.PROT_EXEC)
-	if flags.Debug {
-		fmt.Println("Compiled assembly")
-		fmt.Printf("\n%s\n", hex.Dump(asm.buffer[:asm.offset]))
-	}
 	if err != nil {
 		return nil, fmt.Errorf("mprotect failed: %s", err.Error())
+	}
+
+	if flags.StructuredOutput {
+		i := 0
+		insn := zydis.DisassembledInstruction{}
+		runtimeAddress := uintptr(0)
+
+		for i < len(asm.buffer[:asm.offset]) {
+			status := zydis.DisassembleIntel(
+				zydis.MACHINE_MODE_LONG_64,
+				uint64(runtimeAddress),
+				unsafe.Pointer(&asm.buffer[i]),
+				uint64(len(asm.buffer[:asm.offset])-i),
+				&insn,
+			)
+
+			if !zydis.Ok(status) {
+				break
+			}
+
+			textEnd := bytes.IndexByte(insn.Text[:], 0)
+			asm.disassembled = append(asm.disassembled, JitDetail{
+				Inst:      fmt.Sprintf("%016X  %s\n", runtimeAddress, string(insn.Text[:textEnd])),
+				OpCodePtr: debugs[asm].opCodePointers[i],
+				AstId:     debugs[asm].astIds[i],
+			})
+			i += int(insn.Info.Length)
+			runtimeAddress += uintptr(insn.Info.Length)
+		}
 	}
 
 	jittedFns[fn] = asm
@@ -669,6 +739,14 @@ func IsJittable(fn object.Callable, globals []value.Value) bool {
 		locals int
 	}{is: is, locals: localcount}
 	return is
+}
+
+func GetJittedDisassemblyIfPossible(fn object.Callable) (bool, []JitDetail) {
+	if asm, found := jittedFns[fn]; found {
+		return true, asm.disassembled
+	}
+
+	return false, nil
 }
 
 func checkJittability(fn object.Callable, globals []value.Value) (is bool, localcount int) {

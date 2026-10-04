@@ -17,4 +17,5 @@ iptables -A FORWARD -i "$BRIDGE_DEV" -j ACCEPT
 iptables -A FORWARD -o "$BRIDGE_DEV" -m state --state RELATED,ESTABLISHED -j ACCEPT
 
 echo "Network bridge created. Starting Go server..."
+
 ./web

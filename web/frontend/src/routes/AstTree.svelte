@@ -1,17 +1,16 @@
 <script lang="ts">
     type PropsType = {
         node: AstNode;
-        setHighlight: (
-            opts: {
-                astId: number;
-                source: "ast" | "op_code";
-            } | null,
-        ) => void;
+        setHighlight: (opts: SetHighlightStatusParams) => void;
         highlight: HighlightStatus | null;
         registerThySelf: (opts: { id: number; el: HTMLElement }) => void;
     };
     import { slide } from "svelte/transition";
-    import type { AstNode, HighlightStatus } from "../types";
+    import type {
+        AstNode,
+        HighlightStatus,
+        SetHighlightStatusParams,
+    } from "../types";
     import AstTree from "./AstTree.svelte";
     import Arrow from "./Arrow.svelte";
     import { objectIsAstNode } from "$lib/util";
@@ -32,22 +31,13 @@
         return !["type", "start", "end", "id", "ast_train"].includes(prop);
     };
 
-    const onMouseEnter = (e: Event) => {
+    const onDoubleClick = (e: Event) => {
         e.stopPropagation();
         setHighlight({ source: "ast", astId: node.id });
     };
 
-    const onMouseLeave = (e: Event) => {
-        e.stopPropagation();
-        setHighlight(null);
-    };
-
     const determineHighlightStatus = () => {
-        if (
-            highlight !== null &&
-            highlight.source === "op_code" &&
-            highlight.astId === node.id
-        ) {
+        if (highlight !== null && highlight.astId === node.id) {
             return "border-color: #3b82f6; background-color: #eff6ff;";
         }
         return "";
@@ -55,11 +45,10 @@
 </script>
 
 <ul
-    class="ast-node border-solid border-l p-1 mb-1 rounded-md {String(node.id)}"
-    onmouseover={onMouseEnter}
-    onmouseleave={onMouseLeave}
-    onfocus={() => {}}
-    onblur={() => {}}
+    class="ast-node select-none border-solid border-l p-1 mb-1 rounded-md {String(
+        node.id,
+    )} overflow-y-auto"
+    ondblclick={onDoubleClick}
     style={determineHighlightStatus()}
     bind:this={
         () => {},

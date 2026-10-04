@@ -181,6 +181,7 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	}
 	defer client.Close()
 
+	_, err = runSSHCommand(client, "mount -t tmpfs -o size=10M tmpfs /root/.cache")
 	_, err = runSSHCommand(client, "mount -t tmpfs -o size=50M tmpfs /workspace")
 	if err != nil {
 		return "", fmt.Errorf("Failed to mount tmpfs: %v", err)
@@ -211,10 +212,6 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	clearTap(tap)
 	mvm.ipPool <- vmId
 	os.Remove(socket)
-
-	if err != nil {
-		return "", fmt.Errorf("failed to parse script output %v", err)
-	}
 
 	return string(output), nil
 }
