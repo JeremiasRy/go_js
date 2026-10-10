@@ -44,7 +44,10 @@
             return false;
         }
 
-        if (highlight.source !== opts.source || highlight.astId !== opts.astId) {
+        if (
+            highlight.source !== opts.source ||
+            highlight.astId !== opts.astId
+        ) {
             return false;
         }
 
@@ -52,7 +55,9 @@
             return true;
         }
 
-        return highlight.fn === opts.fn && highlight.opCodePtr === opts.opCodePtr;
+        return (
+            highlight.fn === opts.fn && highlight.opCodePtr === opts.opCodePtr
+        );
     };
 
     const setHighlight = (opts: SetHighlightStatusParams) => {
@@ -380,7 +385,16 @@
             </div>
         {:else}
             <div class="p-6 text-slate-500 flex-1 overflow-y-auto">
-                {OUTPUT_TITLES[pageState]}
+                <div
+                    class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
+                >
+                    {OUTPUT_TITLES[pageState]}
+                </div>
+                <div
+                    class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0 whitespace-pre-wrap"
+                >
+                    {interpretResult?.result}
+                </div>
             </div>
         {/if}
     </div>

@@ -73,6 +73,10 @@ func main() {
 	mux.HandleFunc("/api/interpret", ctr.HandlePostInterpret)
 	mux.HandleFunc("/api/jobs/{job_id}", ctr.HandleGetJobById)
 
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Ok!"))
+	})
+
 	wrap := corsMiddleware(Logger(mux))
 	log.Printf("Listening and serving from localhost%s", PORT)
 	err := http.ListenAndServe(PORT, wrap)

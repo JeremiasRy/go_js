@@ -6,6 +6,7 @@ COPY ./runtime/go.mod .
 COPY ./runtime .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o go_js .
+RUN cp "$(go env GOMODCACHE)/github.com/zyantific/zydis-go@v1.2.1/zyembed/linux-amd64.so" /app/libzydis.so
 
 FROM ubuntu:24.04 AS firecracker_builder
 
@@ -13,6 +14,7 @@ COPY ./bin/install-deps.sh ./
 COPY ./bin/build-vmlinux.sh ./
 COPY ./bin/build-firecracker.sh ./
 COPY --from=runtime_builder ./app/go_js ./
+COPY --from=runtime_builder /app/libzydis.so ./
 
 RUN ["chmod",  "+x", "./build-firecracker.sh"]
 RUN ["chmod",  "+x", "./build-vmlinux.sh"]

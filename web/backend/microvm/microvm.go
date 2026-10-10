@@ -181,7 +181,9 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	}
 	defer client.Close()
 
-	_, err = runSSHCommand(client, "mount -t tmpfs -o size=10M tmpfs /root/.cache")
+	// /root/.cache holds the preinstalled Zydis .so. Do not mount tmpfs over it:
+	// the rootfs is read-only, so a fresh tmpfs has nowhere to write the library
+	// and dlopen then faults inside Zydis.
 	_, err = runSSHCommand(client, "mount -t tmpfs -o size=50M tmpfs /workspace")
 	if err != nil {
 		return "", fmt.Errorf("Failed to mount tmpfs: %v", err)

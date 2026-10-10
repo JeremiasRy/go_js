@@ -15,6 +15,24 @@ import (
 	"github.com/zyantific/zydis-go"
 )
 
+// gengo's CCall5 enters Zydis with RSP 16-byte aligned. SysV requires
+// 8-mod-16, and Zydis then null-derefs. call5Aligned pushes once so the
+// callee sees the ABI alignment.
+//
+//go:linkname zydisDisassembleIntel github.com/zyantific/zydis-go.__imp_ZydisDisassembleIntel
+var zydisDisassembleIntel uintptr
+
+func disassembleIntel(runtimeAddress uint64, buffer unsafe.Pointer, length uint64, insn *zydis.DisassembledInstruction) zydis.Status {
+	return zydis.Status(call5Aligned(
+		zydisDisassembleIntel,
+		uintptr(zydis.MACHINE_MODE_LONG_64),
+		uintptr(runtimeAddress),
+		uintptr(buffer),
+		uintptr(length),
+		uintptr(unsafe.Pointer(insn)),
+	))
+}
+
 const (
 	BASE_IMM_64_MOV byte = 0xB8
 	BASE_PUSH       byte = 0x50
@@ -701,8 +719,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 		runtimeAddress := uintptr(0)
 
 		for i < len(asm.buffer[:asm.offset]) {
-			status := zydis.DisassembleIntel(
-				zydis.MACHINE_MODE_LONG_64,
+			status := disassembleIntel(
 				uint64(runtimeAddress),
 				unsafe.Pointer(&asm.buffer[i]),
 				uint64(len(asm.buffer[:asm.offset])-i),
