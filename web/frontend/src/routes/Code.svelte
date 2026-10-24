@@ -90,55 +90,77 @@
         return [offset, "|", ...rest].join(" ");
     }
 
-    function determineHiglightStatusForOpCode({
-        op_ptr,
-        ast_id,
+    const highlightedAstIds = $derived(
+        highlight?.source === "ast"
+            ? new Set(highlight.astIds)
+            : new Set<number>(),
+    );
+
+    const highlightedPointer = $derived(
+        highlight !== null && highlight.source !== "ast"
+            ? { fn: highlight.fn, ptr: highlight.opCodePtr }
+            : null,
+    );
+
+    function buildHighlightClasses<T extends { ast_id: number }>({
+        items,
         fn,
+        getPtr,
     }: {
-        op_ptr: number;
-        ast_id: number;
+        items: T[];
         fn: string;
+        getPtr: (item: T) => number;
     }) {
-        if (
-            (highlight?.source === "asm" || highlight?.source === "op_code") &&
-            fn === highlight.fn &&
-            op_ptr === highlight.opCodePtr
-        ) {
-            return "highlight";
-        }
+        const states = items.map((item) => {
+            const byAst = highlightedAstIds.has(item.ast_id);
+            const byPointer =
+                highlightedPointer !== null &&
+                highlightedPointer.fn === fn &&
+                highlightedPointer.ptr === getPtr(item);
 
-        if (highlight?.source === "ast" && highlight?.astIds.includes(ast_id)) {
-            return "highlight";
-        }
+            return byAst || byPointer;
+        });
 
-        return "";
+        return states.map((isHighlighted, i) => {
+            if (!isHighlighted) {
+                return "";
+            }
+
+            const isStart = !states[i - 1];
+            const isEnd = !states[i + 1];
+
+            if (isStart && isEnd) {
+                return "highlight highlight-start highlight-end";
+            }
+
+            if (isStart) {
+                return "highlight highlight-start";
+            }
+
+            if (isEnd) {
+                return "highlight highlight-end";
+            }
+
+            return "highlight";
+        });
     }
 
-    function determineHighlightStatusForAsm({
-        ast_id,
-        op_code_ptr,
-        fn,
-    }: {
-        ast_id: number;
-        op_code_ptr: number;
-        fn: string;
-    }) {
-        if (
-            (highlight?.source === "asm" || highlight?.source === "op_code") &&
-            highlight?.opCodePtr === op_code_ptr &&
-            highlight?.fn === fn
-        ) {
-            return "highlight";
-        }
-
-        if (highlight?.source === "ast" && highlight?.astIds.includes(ast_id)) {
-            return "highlight";
-        }
-    }
+    const getOpCodePtr = (item: { op_ptr: number }) => item.op_ptr;
+    const getJitPtr = (item: { op_code_ptr: number }) => item.op_code_ptr;
 </script>
 
 <div class="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto">
     {#each Object.entries(debugInfo).filter(isNotInternalSetup) as [fn, { byte_code, jit }]}
+        {@const byteHighlightClasses = buildHighlightClasses({
+            items: byte_code,
+            fn,
+            getPtr: getOpCodePtr,
+        })}
+        {@const jitHighlightClasses = buildHighlightClasses({
+            items: jit,
+            fn,
+            getPtr: getJitPtr,
+        })}
         <div class="rounded-lg border border-slate-200 bg-white p-2">
             <p class="mb-2 text-sm font-semibold text-slate-600">
                 {fn === "PROGRAM_MAIN" ? "Main" : fn}
@@ -148,30 +170,6 @@
                     class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-1.5"
                 >
                     {#each byte_code as { op, ast_id, op_ptr }, i}
-                        {@const isHighlighted =
-                            determineHiglightStatusForOpCode({
-                                op_ptr,
-                                ast_id,
-                                fn,
-                            }) === "highlight"}
-                        {@const previousHighlighted =
-                            i > 0 &&
-                            determineHiglightStatusForOpCode({
-                                op_ptr: byte_code[i - 1].op_ptr,
-                                ast_id: byte_code[i - 1].ast_id,
-                                fn,
-                            }) === "highlight"}
-                        {@const nextHighlighted =
-                            i < byte_code.length - 1 &&
-                            determineHiglightStatusForOpCode({
-                                op_ptr: byte_code[i + 1].op_ptr,
-                                ast_id: byte_code[i + 1].ast_id,
-                                fn,
-                            }) === "highlight"}
-                        {@const isHighlightStart =
-                            isHighlighted && !previousHighlighted}
-                        {@const isHighlightEnd =
-                            isHighlighted && !nextHighlighted}
                         <p
                             ondblclick={() => {
                                 setHighlight({
@@ -201,13 +199,9 @@
                                     }
                                 }
                             }
-                            class="code cursor-default select-none rounded border border-transparent px-2 py-0.5 whitespace-pre-wrap transition-colors {Number(
+                            class="code cursor-default select-none rounded border border-transparent px-2 py-0.5 whitespace-pre-wrap {Number(
                                 ast_id,
-                            )} {isHighlighted ? 'highlight' : ''} {isHighlightStart
-                                ? 'highlight-start'
-                                : ''} {isHighlightEnd
-                                ? 'highlight-end'
-                                : ''}"
+                            )} {byteHighlightClasses[i]}"
                         >
                             {op}
                         </p>
@@ -218,30 +212,6 @@
                         class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-1.5"
                     >
                         {#each jit as { inst, op_code_ptr, ast_id }, i}
-                            {@const isHighlighted =
-                                determineHighlightStatusForAsm({
-                                    ast_id,
-                                    fn,
-                                    op_code_ptr,
-                                }) === "highlight"}
-                            {@const previousHighlighted =
-                                i > 0 &&
-                                determineHighlightStatusForAsm({
-                                    ast_id: jit[i - 1].ast_id,
-                                    fn,
-                                    op_code_ptr: jit[i - 1].op_code_ptr,
-                                }) === "highlight"}
-                            {@const nextHighlighted =
-                                i < jit.length - 1 &&
-                                determineHighlightStatusForAsm({
-                                    ast_id: jit[i + 1].ast_id,
-                                    fn,
-                                    op_code_ptr: jit[i + 1].op_code_ptr,
-                                }) === "highlight"}
-                            {@const isHighlightStart =
-                                isHighlighted && !previousHighlighted}
-                            {@const isHighlightEnd =
-                                isHighlighted && !nextHighlighted}
                             <p
                                 ondblclick={() => {
                                     setHighlight({
@@ -273,15 +243,11 @@
                                         }
                                     }
                                 }
-                                class="code cursor-default select-none rounded border border-transparent px-2 py-0.5 whitespace-pre-wrap transition-colors ast-{Number(
+                                class="code cursor-default select-none rounded border border-transparent px-2 py-0.5 whitespace-pre-wrap ast-{Number(
                                     ast_id,
                                 )} op-{Number(
                                     op_code_ptr,
-                                )} {isHighlighted ? 'highlight' : ''} {isHighlightStart
-                                    ? 'highlight-start'
-                                    : ''} {isHighlightEnd
-                                    ? 'highlight-end'
-                                    : ''}"
+                                )} {jitHighlightClasses[i]}"
                             >
                                 {formatAssemblyInstruction(inst)}
                             </p>
