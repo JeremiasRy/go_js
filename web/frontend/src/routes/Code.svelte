@@ -130,37 +130,30 @@
         }
     }
 
-    function bringIntoView(target: HTMLElement | null) {
-        if (!target || !codeScrollContainer) {
+    function scrollRootToTarget(
+        column: HTMLElement,
+        target: HTMLElement,
+        commonOffset: number,
+    ) {
+        if (!codeScrollContainer) {
             return;
         }
 
         const rootRect = codeScrollContainer.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        const margin = 8;
+        const columnRect = column.getBoundingClientRect();
+        const columnTopInRoot =
+            columnRect.top - rootRect.top + codeScrollContainer.scrollTop;
+        const targetTopInRoot = columnTopInRoot + commonOffset;
+        const targetHeight = target.getBoundingClientRect().height;
+        const rootTarget =
+            targetTopInRoot +
+            targetHeight / 2 -
+            codeScrollContainer.clientHeight / 2;
 
-        if (targetRect.top < rootRect.top + margin) {
-            codeScrollContainer.scrollTo({
-                top:
-                    codeScrollContainer.scrollTop +
-                    targetRect.top -
-                    rootRect.top -
-                    margin,
-                behavior: "smooth",
-            });
-            return;
-        }
-
-        if (targetRect.bottom > rootRect.bottom - margin) {
-            codeScrollContainer.scrollTo({
-                top:
-                    codeScrollContainer.scrollTop +
-                    targetRect.bottom -
-                    rootRect.bottom +
-                    margin,
-                behavior: "smooth",
-            });
-        }
+        codeScrollContainer.scrollTo({
+            top: rootTarget,
+            behavior: "smooth",
+        });
     }
 
     function alignColumns(bytecodeTarget: HTMLElement, jitTarget: HTMLElement) {
@@ -191,14 +184,16 @@
         const commonOffset =
             lower <= upper ? clamp(preferred, lower, upper) : (lower + upper) / 2;
 
-        bytecodeScroll.scrollTop = clamp(
-            bytecodeTop - commonOffset,
-            0,
-            bytecodeMaxScroll,
-        );
-        jitScroll.scrollTop = clamp(jitTop - commonOffset, 0, jitMaxScroll);
+        bytecodeScroll.scrollTo({
+            top: clamp(bytecodeTop - commonOffset, 0, bytecodeMaxScroll),
+            behavior: "smooth",
+        });
+        jitScroll.scrollTo({
+            top: clamp(jitTop - commonOffset, 0, jitMaxScroll),
+            behavior: "smooth",
+        });
 
-        bringIntoView(bytecodeTarget);
+        scrollRootToTarget(bytecodeScroll, bytecodeTarget, commonOffset);
     }
 
     const isNotInternalSetup = ([fnName]: [string, DisassembledByteCode]) => {
