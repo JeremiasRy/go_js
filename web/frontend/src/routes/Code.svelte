@@ -111,37 +111,14 @@
         fn: string;
         getPtr: (item: T) => number;
     }) {
-        const states = items.map((item) => {
+        return items.map((item) => {
             const byAst = highlightedAstIds.has(item.ast_id);
             const byPointer =
                 highlightedPointer !== null &&
                 highlightedPointer.fn === fn &&
                 highlightedPointer.ptr === getPtr(item);
 
-            return byAst || byPointer;
-        });
-
-        return states.map((isHighlighted, i) => {
-            if (!isHighlighted) {
-                return "";
-            }
-
-            const isStart = !states[i - 1];
-            const isEnd = !states[i + 1];
-
-            if (isStart && isEnd) {
-                return "highlight highlight-start highlight-end";
-            }
-
-            if (isStart) {
-                return "highlight highlight-start";
-            }
-
-            if (isEnd) {
-                return "highlight highlight-end";
-            }
-
-            return "highlight";
+            return byAst || byPointer ? "highlight" : "";
         });
     }
 
@@ -199,7 +176,7 @@
                                     }
                                 }
                             }
-                            class="code cursor-default select-none rounded border border-transparent px-2 py-0.5 whitespace-pre-wrap {Number(
+                            class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap {Number(
                                 ast_id,
                             )} {byteHighlightClasses[i]}"
                         >
@@ -243,7 +220,7 @@
                                         }
                                     }
                                 }
-                                class="code cursor-default select-none rounded border border-transparent px-2 py-0.5 whitespace-pre-wrap ast-{Number(
+                                class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap ast-{Number(
                                     ast_id,
                                 )} op-{Number(
                                     op_code_ptr,
@@ -261,33 +238,13 @@
 
 <style>
     .code:hover:not(.highlight) {
-        border-color: #3b82f6;
+        border-left-color: #3b82f6;
         background-color: #eff6ff;
     }
 
     .code.highlight {
         background-color: #eff6ff;
-        border-top-color: transparent;
-        border-bottom-color: transparent;
         border-left-color: #3b82f6;
-        border-right-color: #3b82f6;
-        border-radius: 0;
-    }
-
-    .code.highlight-start {
-        border-top-color: #3b82f6;
-        border-top-left-radius: 0.25rem;
-        border-top-right-radius: 0.25rem;
-    }
-
-    .code.highlight-end {
-        border-bottom-color: #3b82f6;
-        border-bottom-left-radius: 0.25rem;
-        border-bottom-right-radius: 0.25rem;
-    }
-
-    .code.highlight-start.highlight-end {
-        border-radius: 0.25rem;
     }
 
     .code.highlight:hover {
