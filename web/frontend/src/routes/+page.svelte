@@ -9,6 +9,9 @@
     } from "@codemirror/state";
     import { javascript } from "@codemirror/lang-javascript";
     import { onMount } from "svelte";
+    import { Tween } from "svelte/motion";
+    import { cubicOut } from "svelte/easing";
+    import { fade, fly } from "svelte/transition";
     import fibo from "$lib/examples/fibonacci?raw";
     import type {
         AstNode,
@@ -30,12 +33,28 @@
     let jobId = $state<null | string>(null);
     let pageState = $state<PageStatus>("input");
     let interpretResult = $state<InterpretResult | null>(null);
+    let runError = $state<string | null>(null);
     let showResults = $derived(
         pageState === "done" &&
             interpretResult !== null &&
             interpretResult.jobStatus === "Success" &&
             interpretResult.result !== null,
     );
+    let statusLabel = $derived(
+        pageState === "submitting"
+            ? "Submitting…"
+            : pageState === "polling"
+              ? "Running…"
+              : runError !== null
+                ? "Run failed"
+                : "",
+    );
+    const reveal = new Tween(0, { duration: 350, easing: cubicOut });
+
+    $effect(() => {
+        reveal.target = showResults ? 1 : 0;
+    });
+
     let highlight = $state.raw<HighlightStatus | null>(null);
     let timeout = $state.raw<number | null>(null);
 
@@ -86,14 +105,6 @@
         };
     };
 
-    const OUTPUT_TITLES: Record<PageStatus, string> = {
-        input: "Results will appear here...",
-        submitting: "Submitting...",
-        polling: "Runnning code...",
-        error: "Oops, something went seriously wrong :/",
-        done: "no-op",
-    };
-
     const addHighlight = StateEffect.define<{ from: number; to: number }>();
     const highlightMark = Decoration.mark({ class: "cm-highlight" });
     const highlightField = StateField.define({
@@ -133,6 +144,7 @@
             extensions: [
                 basicSetup,
                 javascript(),
+                EditorView.lineWrapping,
                 readOnlyCompartment.of([
                     EditorState.readOnly.of(false),
                     EditorView.editable.of(true),
@@ -165,6 +177,7 @@
                 if (json.job_status === "Success") {
                     const interpretDetails = JSON.parse(atob(json.result));
                     jobId = null;
+                    runError = null;
                     interpretResult = {
                         jobStatus: "Success",
                         result: interpretDetails,
@@ -180,17 +193,40 @@
 
                 if (json.job_status === "Failed") {
                     jobId = null;
-                    interpretResult = json;
+                    runError =
+                        typeof json.result === "string" &&
+                        json.result.trim() !== ""
+                            ? json.result
+                            : "The interpreter failed to run your code.";
+                    interpretResult = {
+                        jobStatus: "Failed",
+                        result: null,
+                    };
                     pageState = "done";
                     return;
                 }
             } catch (e) {
                 console.error(e);
+                jobId = null;
+                runError =
+                    "Could not reach the interpreter. Please try again.";
                 pageState = "error";
             }
         }, 500);
 
         return () => clearInterval(timeout);
+    });
+
+    $effect(() => {
+        if (!showResults) {
+            return;
+        }
+
+        const timeout = setTimeout(() => {
+            view?.requestMeasure();
+        }, 400);
+
+        return () => clearTimeout(timeout);
     });
 
     $effect(() => {
@@ -276,6 +312,7 @@
 
     async function submitCode() {
         const src = view.state.doc.toString();
+        runError = null;
         pageState = "submitting";
 
         try {
@@ -288,6 +325,8 @@
             jobId = JobId;
             pageState = "polling";
         } catch (e) {
+            console.error(e);
+            runError = "Could not submit your code. Please try again.";
             pageState = "error";
         }
     }
@@ -296,6 +335,10 @@
         pageState = "input";
         jobId = null;
         interpretResult = null;
+        runError = null;
+        highlight = null;
+        astElements.clear();
+        lookUp.clear();
     }
 
     function registerThySelf({ id, el }: { id: number; el: HTMLElement }) {
@@ -303,24 +346,49 @@
     }
 </script>
 
-<div
-    class="w-full h-screen overflow-hidden flex flex-row gap-4 p-4 bg-slate-50"
->
+<div class="w-full h-screen overflow-hidden flex flex-row p-4 bg-slate-50">
     <div
-        class="w-1/2 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+        class="basis-0 min-w-0"
+        style:flex-grow={1 - reveal.current}
+        aria-hidden="true"
+    ></div>
+
+    <div
+        class="basis-0 min-w-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+        style:flex-grow={2 - reveal.current}
     >
         <div
-            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
+            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex flex-row items-center justify-between gap-2"
         >
-            Editor
+            <span>Editor</span>
+            {#if statusLabel}
+                <span
+                    class="text-xs font-medium text-slate-500"
+                    aria-live="polite"
+                    transition:fade={{ duration: 150 }}
+                >
+                    {statusLabel}
+                </span>
+            {/if}
         </div>
+
+        {#if runError}
+            <div
+                class="mx-4 mt-4 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 shrink-0"
+                role="alert"
+                in:fly={{ y: -8, duration: 200, easing: cubicOut }}
+                out:fade={{ duration: 150 }}
+            >
+                {runError}
+            </div>
+        {/if}
 
         <div class="flex-1 min-h-0 overflow-y-auto relative">
             <div bind:this={editorContainer} class="absolute inset-0 p-2"></div>
         </div>
 
         <div
-            class="p-4 border-t border-slate-100 flex flex-row gap-2 justify-between shrink-0"
+            class="p-4 border-t border-slate-100 flex flex-row flex-wrap gap-2 justify-between shrink-0"
         >
             <button
                 onclick={submitCode}
@@ -333,6 +401,7 @@
                 <button
                     onclick={resetPage}
                     class="bg-[#F3F4F6] hover:bg-[#E5E7EB] text-[#374151] px-4 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    transition:fade={{ duration: 150 }}
                 >
                     Reset
                 </button>
@@ -341,22 +410,34 @@
     </div>
 
     <div
-        class="w-1/2 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col"
+        class="basis-0 min-w-0 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col {showResults
+            ? ''
+            : 'pointer-events-none'}"
+        style:flex-grow={2 * reveal.current}
+        style:margin-left={`${reveal.current}rem`}
+        style:opacity={reveal.current}
+        aria-hidden={!showResults}
     >
-        <div
-            class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
-        >
-            Output
-        </div>
-
         {#if showResults}
-            <div class="flex flex-col w-full flex-1 min-h-0">
+            <div
+                class="flex flex-col w-full flex-1 min-h-0"
+                in:fly={{ x: 32, duration: 300, easing: cubicOut }}
+                out:fade={{ duration: 150 }}
+            >
+                <div
+                    class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
+                >
+                    Results
+                </div>
+
                 <div class="p-6 text-slate-500 whitespace-pre-wrap shrink-0">
                     {interpretResult!.result?.output}
                 </div>
 
                 <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
-                    <div class="p-2 w-1/2 flex flex-col gap-2">
+                    <div
+                        class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
+                    >
                         <div
                             class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
@@ -369,7 +450,9 @@
                             {registerThySelf}
                         />
                     </div>
-                    <div class="p-2 w-1/2 flex flex-col gap-2">
+                    <div
+                        class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
+                    >
                         <div
                             class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
@@ -383,19 +466,12 @@
                     </div>
                 </div>
             </div>
-        {:else}
-            <div class="p-6 text-slate-500 flex-1 overflow-y-auto">
-                <div
-                    class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
-                >
-                    {OUTPUT_TITLES[pageState]}
-                </div>
-                <div
-                    class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0 whitespace-pre-wrap"
-                >
-                    {interpretResult?.result}
-                </div>
-            </div>
         {/if}
     </div>
+
+    <div
+        class="basis-0 min-w-0"
+        style:flex-grow={1 - reveal.current}
+        aria-hidden="true"
+    ></div>
 </div>

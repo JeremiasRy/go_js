@@ -33,7 +33,8 @@ func Logger(next http.Handler) http.Handler {
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
-		log.Printf("// %s %s", r.Method, r.URL)
+		log.Printf("Incoming request: Method=%s, Path=%s, RemoteAddr=%s, User-Agent=%s",
+			r.Method, r.URL.Path, r.RemoteAddr, r.Header.Get("User-Agent"))
 		next.ServeHTTP(lrs, r)
 		log.Printf("%d Done in %.2fms", lrs.statusCode, float64(time.Since(start).Microseconds())/1000)
 	})

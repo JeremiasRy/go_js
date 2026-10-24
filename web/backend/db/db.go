@@ -49,7 +49,6 @@ type Db struct {
 }
 
 func NewDatabase() *Db {
-	log.Printf("DB=%s", os.Getenv("DATABASE_URL"))
 	pool, err := pgxpool.New(context.Background(), os.Getenv("DATABASE_URL"))
 
 	if err != nil {
