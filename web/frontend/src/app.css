@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+html,
+body {
+    font-family:
+        ui-monospace,
+        SFMono-Regular,
+        Menlo,
+        Monaco,
+        Consolas,
+        "Liberation Mono",
+        "Courier New",
+        monospace;
+}
+
 body {
     height: 100vh;
 }
