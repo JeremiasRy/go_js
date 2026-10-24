@@ -144,7 +144,7 @@
             </p>
             <div class="flex flex-row w-full gap-2 max-h-[800px]">
                 <div
-                    class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-1.5"
+                    class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md p-1.5"
                 >
                     {#each byte_code as { op, ast_id, op_ptr }, i}
                         <p
@@ -186,7 +186,7 @@
                 </div>
                 {#if jit.length > 0}
                     <div
-                        class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md border border-slate-200 bg-slate-50 p-1.5"
+                        class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md p-1.5"
                     >
                         {#each jit as { inst, op_code_ptr, ast_id }, i}
                             <p
