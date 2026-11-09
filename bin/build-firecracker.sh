@@ -34,6 +34,14 @@ mkdir -p squashfs-root/workspace
 mkdir -p squashfs-root/root/.cache
 
 cp ./go_js squashfs-root/usr/local/bin/go_js
+# gengo extracts Zydis to $HOME/.cache/.<sha1[:8]>.gengo.so and dlopens it.
+# The rootfs is read-only, so install that file here. Do not tmpfs-mount
+# over /root/.cache or this copy is hidden and the extract fails.
+if [ -f ./libzydis.so ]; then
+  hash=$(sha1sum ./libzydis.so | cut -c1-8)
+  cp ./libzydis.so "squashfs-root/root/.cache/.${hash}.gengo.so"
+  chmod 644 "squashfs-root/root/.cache/.${hash}.gengo.so"
+fi
 chmod +x squashfs-root/usr/local/bin/go_js
 
 ssh-keygen -f id_rsa -N ""

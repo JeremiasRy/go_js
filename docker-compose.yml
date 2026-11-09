@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile.web
     environment:
-      - DATABASE_URL=postgres://test_user:bagel@db:5432/go_js_web?sslmode=disable
+      - DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable
     develop:
       watch:
         - action: rebuild
@@ -25,15 +25,15 @@ services:
     container_name: postgres_db
     restart: always
     environment:
-      POSTGRES_USER: test_user
-      POSTGRES_PASSWORD: bagel
-      POSTGRES_DB: go_js_web
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:8080:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U test_user -d go_js_web" ]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -41,7 +41,7 @@ services:
     image: migrate/migrate
     volumes:
       - ./web/backend/db/migrations:/migrations
-    command: -path=./migrations/ -database "postgres://test_user:bagel@db:5432/go_js_web?sslmode=disable" up
+    command: -path=./migrations/ -database "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}?sslmode=disable" up
     depends_on:
       db:
         condition: service_healthy

@@ -33,7 +33,8 @@ func Logger(next http.Handler) http.Handler {
 			ResponseWriter: w,
 			statusCode:     http.StatusOK,
 		}
-		log.Printf("// %s %s", r.Method, r.URL)
+		log.Printf("Incoming request: Method=%s, Path=%s, RemoteAddr=%s, User-Agent=%s",
+			r.Method, r.URL.Path, r.RemoteAddr, r.Header.Get("User-Agent"))
 		next.ServeHTTP(lrs, r)
 		log.Printf("%d Done in %.2fms", lrs.statusCode, float64(time.Since(start).Microseconds())/1000)
 	})
@@ -72,6 +73,10 @@ func main() {
 	mux.Handle("/", http.FileServer(dir))
 	mux.HandleFunc("/api/interpret", ctr.HandlePostInterpret)
 	mux.HandleFunc("/api/jobs/{job_id}", ctr.HandleGetJobById)
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Ok!"))
+	})
 
 	wrap := corsMiddleware(Logger(mux))
 	log.Printf("Listening and serving from localhost%s", PORT)
