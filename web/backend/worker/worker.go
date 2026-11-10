@@ -3,26 +3,36 @@ package worker
 import (
 	"context"
 	"errors"
+	"fmt"
 	"go_js_demo/db"
 	"go_js_demo/microvm"
 	"log"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 )
 
 type HeartbeatSignal struct{}
 
-type Worker struct {
-	db  *db.Db
-	mvm *microvm.MicroVMHandler
-	sig chan HeartbeatSignal
+type JobResult struct {
+	JobID  uuid.UUID
+	Status string
+	Result string
 }
 
-func NewWorker(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal) *Worker {
+type Worker struct {
+	db      *db.Db
+	mvm     *microvm.MicroVMHandler
+	sig     chan HeartbeatSignal
+	results chan<- JobResult
+}
+
+func NewWorker(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal, results chan<- JobResult) *Worker {
 	return &Worker{
 		db,
 		mvm,
 		sig,
+		results,
 	}
 }
 
@@ -33,7 +43,6 @@ func (w *Worker) Run(id int, ctx context.Context) {
 			return
 		default:
 			{
-
 				log.Printf("Worker %d, querying for work...", id)
 				job, err := w.db.GetOldestPendingJob(ctx)
 				if errors.Is(err, pgx.ErrNoRows) {
@@ -46,31 +55,38 @@ func (w *Worker) Run(id int, ctx context.Context) {
 					continue
 				}
 
-				res, err := w.mvm.RunCode(job.Src, ctx)
+				res, runErr := w.mvm.RunCode(job.Src, ctx)
 
-				var jobStatus db.JobStatus
-
-				if err != nil {
-					res = err.Error()
+				jobStatus := db.JobSucceeded
+				if runErr != nil {
+					res = runErr.Error()
 					jobStatus = db.JobFailed
-				} else {
-					jobStatus = db.JobSucceeded
 				}
 
-				err = w.db.UpdateJob(jobStatus, res, job.JobId, ctx)
+				updateErr := w.db.UpdateJob(jobStatus, res, job.JobId, ctx)
+				if updateErr != nil {
+					log.Printf("Worker error: %v", updateErr)
+					jobStatus = db.JobFailed
+					res = fmt.Sprintf("failed to persist job result: %v", updateErr)
+				}
 
-				if err != nil {
-					log.Printf("Worker error: %v", err)
-					continue
+				select {
+				case w.results <- JobResult{
+					JobID:  job.JobId,
+					Status: jobStatus.String(),
+					Result: res,
+				}:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
 	}
 }
 
-func SpinUpWorkers(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal, amount int, ctx context.Context) {
+func SpinUpWorkers(db *db.Db, mvm *microvm.MicroVMHandler, sig chan HeartbeatSignal, results chan<- JobResult, amount int, ctx context.Context) {
 	for id := range amount {
-		w := NewWorker(db, mvm, sig)
+		w := NewWorker(db, mvm, sig, results)
 		go w.Run(id, ctx)
 	}
 }

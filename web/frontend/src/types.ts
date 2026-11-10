@@ -36,7 +36,7 @@ type setHighlightFromAst = {
 
 export type SetHighlightStatusParams = setHighlightFromOpCode | setHighlightFromAsm | setHighlightFromAst | null
 
-export type PageStatus = "input" | "submitting" | "polling" | "error" | "done";
+export type PageStatus = "input" | "submitting" | "running" | "error" | "done";
 export type JobStatus = "Success" | "Failed" | "Pending" | "Processing";
 export type FunctionName = string;
 export type DisassembledByteCode =

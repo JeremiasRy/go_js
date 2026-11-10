@@ -57,6 +57,47 @@ Requires go version `1.22.5`
 
 Test suite can be run with docker by running `./test.sh` in the root of the repo.
 
+## Web demo and MCP agent bridge
+
+The web demo exposes one MCP endpoint per browser tab:
+
+```text
+https://<host>/session/<session-id>/mcp
+```
+
+Open the demo, copy the MCP endpoint shown above the editor, and give it to a
+Streamable HTTP MCP client. The URL is a capability: anyone with it can run code
+in the connected tab, so treat it as a secret.
+
+The backend creates a fresh session when it serves the demo page and embeds
+that session's bootstrap data in the HTML. The browser opens
+`/ws/<session-id>` and attaches to the existing server-side session. A full page
+reload gets a new session and a new MCP URL; WebSocket reconnects reuse the
+session from the current page.
+
+The MCP activity indicator is separate from the browser connection. It shows
+`Agent active` after valid MCP traffic and `Last active` after 60 seconds without
+traffic, so manual runs work without an MCP client connected.
+
+The browser keeps one WebSocket connection to `/ws/<session-id>`. Both manual
+submissions and MCP tool calls use that same connection:
+
+1. An MCP client calls the `execute` tool.
+2. The backend pushes the code to the browser over WebSocket.
+3. The browser replaces the editor contents and submits the run.
+4. The backend queues the job for the Firecracker worker pool.
+5. The result is pushed back to the browser over WebSocket and returned to the
+   waiting MCP tool call.
+
+The session survives brief WebSocket disconnects and expires 30 minutes after the
+browser tab disconnects. Session and in-flight job state are kept in memory;
+restarting the backend invalidates active sessions.
+
+For frontend development, the SvelteKit dev server asks the backend to create a
+session and injects the same bootstrap data into the served HTML. It also proxies
+`/ws` and `/session` to port `8000`, so the same browser-origin URLs work in
+development and production.
+
 ## Test runner 
 The test runner is neatly packaged in to a docker container.
 

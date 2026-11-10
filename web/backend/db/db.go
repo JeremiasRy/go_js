@@ -57,7 +57,7 @@ func NewDatabase() *Db {
 	return &Db{pool}
 }
 
-func (db *Db) InsertNewJob(src string, ctx context.Context) (string, error) {
+func (db *Db) InsertNewJob(src string, ctx context.Context) (uuid.UUID, error) {
 	query := `
         INSERT INTO user_script_jobs (src, job_status) 
         VALUES ($1, $2) 
@@ -74,10 +74,10 @@ func (db *Db) InsertNewJob(src string, ctx context.Context) (string, error) {
 	)
 
 	if err != nil {
-		return "", fmt.Errorf("failed to insert job: %w", err)
+		return uuid.Nil, fmt.Errorf("failed to insert job: %w", err)
 	}
 
-	return job.JobId.String(), nil
+	return job.JobId, nil
 }
 
 func (db *Db) GetOldestPendingJob(ctx context.Context) (*UserScriptJob, error) {
