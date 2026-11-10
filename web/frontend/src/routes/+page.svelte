@@ -168,9 +168,7 @@
 
         const timeout = setInterval(async () => {
             try {
-                const result = await fetch(
-                    `http://localhost:8000/api/jobs/${jobId}`,
-                );
+                const result = await fetch(`/api/jobs/${jobId}`);
 
                 const json = await result.json();
 
@@ -208,8 +206,7 @@
             } catch (e) {
                 console.error(e);
                 jobId = null;
-                runError =
-                    "Could not reach the interpreter. Please try again.";
+                runError = "Could not reach the interpreter. Please try again.";
                 pageState = "error";
             }
         }, 500);
@@ -316,7 +313,7 @@
         pageState = "submitting";
 
         try {
-            const result = await fetch("http://localhost:8000/api/interpret", {
+            const result = await fetch("/api/interpret", {
                 method: "POST",
                 body: JSON.stringify({ src }),
             });
@@ -435,9 +432,7 @@
                 </div>
 
                 <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
-                    <div
-                        class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
-                    >
+                    <div class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2">
                         <div
                             class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
@@ -450,9 +445,7 @@
                             {registerThySelf}
                         />
                     </div>
-                    <div
-                        class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
-                    >
+                    <div class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2">
                         <div
                             class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
                         >
