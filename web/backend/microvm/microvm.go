@@ -3,6 +3,7 @@ package microvm
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -25,6 +26,7 @@ const (
 	MAC_PRE            = "06:00:AC:10:00:"
 	BRIDGE             = "br0"
 	RUNTIME_PATH       = "/usr/local/bin/go_js"
+	EXECUTION_TIMEOUT  = 10 * time.Second
 )
 
 type MicroVMHandler struct {
@@ -97,9 +99,8 @@ func createTap(tapName string) {
 }
 
 func clearTap(tapName string) {
-	err := exec.Command("ip", "link", "del", tapName).Run()
-	if err != nil {
-		log.Fatalf("Fatal error %v", err)
+	if err := exec.Command("ip", "link", "del", tapName).Run(); err != nil {
+		log.Printf("Failed to remove tap %s: %v", tapName, err)
 	}
 }
 
@@ -113,6 +114,41 @@ func runSSHCommand(client *ssh.Client, cmd string) ([]byte, error) {
 	return session.CombinedOutput(cmd)
 }
 
+type sshCommandResult struct {
+	output []byte
+	err    error
+}
+
+var errExecutionTimeout = errors.New("execution timed out")
+
+func runSSHCommandWithTimeout(client *ssh.Client, cmd string, timeout time.Duration) ([]byte, error) {
+	session, err := client.NewSession()
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session: %w", err)
+	}
+	defer session.Close()
+
+	result := make(chan sshCommandResult, 1)
+	go func() {
+		output, err := session.CombinedOutput(cmd)
+		result <- sshCommandResult{output: output, err: err}
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case res := <-result:
+		return res.output, res.err
+	case <-timer.C:
+		if err := session.Signal(ssh.SIGKILL); err != nil {
+			log.Printf("Failed to kill timed out command: %v", err)
+		}
+		_ = session.Close()
+		return nil, fmt.Errorf("%w after %s", errExecutionTimeout, timeout)
+	}
+}
+
 func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, error) {
 	vmId := <-mvm.ipPool
 	ip := createIpAddress(vmId)
@@ -121,6 +157,11 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	socket := strings.Replace(SOCKET_PATH, SOCKET_PLACEHOLDER, strconv.Itoa(vmId), 1)
 
 	createTap(tap)
+	defer func() {
+		clearTap(tap)
+		os.Remove(socket)
+		mvm.ipPool <- vmId
+	}()
 
 	staticConfiguration := &firecracker.StaticNetworkConfiguration{
 		MacAddress:  mac,
@@ -140,6 +181,12 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	if err != nil {
 		return "", fmt.Errorf("Failed to initialize machine: %v", err)
 	}
+
+	defer func() {
+		if err := m.StopVMM(); err != nil {
+			log.Printf("Failed to stop VM %d: %v", vmId, err)
+		}
+	}()
 
 	if err := m.Start(ctx); err != nil {
 		return "", fmt.Errorf("Failed to start machine: %v", err)
@@ -201,19 +248,13 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 	}
 
 	runCmd := fmt.Sprintf("%s --structured /workspace/script.js", RUNTIME_PATH)
-	output, err := runSSHCommand(client, runCmd)
+	output, err := runSSHCommandWithTimeout(client, runCmd, EXECUTION_TIMEOUT)
 	if err != nil {
+		if errors.Is(err, errExecutionTimeout) {
+			return "", err
+		}
 		return "", fmt.Errorf("Failed to run user script: %v\nOutput: %s", err, string(output))
 	}
-
-	err = m.StopVMM()
-	if err != nil {
-		return "", fmt.Errorf("Failed to stop VM: %v", err)
-	}
-
-	clearTap(tap)
-	mvm.ipPool <- vmId
-	os.Remove(socket)
 
 	return string(output), nil
 }
