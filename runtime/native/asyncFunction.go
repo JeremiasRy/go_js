@@ -10,6 +10,8 @@ type PauseState struct {
 	Stack []value.Value
 	Ip    int
 	LocalStart int
+	HeapScope int
+	OwnScope bool
 }
 
 type ObjAsyncFunction struct {
@@ -61,11 +63,13 @@ func (asyncFn *ObjAsyncFunction) Resolve(v value.Value) {
 	}
 }
 
-func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int, localStart int) {
+func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int, localStart int, heapScope int, ownScope bool) {
 	asyncFn.State = &PauseState{
 		Stack: s,
 		Ip:    ip,
 		LocalStart: localStart,
+		HeapScope: heapScope,
+		OwnScope: ownScope,
 	}
 }
 

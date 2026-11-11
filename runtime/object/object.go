@@ -56,6 +56,7 @@ type Callback struct {
 	Fn      Callable
 	ThisCtx value.Value
 	Stack   []value.Value
+	Native  func()
 }
 
 type JobChannelMessage struct {

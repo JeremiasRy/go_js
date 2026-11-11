@@ -375,12 +375,18 @@ func initPromisePrototype() {
 	p.Members = map[string]ObjectValueEntry{}
 
 	then := value.EncodeHandle(heap.Allocate(NewThen()))
+	catch := value.EncodeHandle(heap.Allocate(NewPromiseCatch()))
+	finally := value.EncodeHandle(heap.Allocate(NewPromiseFinally()))
 
 	p.SetMember(KEY_THEN, then)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("catch"))), catch)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("finally"))), finally)
 
 	PROTOTYPE_PROMISE = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
 		PROTOTYPE_PROMISE,
 		KEY_THEN,
+		catch,
+		finally,
 	)
 }
