@@ -6,6 +6,7 @@ import (
 	"go_js/parser"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -82,26 +83,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 		}
 
-		for _, param := range current.Params {
-			switch param.Type {
-			case parser.NODE_IDENTIFIER:
-				symbolTable.addVariable(param.Name, LET, false, nil)
-			case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
-				addPatternVariables(param, LET, symbolTable)
-				if param.Type == parser.NODE_ASSIGNMENT_PATTERN {
-					prePass(param.Right, symbolTable)
-				}
-			case parser.NODE_REST_ELEMENT:
-				symbolTable.hasRestParameter = true
-				switch param.Argument.Type {
-				case parser.NODE_IDENTIFIER:
-					symbolTable.addVariable(param.Argument.Name, LET, false, nil)
-				default:
-					addPatternVariables(param.Argument, LET, symbolTable)
-				}
-			}
-		}
-
+		addParameterSlots(current.Params, symbolTable)
 		symbolTable.arity = len(current.Params)
 		markParamNames(current.Params, symbolTable)
 
@@ -139,25 +121,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
 		}
-		for _, param := range current.Params {
-			switch param.Type {
-			case parser.NODE_IDENTIFIER:
-				symbolTable.addVariable(param.Name, LET, false, nil)
-			case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
-				addPatternVariables(param, LET, symbolTable)
-				if param.Type == parser.NODE_ASSIGNMENT_PATTERN {
-					prePass(param.Right, symbolTable)
-				}
-			case parser.NODE_REST_ELEMENT:
-				symbolTable.hasRestParameter = true
-				switch param.Argument.Type {
-				case parser.NODE_IDENTIFIER:
-					symbolTable.addVariable(param.Argument.Name, LET, false, nil)
-				default:
-					addPatternVariables(param.Argument, LET, symbolTable)
-				}
-			}
-		}
+		addParameterSlots(current.Params, symbolTable)
 		symbolTable.arity = len(current.Params)
 		markParamNames(current.Params, symbolTable)
 
@@ -193,25 +157,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					symbolTable.addVariable(name, FUNCTION, false, fn)
 				}
 			}
-			for _, param := range current.Params {
-				switch param.Type {
-				case parser.NODE_IDENTIFIER:
-					symbolTable.addVariable(param.Name, LET, false, nil)
-				case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
-					addPatternVariables(param, LET, symbolTable)
-					if param.Type == parser.NODE_ASSIGNMENT_PATTERN {
-						prePass(param.Right, symbolTable)
-					}
-				case parser.NODE_REST_ELEMENT:
-					symbolTable.hasRestParameter = true
-					switch param.Argument.Type {
-					case parser.NODE_IDENTIFIER:
-						symbolTable.addVariable(param.Argument.Name, LET, false, nil)
-					default:
-						addPatternVariables(param.Argument, LET, symbolTable)
-					}
-				}
-			}
+			addParameterSlots(current.Params, symbolTable)
 			symbolTable.arity = len(current.Params)
 		markParamNames(current.Params, symbolTable)
 
@@ -556,6 +502,45 @@ func moveUndeclaredToGlobal(symbolTable *FunctionScope) {
 		if variable.undeclared && variable.scope != GLOBAL {
 			delete(symbolTable.vars, name)
 			global.addVariable(name, LET, true, nil)
+		}
+	}
+}
+
+func addParameterSlots(params []*parser.Node, symbolTable *FunctionScope) {
+	for i, param := range params {
+		switch param.Type {
+		case parser.NODE_IDENTIFIER:
+			symbolTable.addVariable(param.Name, LET, false, nil)
+		case parser.NODE_REST_ELEMENT:
+			symbolTable.hasRestParameter = true
+			if param.Argument.Type == parser.NODE_IDENTIFIER {
+				symbolTable.addVariable(param.Argument.Name, LET, false, nil)
+			} else {
+				symbolTable.addVariable("__param"+strconv.Itoa(i), LET, false, nil)
+			}
+		case parser.NODE_ASSIGNMENT_PATTERN:
+			if param.Left.Type == parser.NODE_IDENTIFIER {
+				symbolTable.addVariable(param.Left.Name, LET, false, nil)
+			} else {
+				symbolTable.addVariable("__param"+strconv.Itoa(i), LET, false, nil)
+			}
+		default:
+			symbolTable.addVariable("__param"+strconv.Itoa(i), LET, false, nil)
+		}
+	}
+	for _, param := range params {
+		pattern := param
+		if pattern.Type == parser.NODE_ASSIGNMENT_PATTERN {
+			pattern = pattern.Left
+			prePass(param.Right, symbolTable)
+		}
+		switch pattern.Type {
+		case parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
+			addPatternVariables(pattern, LET, symbolTable)
+		case parser.NODE_REST_ELEMENT:
+			if pattern.Argument.Type != parser.NODE_IDENTIFIER {
+				addPatternVariables(pattern.Argument, LET, symbolTable)
+			}
 		}
 	}
 }

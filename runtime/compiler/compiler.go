@@ -965,6 +965,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				emitVarInitializers(symbolTable, fn)
 				emitArgumentsHeap(fn)
+				emitPatternParameters(current.Params, symbolTable, fn)
 
 				if fn.GetArity() > 0 {
 					heapVars := []int{}
@@ -1057,6 +1058,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
+				emitPatternParameters(current.Params, symbolTable, newFn)
 
 				if len(current.Params) > 0 {
 					heapVars := []int{}
@@ -1129,6 +1131,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
+				emitPatternParameters(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -2438,6 +2441,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				emitVarInitializers(symbolTable, method)
 				emitArgumentsHeap(method)
+				emitPatternParameters(function.Params, symbolTable, method)
 
 				for _, node := range function.BodyNode.Body {
 					generateByteCode(node, symbolTable, method)
@@ -2836,16 +2840,8 @@ func emitAssignmentTarget(node *parser.Node, symbolTable *FunctionScope, fn obje
 	}
 }
 
-func generatePatternAssignment(pattern, right *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
-	if right == nil {
-		fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
-	} else {
-		popReturnValue.push(false)
-		generateByteCode(right, symbolTable, fn)
-		popReturnValue.pop()
-	}
-	fn.ValueChunk().EmitByte(chunk.OP_DUP)
 
+func emitPatternTargetFromStack(pattern *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
 	var assign func(*parser.Node)
 	assign = func(node *parser.Node) {
 		if node == nil {
@@ -2942,6 +2938,76 @@ func generatePatternAssignment(pattern, right *parser.Node, symbolTable *Functio
 		}
 	}
 	assign(pattern)
+}
+
+func generatePatternAssignment(pattern, right *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	if right == nil {
+		fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+	} else {
+		popReturnValue.push(false)
+		generateByteCode(right, symbolTable, fn)
+		popReturnValue.pop()
+	}
+	fn.ValueChunk().EmitByte(chunk.OP_DUP)
+
+	emitPatternTargetFromStack(pattern, symbolTable, fn)
+}
+
+func emitPatternParameters(params []*parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	var patternVars []*Variable
+	seen := map[*Variable]bool{}
+	for _, param := range params {
+		pattern := param
+		if pattern.Type == parser.NODE_ASSIGNMENT_PATTERN {
+			pattern = pattern.Left
+		}
+		targets := []*parser.Node{}
+		collectPatternTargets(pattern, &targets)
+		for _, target := range targets {
+			variable, _ := symbolTable.findVariable(target.Name)
+			if variable == nil || seen[variable] || variable.slot < len(params) {
+				continue
+			}
+			seen[variable] = true
+			patternVars = append(patternVars, variable)
+		}
+	}
+	slices.SortFunc(patternVars, func(a, b *Variable) int { return cmp.Compare(a.slot, b.slot) })
+	for _, variable := range patternVars {
+		fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+		if variable.scope == HEAP {
+			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
+		} else {
+			fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+		}
+	}
+	for i, param := range params {
+		pattern := param
+		if pattern.Type == parser.NODE_ASSIGNMENT_PATTERN {
+			if pattern.Left.Type == parser.NODE_IDENTIFIER {
+				continue
+			}
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL_RAW, uint8(i))
+			fn.ValueChunk().EmitByte(chunk.OP_DUP)
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NOT_UNDEFINED, 0, 0, 0, 0)
+			skipJump := len(fn.ValueChunk().Code) - 4
+			fn.ValueChunk().EmitByte(chunk.OP_POP)
+			popReturnValue.push(false)
+			savedParameterFunction := parameterFunction
+			parameterFunction = symbolTable
+			generateByteCode(param.Right, symbolTable, fn)
+			parameterFunction = savedParameterFunction
+			popReturnValue.pop()
+			fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
+			pattern = pattern.Left
+		}
+		if pattern.Type == parser.NODE_ARRAY_PATTERN || pattern.Type == parser.NODE_OBJECT_PATTERN || (pattern.Type == parser.NODE_REST_ELEMENT && pattern.Argument.Type != parser.NODE_IDENTIFIER) {
+			if param.Type != parser.NODE_ASSIGNMENT_PATTERN {
+				fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL_RAW, uint8(i))
+			}
+			emitPatternTargetFromStack(pattern, symbolTable, fn)
+		}
+	}
 }
 
 func collectPatternTargets(node *parser.Node, targets *[]*parser.Node) {
