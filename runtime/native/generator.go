@@ -2,6 +2,7 @@ package native
 
 import (
 	"fmt"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 )
@@ -11,6 +12,12 @@ type GeneratorException struct {
 	StackTop  int
 	Frame     int
 	IsFinally bool
+}
+
+type AsyncGeneratorRequest struct {
+	Input   value.Value
+	Mode    int
+	Promise *ObjPromise
 }
 
 type ObjGenerator struct {
@@ -38,6 +45,16 @@ type ObjGenerator struct {
 	DelegateIterator  value.Value
 	DelegateHasResult bool
 	DelegateResult    value.Value
+	IsAsync           bool
+	AsyncAwaiting     *ObjPromise
+	AsyncProcessing   bool
+	AsyncRequests     []AsyncGeneratorRequest
+}
+
+func NewAsyncGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
+	g := NewGenerator(name, arity, chunk)
+	g.IsAsync = true
+	return g
 }
 
 func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
@@ -74,6 +91,15 @@ func (i *ObjGenerator) GetReferencingValues() []value.Value {
 	arr = append(arr, i.Locals...)
 	arr = append(arr, i.Args...)
 	arr = append(arr, i.Current, i.PendingThrow, i.ReturnValue, i.CompletionMark, i.DelegateIterator, i.DelegateResult)
+	if i.AsyncAwaiting != nil {
+		arr = append(arr, value.EncodeHandle(heap.Allocate(i.AsyncAwaiting)))
+	}
+	for _, request := range i.AsyncRequests {
+		arr = append(arr, request.Input)
+		if request.Promise != nil {
+			arr = append(arr, value.EncodeHandle(heap.Allocate(request.Promise)))
+		}
+	}
 	return arr
 }
 

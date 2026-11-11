@@ -36,7 +36,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				arity := len(node.Params)
 
 				var fn object.Callable
-				if node.IsAsync {
+				if node.IsAsync && node.IsGenerator {
+					fn = native.NewAsyncGenerator(name, arity, nil)
+				} else if node.IsAsync {
 					fn = native.NewAsyncFunction(name, arity, nil)
 				} else if node.IsGenerator {
 					fn = native.NewGenerator(name, arity, nil)
@@ -72,7 +74,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				arity := len(node.Params)
 
 				var fn object.Callable
-				if node.IsAsync {
+				if node.IsAsync && node.IsGenerator {
+					fn = native.NewAsyncGenerator(name, arity, nil)
+				} else if node.IsAsync {
 					fn = native.NewAsyncFunction(name, arity, nil)
 				} else if node.IsGenerator {
 					fn = native.NewGenerator(name, arity, nil)
@@ -112,8 +116,12 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				arity := len(node.Arguments)
 
 				var fn object.Callable
-				if node.IsAsync {
+				if node.IsAsync && node.IsGenerator {
+					fn = native.NewAsyncGenerator(name, arity, nil)
+				} else if node.IsAsync {
 					fn = native.NewAsyncFunction(name, arity, nil)
+				} else if node.IsGenerator {
+					fn = native.NewGenerator(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
 					if objFn, ok := fn.(*object.ObjFunction); ok {
@@ -148,8 +156,12 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					arity := len(node.Arguments)
 					var fn object.Callable
 
-					if node.IsAsync {
+					if node.IsAsync && node.IsGenerator {
+						fn = native.NewAsyncGenerator(name, arity, nil)
+					} else if node.IsAsync {
 						fn = native.NewAsyncFunction(name, arity, nil)
+					} else if node.IsGenerator {
+						fn = native.NewGenerator(name, arity, nil)
 					} else {
 						fn = object.NewFunction(name, arity, nil)
 						if objFn, ok := fn.(*object.ObjFunction); ok {
@@ -184,7 +196,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					name := node.Identifier.Name
 					arity := len(node.Params)
 					var fn object.Callable
-					if node.IsAsync {
+					if node.IsAsync && node.IsGenerator {
+						fn = native.NewAsyncGenerator(name, arity, nil)
+					} else if node.IsAsync {
 						fn = native.NewAsyncFunction(name, arity, nil)
 					} else if node.IsGenerator {
 						fn = native.NewGenerator(name, arity, nil)
@@ -634,10 +648,15 @@ func addVarPatternVariables(node *parser.Node, symbolTable *FunctionScope) {
 		slot := 0
 		if symbolTable.tableScope == LOCAL {
 			slot = functionSlotCount(symbolTable)
+		} else {
+			slot = symbolTable.getCurrentSlot()
 		}
 		variable := &Variable{scope: symbolTable.tableScope, type_: VAR, slot: slot, owner: symbolTable}
 		symbolTable.vars[node.Name] = variable
 		symbolTable.varOrder = append(symbolTable.varOrder, variable)
+		if symbolTable.tableScope == GLOBAL && slot > symbolTable.maxSlot {
+			symbolTable.maxSlot = slot
+		}
 	case parser.NODE_ASSIGNMENT_PATTERN:
 		addVarPatternVariables(node.Left, symbolTable)
 	case parser.NODE_REST_ELEMENT:

@@ -151,11 +151,13 @@ type LoopBreakPoint struct {
 }
 
 type Loop struct {
-	points       []*LoopBreakPoint
-	block        *BlockScope
-	label        string
-	isSwitch     bool
-	iteratorSlot int
+	points        []*LoopBreakPoint
+	block         *BlockScope
+	label         string
+	isSwitch      bool
+	iteratorSlot  int
+	iteratorID    int
+	asyncIterator bool
 }
 
 var loopStack = []*Loop{}
@@ -192,16 +194,16 @@ func findLoop(label string, breakAllowed bool) *Loop {
 }
 
 func pushLoop(block *BlockScope) {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, iteratorSlot: -1})
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, iteratorSlot: -1, iteratorID: -1})
 	pendingLoopLabel = ""
 }
 
 func pushLabeledLoop(block *BlockScope, label string) {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: label, iteratorSlot: -1})
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: label, iteratorSlot: -1, iteratorID: -1})
 }
 
 func pushSwitchLoop(block *BlockScope) {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, isSwitch: true, iteratorSlot: -1})
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, isSwitch: true, iteratorSlot: -1, iteratorID: -1})
 	pendingLoopLabel = ""
 }
 
@@ -216,12 +218,22 @@ func emitIteratorClosesTo(fn object.Callable, target *Loop, includeTarget bool) 
 	for i := len(loopStack) - 1; i >= 0; i-- {
 		l := loopStack[i]
 		if l == target {
-			if includeTarget && l.iteratorSlot >= 0 {
-				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot))
+			if includeTarget {
+				if l.asyncIterator && l.iteratorSlot >= 0 {
+					fn.ValueChunk().EmitBytes(chunk.OP_ASYNC_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot), chunk.OP_AWAIT, chunk.OP_POP)
+				} else if l.iteratorID >= 0 {
+					fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_MARK, uint8(l.iteratorID))
+				} else if l.iteratorSlot >= 0 {
+					fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot))
+				}
 			}
 			break
 		}
-		if l.iteratorSlot >= 0 {
+		if l.asyncIterator && l.iteratorSlot >= 0 {
+			fn.ValueChunk().EmitBytes(chunk.OP_ASYNC_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot), chunk.OP_AWAIT, chunk.OP_POP)
+		} else if l.iteratorID >= 0 {
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_MARK, uint8(l.iteratorID))
+		} else if l.iteratorSlot >= 0 {
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot))
 		}
 	}
@@ -229,7 +241,11 @@ func emitIteratorClosesTo(fn object.Callable, target *Loop, includeTarget bool) 
 
 func emitAllIteratorCloses(fn object.Callable) {
 	for i := len(loopStack) - 1; i >= 0; i-- {
-		if loopStack[i].iteratorSlot >= 0 {
+		if loopStack[i].asyncIterator && loopStack[i].iteratorSlot >= 0 {
+			fn.ValueChunk().EmitBytes(chunk.OP_ASYNC_ITERATOR_CLOSE_SLOT, uint8(loopStack[i].iteratorSlot), chunk.OP_AWAIT, chunk.OP_POP)
+		} else if loopStack[i].iteratorID >= 0 {
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_MARK, uint8(loopStack[i].iteratorID))
+		} else if loopStack[i].iteratorSlot >= 0 {
 			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(loopStack[i].iteratorSlot))
 		}
 	}
@@ -1112,9 +1128,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				})
 				popReturnValue.pop()
 
-				if len(fn.ValueChunk().Code) == 0 {
-					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
-				} else {
+				if len(fn.ValueChunk().Code) == 0 || needsFallthroughReturn(current) {
 					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
@@ -1208,7 +1222,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						generateByteCode(node, symbolTable, newFn)
 					}
 					popReturnValue.pop()
-					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+					if needsFallthroughReturn(current) {
+						newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+					}
 				}
 
 				symbolTable = outerSymbolTable
@@ -1256,9 +1272,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					popReturnValue.pop()
 				}
 
-				if len(newFn.ValueChunk().Code) == 0 {
-					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
-				} else {
+				if len(newFn.ValueChunk().Code) == 0 || needsFallthroughReturn(current) {
 					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 				symbolTable = outerSymbolTable
@@ -1607,6 +1621,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 						generateByteCode(current.Initializer, symbolTable, fn)
 
+					} else if current.Initializer == nil && current.Kind == parser.KIND_DECLARATION_VAR {
+						return
 					} else if current.Initializer == nil && variable.type_ != FOR && variable.type_ != VAR {
 						fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 					}
@@ -2099,29 +2115,44 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(current.Right, symbolTable, fn)
 
 				popReturnValue.pop()
-				fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
+				if current.Await {
+					fn.ValueChunk().EmitByte(chunk.OP_GET_ASYNC_ITERATOR)
+				} else {
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
+				}
 				iteratorVariable, _ := symbolTable.findVariable(ITERATOR_VAR_NAME)
-				fn.ValueChunk().EmitBytes(chunk.OP_DUP, chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot), chunk.OP_STACK_MARK, uint8(loopID))
-				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
+				fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_LOCAL_SLOT, uint8(iteratorVariable.slot))
+				jumpOffset := 3
+				if current.Await {
+					fn.ValueChunk().EmitBytes(chunk.OP_ASYNC_ITERATOR_NEXT_SLOT, uint8(iteratorVariable.slot), chunk.OP_AWAIT, chunk.OP_ASYNC_ITERATOR_RESULT_SLOT, uint8(iteratorVariable.slot), chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
+					jumpOffset = 6
+				} else {
+					fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT_SLOT, uint8(iteratorVariable.slot), chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
+				}
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_COPY_HEAP_SCOPE)
 				}
-				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT)
+				if current.Await {
+					fn.ValueChunk().EmitBytes(chunk.OP_ASYNC_ITERATOR_VALUE_SLOT, uint8(iteratorVariable.slot), chunk.OP_AWAIT)
+				} else {
+					fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT_SLOT, uint8(iteratorVariable.slot))
+				}
 
 				parseForDotDotLoopVariable(current, symbolTable, fn)
 
 				pushLoop(BLOCK_SCOPES[current.BodyNode])
 				currentLoop().iteratorSlot = int(iteratorVariable.slot)
+				currentLoop().asyncIterator = current.Await
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
 
 				continueTarget := len(fn.ValueChunk().Code)
-				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_JUMP)
-				fn.ValueChunk().EmitUint32(jumpStart - 2)
+				fn.ValueChunk().EmitBytes(chunk.OP_TRIM_STACK_SLOT, uint8(iteratorVariable.slot), chunk.OP_JUMP)
+				fn.ValueChunk().EmitUint32(jumpStart - uint32(jumpOffset))
 				normalStart := len(fn.ValueChunk().Code)
-				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID), chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID))
+				fn.ValueChunk().EmitBytes(chunk.OP_TRIM_STACK_SLOT, uint8(iteratorVariable.slot), chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID))
 				fn.ValueChunk().PatchUint32(jumpStart, uint32(normalStart))
 				for _, breakpoint := range currentLoop().points {
 					pos := breakpoint.position
@@ -2166,26 +2197,27 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_IN)
 				iteratorVariable, _ := symbolTable.findVariable(ITERATOR_VAR_NAME)
-				fn.ValueChunk().EmitBytes(chunk.OP_DUP, chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot), chunk.OP_STACK_MARK, uint8(loopID))
-				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
+				fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_LOCAL_SLOT, uint8(iteratorVariable.slot))
+				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT_SLOT, uint8(iteratorVariable.slot), chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_COPY_HEAP_SCOPE)
 				}
-				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT)
+				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CURRENT_SLOT, uint8(iteratorVariable.slot))
 
 				parseForDotDotLoopVariable(current, symbolTable, fn)
 
 				pushLoop(BLOCK_SCOPES[current.BodyNode])
+				currentLoop().iteratorSlot = int(iteratorVariable.slot)
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
 
 				continueTarget := len(fn.ValueChunk().Code)
-				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_JUMP)
-				fn.ValueChunk().EmitUint32(jumpStart - 2)
+				fn.ValueChunk().EmitBytes(chunk.OP_TRIM_STACK_SLOT, uint8(iteratorVariable.slot), chunk.OP_JUMP)
+				fn.ValueChunk().EmitUint32(jumpStart - 3)
 				normalStart := len(fn.ValueChunk().Code)
-				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID), chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID))
+				fn.ValueChunk().EmitBytes(chunk.OP_TRIM_STACK_SLOT, uint8(iteratorVariable.slot), chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID))
 				fn.ValueChunk().PatchUint32(jumpStart, uint32(normalStart))
 				for _, breakpoint := range currentLoop().points {
 					pos := breakpoint.position
@@ -2621,7 +2653,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, method)
 				}
 
-				{
+				if needsFallthroughReturn(function) {
 					method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
@@ -3288,6 +3320,14 @@ func patternValueNode(node *parser.Node) *parser.Node {
 		return node.Left
 	}
 	return node
+}
+
+func needsFallthroughReturn(fn *parser.Node) bool {
+	if fn == nil || fn.BodyNode == nil || len(fn.BodyNode.Body) == 0 {
+		return true
+	}
+	last := fn.BodyNode.Body[len(fn.BodyNode.Body)-1]
+	return last.Type != parser.NODE_RETURN_STATEMENT && last.Type != parser.NODE_THROW_STATEMENT
 }
 
 func functionLength(params []*parser.Node) int {

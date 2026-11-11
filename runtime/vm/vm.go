@@ -109,8 +109,9 @@ type VM struct {
 	globalObject      value.Value
 	catchValues       map[int]value.Value
 
-	main      bool
-	loopMarks map[int][]int
+	main          bool
+	loopMarks     map[int][]int
+	loopIterators map[int]value.Value
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -128,6 +129,7 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		callCounts:     map[object.Callable]int{},
 		catchValues:    map[int]value.Value{},
 		loopMarks:      map[int][]int{},
+		loopIterators:  map[int]value.Value{},
 	}
 }
 
@@ -1718,8 +1720,10 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 			}
 		}
 	}
-	if _, ok := obj.(*native.ObjGenerator); ok && key == native.SYMBOL_ITERATOR {
-		return value.EncodeHandle(heap.Allocate(native.NewGeneratorIterator())), nil
+	if generator, ok := obj.(*native.ObjGenerator); ok {
+		if key == native.SYMBOL_ITERATOR || (generator.IsAsync && key == native.SYMBOL_ASYNC_ITERATOR) {
+			return value.EncodeHandle(heap.Allocate(native.NewGeneratorIterator())), nil
+		}
 	}
 	if _, ok := obj.(*native.ObjArr); ok && key == native.SYMBOL_ITERATOR {
 		return value.EncodeHandle(heap.Allocate(native.NewArrayIterator())), nil
@@ -5304,6 +5308,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
+						if generator.IsAsync {
+							vm.push(vm.asyncGeneratorRequest(generator, input, generatorNextMode))
+							continue
+						}
 						result, err := vm.generatorResume(generator, input, generatorNextMode)
 						if err != nil {
 							if throwErr := vm.throwGeneratorError(err, &f, &c, &ip); throwErr != nil {
@@ -5339,6 +5347,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
+						if generator.IsAsync {
+							vm.push(vm.asyncGeneratorRequest(generator, returned, generatorReturnMode))
+							continue
+						}
 						result, err := vm.generatorResume(generator, returned, generatorReturnMode)
 						if err != nil {
 							if throwErr := vm.throwGeneratorError(err, &f, &c, &ip); throwErr != nil {
@@ -5357,6 +5369,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
+						if generator.IsAsync {
+							vm.push(vm.asyncGeneratorRequest(generator, thrown, generatorThrowMode))
+							continue
+						}
 						result, err := vm.generatorResume(generator, thrown, generatorThrowMode)
 						if err != nil {
 							if throwErr := vm.throwGeneratorError(err, &f, &c, &ip); throwErr != nil {
@@ -6263,6 +6279,80 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.push(iterator)
 			}
+		case chunk.OP_GET_ASYNC_ITERATOR:
+			{
+				iteratee := vm.pop()
+				iterator, err := vm.acquireAsyncIterator(iteratee)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(iterator)
+			}
+		case chunk.OP_ASYNC_ITERATOR_NEXT_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				iterator := vm.stack[f.localStart+slot]
+				result, err := vm.asyncIteratorNext(iterator)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(result)
+			}
+		case chunk.OP_ASYNC_ITERATOR_RESULT_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				result := vm.pop()
+				iterator := vm.stack[f.localStart+slot]
+				done, err := vm.asyncIteratorResult(iterator, result)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(boolValue(done))
+			}
+		case chunk.OP_ASYNC_ITERATOR_VALUE_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				iterator := vm.stack[f.localStart+slot]
+				current, err := vm.iteratorCurrent(iterator)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(current)
+			}
+		case chunk.OP_ASYNC_ITERATOR_CLOSE_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				iterator := vm.stack[f.localStart+slot]
+				result, err := vm.asyncIteratorClose(iterator)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(result)
+			}
 		case chunk.OP_ITERATOR_NEXT:
 			{
 				iterator := vm.peek()
@@ -6325,6 +6415,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				id := int(c.Code[ip])
 				ip++
 				vm.loopMarks[id] = append(vm.loopMarks[id], vm.stackTop)
+				if vm.stackTop > 0 {
+					vm.loopIterators[id] = vm.stack[vm.stackTop-1]
+				}
 			}
 		case chunk.OP_STACK_TRIM:
 			{
@@ -6343,6 +6436,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if len(marks) > 0 {
 					vm.loopMarks[id] = marks[:len(marks)-1]
 				}
+				delete(vm.loopIterators, id)
 			}
 		case chunk.OP_ITERATOR_VALUE_OR_UNDEFINED:
 			{
@@ -6394,6 +6488,25 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				slot := int(c.Code[ip])
 				ip++
 				iterator := vm.stack[f.localStart+slot]
+				if err := vm.closeIterator(iterator); err != nil {
+					if vm.completionPending {
+						continue
+					}
+					errValue := vm.makeError("Error", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+			}
+		case chunk.OP_ITERATOR_CLOSE_MARK:
+			{
+				id := int(c.Code[ip])
+				ip++
+				iterator, found := vm.loopIterators[id]
+				if !found {
+					continue
+				}
 				if err := vm.closeIterator(iterator); err != nil {
 					if vm.completionPending {
 						continue
@@ -6885,6 +6998,25 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if promise == nil {
 					promise = native.NewPromise()
 					promise.Resolve(awaitee)
+				}
+				if promise.Status == native.REJECTED && vm.completionPending {
+					promise = native.NewPromise()
+					promise.Resolve(value.UNDEFINED)
+				}
+				if generator, ok := f.fn.(*native.ObjGenerator); ok && generator.IsAsync {
+					vm.suspendGenerator(generator, ip, &f, value.UNDEFINED)
+					generator.AsyncAwaiting = promise
+					ip = f.returnIp
+					vm.frameCount--
+					if vm.frameCount > 0 {
+						f = vm.currentFrame()
+						c = *f.fn.ValueChunk()
+						vm.push(value.UNDEFINED)
+					} else {
+						vm.stackTop = 0
+						return value.UNDEFINED, nil
+					}
+					continue
 				}
 				if curentAsyncFn, ok := f.fn.(*native.ObjAsyncFunction); ok {
 					count := (vm.stackTop - f.localStart) + 1

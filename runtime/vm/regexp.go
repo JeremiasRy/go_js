@@ -14,7 +14,6 @@ import (
 
 func translateRegExpPattern(pattern string) string {
 	pattern = strings.ReplaceAll(pattern, `\/`, "/")
-	pattern = strings.ReplaceAll(pattern, `\u{`, `\x{`)
 	aliases := map[string]string{
 		`\p{Letter}`: `\p{L}`,
 		`\p{Number}`: `\p{N}`,

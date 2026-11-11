@@ -1637,6 +1637,7 @@ func (p *Parser) parseVar(node *Node, isFor bool, kind Kind, allowMissingInitial
 		} else {
 			decl.Initializer = nil
 		}
+		decl.Kind = kind
 		node.Declarations = append(node.Declarations, p.finishNode(decl, NODE_VARIABLE_DECLARATOR))
 		if !p.eat(TOKEN_COMMA) {
 			break
