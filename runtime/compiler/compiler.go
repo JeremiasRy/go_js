@@ -772,7 +772,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				})
 				popReturnValue.pop()
 
-				if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				if len(fn.ValueChunk().Code) == 0 {
+					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+				} else if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
@@ -855,7 +857,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					popReturnValue.pop()
 				}
 
-				if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				if len(newFn.ValueChunk().Code) == 0 {
+					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+				} else if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 					newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 				}
 
@@ -886,7 +890,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					popReturnValue.pop()
 				}
 
-				if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				if len(newFn.ValueChunk().Code) == 0 {
+					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+				} else if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 					newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 				}
 				symbolTable = outerSymbolTable
@@ -1268,6 +1274,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case float64:
 					{
 						fn.ValueChunk().WriteConstant(value.ValueFromFloat64(v))
+					}
+				case int:
+					{
+						fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(v)))
+					}
+				case int64:
+					{
+						fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(v)))
+					}
+				case uint64:
+					{
+						fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(v)))
 					}
 				case []byte:
 					{

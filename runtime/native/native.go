@@ -6,9 +6,30 @@ import (
 	"go_js/object"
 	"go_js/value"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 )
+
+func nativeNumberString(n float64) string {
+	if math.IsNaN(n) {
+		return "NaN"
+	}
+	if math.IsInf(n, 1) {
+		return "Infinity"
+	}
+	if math.IsInf(n, -1) {
+		return "-Infinity"
+	}
+	if n == 0 {
+		return "0"
+	}
+	abs := math.Abs(n)
+	if abs >= 1e-6 && abs < 1e21 {
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	}
+	return strconv.FormatFloat(n, 'e', -1, 64)
+}
 
 type ObjNativeFn struct {
 	object.Ctx
@@ -135,7 +156,7 @@ func String(v value.Value) string {
 		return "EMPTY_ITEM"
 	}
 
-	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+	return nativeNumberString(v.AsNumber())
 }
 
 func TypeDecoratedString(v value.Value, visited map[uint32]struct{}) string {
@@ -235,7 +256,7 @@ func TypeDecoratedString(v value.Value, visited map[uint32]struct{}) string {
 	} else if v.IsType(value.EMPTY_ARRAY_ITEM) {
 		return "EMPTY_ITEM"
 	}
-	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+	return nativeNumberString(v.AsNumber())
 }
 
 func DebugString(v value.Value) string {
@@ -254,7 +275,7 @@ func DebugString(v value.Value) string {
 	} else if v.IsType(value.EMPTY_ARRAY_ITEM) {
 		return "EMPTY_ITEM"
 	}
-	return strconv.FormatFloat(v.AsNumber(), 'f', -1, 64)
+	return nativeNumberString(v.AsNumber())
 }
 
 func ObjToPrimitive(o object.Object) string {

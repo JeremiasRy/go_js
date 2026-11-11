@@ -1796,20 +1796,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				slot := c.Code[ip]
 				ip++
 				v := heap.GetHeapVar(f.fn.GetHeapScope(), int(slot))
-				if v.IsObject() {
-					obj, err := heap.GetObject(v.GetHandle())
-
-					if err != nil {
-						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
-					}
-
-					if _, ok := obj.(object.NeedsContext); ok {
-						vm.push(vm.currentFrame().thisCtx)
-						vm.push(v)
-						vm.push(value.TAG_METHOD_HANDLE)
-						continue
-					}
-				}
 				vm.push(v)
 			}
 		case chunk.OP_SET_HEAP_VAR:
@@ -1858,21 +1844,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					continue
 				}
 				v := vm.getGlobal(int(global))
-
-				if v.IsObject() {
-					obj, err := heap.GetObject(v.GetHandle())
-
-					if err != nil {
-						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_GLOBAL %e", err)
-					}
-
-					if _, ok := obj.(object.NeedsContext); ok {
-						vm.push(vm.currentFrame().thisCtx)
-						vm.push(v)
-						vm.push(value.TAG_METHOD_HANDLE)
-						continue
-					}
-				}
 				vm.push(v)
 			}
 		case chunk.OP_SET_GLOBAL:
@@ -1966,21 +1937,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				slot := int(c.Code[ip])
 				ip++
 				v := vm.stack[f.localStart+slot]
-
-				if v.IsObject() {
-					obj, err := heap.GetObject(v.GetHandle())
-
-					if err != nil {
-						return value.UNDEFINED, fmt.Errorf("failed to fetch object in OP_GET_LOCAL %e", err)
-					}
-
-					if _, ok := obj.(object.NeedsContext); ok {
-						vm.push(vm.currentFrame().thisCtx)
-						vm.push(v)
-						vm.push(value.TAG_METHOD_HANDLE)
-						continue
-					}
-				}
 				vm.push(v)
 			}
 		case chunk.OP_SET_LOCAL:
