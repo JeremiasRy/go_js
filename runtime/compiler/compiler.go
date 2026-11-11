@@ -958,6 +958,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				calleeFirst := current.Optional || containsOptional(current.Callee)
 				if calleeFirst {
 					generateByteCode(current.Callee, symbolTable, fn)
+					if referenceIsDiscarded(current.Callee) {
+						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
+					}
 
 					var optionalJumpStart int
 					if current.Optional {
@@ -999,6 +1002,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					}
 
 					generateByteCode(current.Callee, symbolTable, fn)
+					if referenceIsDiscarded(current.Callee) {
+						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
+					}
 
 					fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(current.Arguments)), calledWithSpread)
 				}
@@ -1556,14 +1562,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, fn)
 				}
 
-				count := blockLocalVarCount(symbolTable.block)
+				initializerLocals := initializerLocalVariableCount(current.Initializer, symbolTable)
+				count := blockLocalVarCount(symbolTable.block) - initializerLocals
 
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_COPY_HEAP_SCOPE)
 				}
 
 				updateStart := uint32(len(fn.ValueChunk().Code))
-				for count > 1 {
+				for count > 0 {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 					count--
 				}
@@ -1576,7 +1583,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				loopEnd := uint32(len(fn.ValueChunk().Code))
 				fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
 
-				for range blockLocalVarCount(symbolTable.block) {
+				for range initializerLocals {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 				}
 				for _, breakpoint := range currentLoop().points {
@@ -2348,6 +2355,21 @@ func markParamsDeclared(params []*parser.Node, symbolTable *FunctionScope) {
 	}
 }
 
+func initializerLocalVariableCount(node *parser.Node, symbolTable *FunctionScope) int {
+	if node == nil || node.Type != parser.NODE_VARIABLE_DECLARATION {
+		return 0
+	}
+	count := 0
+	for _, declaration := range node.Declarations {
+		if declaration.Identifier.Type == parser.NODE_IDENTIFIER {
+			if variable, _ := symbolTable.findVariable(declaration.Identifier.Name); variable != nil && variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+				count++
+			}
+		}
+	}
+	return count
+}
+
 func blockLocalVarCount(block *BlockScope) int {
 	if block == nil {
 		return 0
@@ -2407,6 +2429,19 @@ func emitThrow(fn object.Callable, name, message string) {
 	err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
 	fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
 	fn.ValueChunk().EmitByte(chunk.OP_THROW)
+}
+
+func referenceIsDiscarded(node *parser.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Type {
+	case parser.NODE_SEQUENCE_EXPRESSION:
+		return true
+	case parser.NODE_PARENTHESIZED_EXPRESSION:
+		return referenceIsDiscarded(node.Expression)
+	}
+	return false
 }
 
 func containsOptional(node *parser.Node) bool {

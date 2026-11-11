@@ -1236,6 +1236,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				vm.push(a)
 				vm.push(b)
 			}
+		case chunk.OP_UNWRAP_METHOD:
+			{
+				v := vm.pop()
+				if isMethodHandle(v) {
+					v = vm.pop()
+					vm.pop()
+				}
+				vm.push(v)
+			}
 		case chunk.OP_POP_BELOW2:
 			{
 				v := vm.pop()
