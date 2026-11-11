@@ -2234,7 +2234,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Finalizer != nil {
 					finalizerStack = append(finalizerStack, current.Finalizer)
 
-					fn.ValueChunk().EmitBytes(chunk.OP_TRY_BLOCK_START, 0, 0, 0, 0)
+					fn.ValueChunk().EmitBytes(chunk.OP_TRY_FINALLY_START, 0, 0, 0, 0)
 					syntheticCatch := len(fn.ValueChunk().Code) - 4
 
 					if current.Handler != nil {
@@ -2521,7 +2521,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 				}
 
-				fn.ValueChunk().EmitByte(chunk.OP_YIELD)
+				if current.Delegate {
+					fn.ValueChunk().EmitByte(chunk.OP_YIELD_DELEGATE)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_YIELD)
+				}
 			}
 		case parser.NODE_IMPORT_DECLARATION:
 			{

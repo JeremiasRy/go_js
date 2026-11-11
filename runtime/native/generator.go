@@ -6,18 +6,38 @@ import (
 	"go_js/value"
 )
 
+type GeneratorException struct {
+	JumpTo    int
+	StackTop  int
+	Frame     int
+	IsFinally bool
+}
+
 type ObjGenerator struct {
 	object.ObjFunction
 	ObjObject
 
-	Ip      int
-	Locals  []value.Value
-	Args    []value.Value
-	Started bool
-	Done    bool
-	PendingThrow value.Value
-	HasPendingThrow bool
-	Current value.Value
+	Ip                int
+	Locals            []value.Value
+	Args              []value.Value
+	Started           bool
+	Done              bool
+	Running           bool
+	PendingThrow      value.Value
+	HasPendingThrow   bool
+	PendingReturn     bool
+	ReturnValue       value.Value
+	CompletionMark    value.Value
+	Current           value.Value
+	Exceptions        []GeneratorException
+	SavedHeapScope    int
+	SavedOwnScope     bool
+	HasSavedScope     bool
+	Delegating        bool
+	DelegateStarted   bool
+	DelegateIterator  value.Value
+	DelegateHasResult bool
+	DelegateResult    value.Value
 }
 
 func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
@@ -53,7 +73,7 @@ func (i *ObjGenerator) GetReferencingValues() []value.Value {
 	arr = append(arr, i.ObjFunction.GetReferencingValues()...)
 	arr = append(arr, i.Locals...)
 	arr = append(arr, i.Args...)
-	arr = append(arr, i.Current, i.PendingThrow)
+	arr = append(arr, i.Current, i.PendingThrow, i.ReturnValue, i.CompletionMark, i.DelegateIterator, i.DelegateResult)
 	return arr
 }
 

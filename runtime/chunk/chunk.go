@@ -52,6 +52,7 @@ const (
 	OP_ITERATOR_CURRENT
 	OP_TRY_BLOCK_START
 	OP_TRY_BLOCK_END
+	OP_TRY_FINALLY_START
 	OP_THROW
 	OP_NEW
 	OP_AWAIT
@@ -63,6 +64,7 @@ const (
 	OP_PUSH_PROPERTY
 	OP_THIS
 	OP_YIELD
+	OP_YIELD_DELEGATE
 	OP_IMPORT
 	OP_EXPORT
 	OP_IN
@@ -174,6 +176,7 @@ var OpNames = map[uint8]string{
 	OP_ITERATOR_CURRENT:                "OP_ITERATOR_CURRENT",
 	OP_TRY_BLOCK_START:                 "OP_TRY_BLOCK_START",
 	OP_TRY_BLOCK_END:                   "OP_TRY_BLOCK_END",
+	OP_TRY_FINALLY_START:               "OP_TRY_FINALLY_START",
 	OP_THROW:                           "OP_THROW",
 	OP_NEW:                             "OP_NEW",
 	OP_AWAIT:                           "OP_AWAIT",
@@ -185,6 +188,7 @@ var OpNames = map[uint8]string{
 	OP_PUSH_PROPERTY:                   "OP_PUSH_PROPERTY",
 	OP_THIS:                            "OP_THIS",
 	OP_YIELD:                           "OP_YIELD",
+	OP_YIELD_DELEGATE:                  "OP_YIELD_DELEGATE",
 	OP_IMPORT:                          "OP_IMPORT",
 	OP_EXPORT:                          "OP_EXPORT",
 	OP_IN:                              "OP_IN",

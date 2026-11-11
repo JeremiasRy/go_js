@@ -587,6 +587,13 @@ func (vm *VM) closeIterator(iteratorValue value.Value) error {
 	if err != nil {
 		return err
 	}
+	if generator, ok := obj.(*native.ObjGenerator); ok {
+		if generator.Done {
+			return nil
+		}
+		_, err := vm.generatorResume(generator, value.UNDEFINED, generatorReturnMode)
+		return err
+	}
 	jsIterator, ok := obj.(*native.JSIterator)
 	if !ok || jsIterator.Done {
 		return nil
@@ -644,41 +651,287 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 	return v
 }
 
-func (vm *VM) generatorNext(generator *native.ObjGenerator, args []value.Value) (value.Value, error) {
-	if generator.Done {
-		result := native.NewObjectHash()
-		result.SetMember(native.KEY_VALUE, value.UNDEFINED)
+type generatorMode uint8
+
+const (
+	generatorNextMode generatorMode = iota
+	generatorReturnMode
+	generatorThrowMode
+)
+
+func iteratorResult(resultValue value.Value, done bool) value.Value {
+	result := native.NewObjectHash()
+	result.SetMember(native.KEY_VALUE, resultValue)
+	if done {
 		result.SetMember(native.KEY_DONE, value.TRUE)
-		return value.EncodeHandle(heap.Allocate(result)), nil
+	} else {
+		result.SetMember(native.KEY_DONE, value.FALSE)
 	}
+	return value.EncodeHandle(heap.Allocate(result))
+}
+
+func (vm *VM) iteratorResultParts(result value.Value) (bool, value.Value, error) {
+	if !result.IsObject() {
+		return false, value.UNDEFINED, fmt.Errorf("Iterator result is not an object")
+	}
+	doneValue, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("done"))))
+	if err != nil {
+		return false, value.UNDEFINED, err
+	}
+	done := truthyValue(doneValue)
+	resultValue, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("value"))))
+	if err != nil {
+		return false, value.UNDEFINED, err
+	}
+	return done, resultValue, nil
+}
+
+func (vm *VM) iteratorNextWithInput(iteratorValue value.Value, input value.Value) (value.Value, error) {
+	obj, err := heap.GetObject(iteratorValue.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	switch iterator := obj.(type) {
+	case *object.Iterator:
+		done := iterator.Next()
+		return iteratorResult(iterator.Current(), done), nil
+	case *native.JSIterator:
+		if iterator.Done {
+			return iteratorResult(value.UNDEFINED, true), nil
+		}
+		return vm.callValue(iterator.NextMethod, iterator.Iterator, []value.Value{input})
+	case *native.ObjGenerator:
+		return vm.generatorResume(iterator, input, generatorNextMode)
+	}
+	return value.UNDEFINED, fmt.Errorf("not an iterator")
+}
+
+func (vm *VM) callIteratorMethod(iteratorValue value.Value, name string, argument value.Value) (value.Value, bool, error) {
+	obj, err := heap.GetObject(iteratorValue.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, false, err
+	}
+	if generator, ok := obj.(*native.ObjGenerator); ok {
+		mode := generatorReturnMode
+		if name == "throw" {
+			mode = generatorThrowMode
+		}
+		result, err := vm.generatorResume(generator, argument, mode)
+		return result, true, err
+	}
+	target := iteratorValue
+	if jsIterator, ok := obj.(*native.JSIterator); ok {
+		target = jsIterator.Iterator
+	}
+	method, err := vm.getMemberValue(target, value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+	if err != nil || method == value.UNDEFINED {
+		return value.UNDEFINED, false, err
+	}
+	result, err := vm.callValue(method, target, []value.Value{argument})
+	return result, true, err
+}
+
+func (vm *VM) jumpGeneratorFinally(f *CallFrame, c *value.ValueChunk, ip *int, generator *native.ObjGenerator) bool {
+	for len(vm.exceptionStack) > 0 {
+		state := vm.exceptionStack[len(vm.exceptionStack)-1]
+		if state.frame < vm.frameCount {
+			return false
+		}
+		vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+		if state.isFinally {
+			vm.frameCount = state.frame
+			*f = vm.currentFrame()
+			*c = *f.fn.ValueChunk()
+			*ip = state.jumpTo
+			vm.stackTop = state.stackTop
+			vm.push(generator.CompletionMark)
+			return true
+		}
+	}
+	return false
+}
+
+func (vm *VM) generatorResume(generator *native.ObjGenerator, input value.Value, mode generatorMode) (value.Value, error) {
+	if generator.Running {
+		return value.UNDEFINED, &JSException{Name: "TypeError", Message: "Generator is already running"}
+	}
+	if generator.Done {
+		switch mode {
+		case generatorReturnMode:
+			return iteratorResult(input, true), nil
+		case generatorThrowMode:
+			return value.UNDEFINED, &JSException{Name: "Error", Message: native.String(input)}
+		default:
+			return iteratorResult(value.UNDEFINED, true), nil
+		}
+	}
+	if !generator.Started {
+		if mode == generatorReturnMode {
+			generator.Done = true
+			return iteratorResult(input, true), nil
+		}
+		if mode == generatorThrowMode {
+			generator.Done = true
+			return value.UNDEFINED, &JSException{Name: "Error", Message: native.String(input)}
+		}
+	}
+
+	generator.Running = true
 	runner := NewVM(false, vm.output)
 	dummy := object.NewFunction("generator-caller", 0, nil)
 	dummy.ValueChunk().EmitByte(chunk.OP_RETURN)
 	dummyIp := 0
 	runner.Call(dummy, nil, value.UNDEFINED, 0, false)
+
 	if !generator.Started {
 		generator.Started = true
 		for _, arg := range generator.Args {
 			runner.push(arg)
 		}
 		f, c := runner.Call(generator, &dummyIp, value.UNDEFINED, len(generator.Args), false)
-		return runner.run(f, c)
+		result, err := runner.run(f, c)
+		generator.Running = false
+		return result, err
 	}
+
 	f, c := runner.Call(generator, &dummyIp, value.UNDEFINED, 0, false)
 	runner.stackTop = f.localStart
 	for _, local := range generator.Locals {
 		runner.push(local)
 	}
+	if generator.HasSavedScope {
+		f.heapScope = generator.SavedHeapScope
+		f.ownScope = generator.SavedOwnScope
+		runner.frames[runner.frameCount-1].heapScope = f.heapScope
+		runner.frames[runner.frameCount-1].ownScope = f.ownScope
+	}
+	for _, exception := range generator.Exceptions {
+		runner.exceptionStack = append(runner.exceptionStack, ExceptionState{jumpTo: exception.JumpTo, stackTop: exception.StackTop, frame: runner.frameCount, isFinally: exception.IsFinally})
+	}
+	generator.Exceptions = nil
+	ip := generator.Ip
+	f.startIp = ip
+	runner.frames[runner.frameCount-1].startIp = ip
+
+	if generator.Delegating {
+		if mode == generatorReturnMode {
+			result, hasMethod, err := runner.callIteratorMethod(generator.DelegateIterator, "return", input)
+			if err != nil {
+				generator.Done = true
+				generator.Running = false
+				return value.UNDEFINED, err
+			}
+			if hasMethod {
+				done, resultValue, err := runner.iteratorResultParts(result)
+				if err != nil {
+					generator.Done = true
+					generator.Running = false
+					return value.UNDEFINED, err
+				}
+				if !done {
+					generator.Running = false
+					return iteratorResult(resultValue, false), nil
+				}
+				input = resultValue
+			}
+			generator.Delegating = false
+			generator.DelegateIterator = value.UNDEFINED
+		} else if mode == generatorThrowMode {
+			result, hasMethod, err := runner.callIteratorMethod(generator.DelegateIterator, "throw", input)
+			if err != nil {
+				generator.Done = true
+				generator.Running = false
+				return value.UNDEFINED, err
+			}
+			if !hasMethod {
+				if _, _, closeErr := runner.callIteratorMethod(generator.DelegateIterator, "return", value.UNDEFINED); closeErr != nil {
+					generator.Done = true
+					generator.Running = false
+					return value.UNDEFINED, closeErr
+				}
+				generator.Delegating = false
+				generator.DelegateIterator = value.UNDEFINED
+				input = runner.makeError("TypeError", "The iterator does not provide a 'throw' method")
+			} else {
+				done, resultValue, err := runner.iteratorResultParts(result)
+				if err != nil {
+					generator.Done = true
+					generator.Running = false
+					return value.UNDEFINED, err
+				}
+				if !done {
+					generator.Running = false
+					return iteratorResult(resultValue, false), nil
+				}
+				generator.Delegating = false
+				generator.DelegateIterator = value.UNDEFINED
+				generator.DelegateHasResult = true
+				generator.DelegateResult = resultValue
+				mode = generatorNextMode
+			}
+		}
+	}
+
+	switch mode {
+	case generatorNextMode:
+		if !generator.DelegateHasResult {
+			runner.push(input)
+		}
+	case generatorReturnMode:
+		generator.PendingReturn = true
+		generator.ReturnValue = input
+		generator.CompletionMark = value.EncodeHandle(heap.Allocate(native.NewObjectHash()))
+		if !runner.jumpGeneratorFinally(&f, &c, &ip, generator) {
+			generator.Done = true
+			generator.Running = false
+			generator.PendingReturn = false
+			return iteratorResult(input, true), nil
+		}
+	case generatorThrowMode:
+		generator.PendingReturn = false
+		if err := runner.throwValue(input, &f, &c, &ip); err != nil {
+			generator.Done = true
+			generator.Running = false
+			return value.UNDEFINED, err
+		}
+	}
+
+	f.startIp = ip
+	runner.frames[runner.frameCount-1].startIp = ip
+	result, err := runner.run(f, c)
+	generator.Running = false
+	return result, err
+}
+
+func (vm *VM) suspendGenerator(generator *native.ObjGenerator, ip int, f *CallFrame, yieldValue value.Value) value.Value {
+	result := iteratorResult(yieldValue, false)
+	locals := make([]value.Value, vm.stackTop-f.localStart)
+	for i, v := range vm.stack[f.localStart:vm.stackTop] {
+		locals[i] = v
+		vm.pop()
+	}
+	generator.Ip = ip
+	generator.Locals = locals
+	generator.Current = yieldValue
+	generator.SavedHeapScope = f.heapScope
+	generator.SavedOwnScope = f.ownScope
+	generator.HasSavedScope = true
+	generator.Exceptions = generator.Exceptions[:0]
+	for _, state := range vm.exceptionStack {
+		generator.Exceptions = append(generator.Exceptions, native.GeneratorException{JumpTo: state.jumpTo, StackTop: state.stackTop, Frame: state.frame, IsFinally: state.isFinally})
+	}
+	vm.exceptionStack = vm.exceptionStack[:0]
+	generator.Running = false
+	return result
+}
+
+func (vm *VM) generatorNext(generator *native.ObjGenerator, args []value.Value) (value.Value, error) {
 	input := value.UNDEFINED
 	if len(args) > 0 {
 		input = args[0]
 	}
-	runner.push(input)
-	f.startIp = generator.Ip
-	runner.frames[runner.frameCount-1].startIp = generator.Ip
-	return runner.run(f, c)
+	return vm.generatorResume(generator, input, generatorNextMode)
 }
-
 func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget value.Value) (value.Value, error) {
 	instance := native.NewObject()
 	if fn, ok := callable.(*object.ObjFunction); ok {
@@ -840,6 +1093,16 @@ func (vm *VM) promiseReaction(reaction native.PromiseReaction, fulfilled bool, a
 		return
 	}
 	vm.resolvePromise(derived, result)
+}
+
+func (vm *VM) throwGeneratorError(err error, f *CallFrame, c *value.ValueChunk, ip *int) error {
+	name := "Error"
+	message := err.Error()
+	if jsErr, ok := err.(*JSException); ok {
+		name = jsErr.Name
+		message = jsErr.Message
+	}
+	return vm.throwValue(vm.makeError(name, message), f, c, ip)
 }
 
 func (vm *VM) errorValue(err error) value.Value {
@@ -4717,35 +4980,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.Next:
 					{
 						args := vm.popN(argCount)
+						input := value.UNDEFINED
+						if len(args) > 0 {
+							input = args[0]
+						}
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
-						if generator.Done {
-							result := native.NewObjectHash()
-							result.SetMember(native.KEY_VALUE, value.UNDEFINED)
-							result.SetMember(native.KEY_DONE, value.TRUE)
-							vm.push(value.EncodeHandle(heap.Allocate(result)))
+						result, err := vm.generatorResume(generator, input, generatorNextMode)
+						if err != nil {
+							if throwErr := vm.throwGeneratorError(err, &f, &c, &ip); throwErr != nil {
+								return value.UNDEFINED, throwErr
+							}
 							continue
 						}
-						if !generator.Started {
-							generator.Started = true
-							for _, arg := range generator.Args {
-								vm.push(arg)
-							}
-							f, c = vm.Call(generator, &ip, value.UNDEFINED, len(generator.Args), false)
-							ip = 0
-						} else {
-							f, c = vm.Call(generator, &ip, value.UNDEFINED, 0, false)
-							vm.stackTop = f.localStart
-							for _, local := range generator.Locals {
-								vm.push(local)
-							}
-							input := value.UNDEFINED
-							if len(args) > 0 {
-								input = args[0]
-							}
-							vm.push(input)
-							ip = generator.Ip
-						}
+						vm.push(result)
 					}
 				case *native.GeneratorIterator:
 					{
@@ -4760,11 +5008,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
-						generator.Done = true
-						result := native.NewObjectHash()
-						result.SetMember(native.KEY_VALUE, returned)
-						result.SetMember(native.KEY_DONE, value.TRUE)
-						vm.push(value.EncodeHandle(heap.Allocate(result)))
+						result, err := vm.generatorResume(generator, returned, generatorReturnMode)
+						if err != nil {
+							if throwErr := vm.throwGeneratorError(err, &f, &c, &ip); throwErr != nil {
+								return value.UNDEFINED, throwErr
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case *native.Throw:
 					{
@@ -4775,26 +5026,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
-						if !generator.Started || generator.Done {
-							errValue := thrown
-							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
-								return value.UNDEFINED, err
+						result, err := vm.generatorResume(generator, thrown, generatorThrowMode)
+						if err != nil {
+							if throwErr := vm.throwGeneratorError(err, &f, &c, &ip); throwErr != nil {
+								return value.UNDEFINED, throwErr
 							}
 							continue
 						}
-						generator.PendingThrow = thrown
-						generator.HasPendingThrow = true
-						generator.Started = true
-						f, c = vm.Call(generator, &ip, value.UNDEFINED, 0, false)
-						vm.stackTop = f.localStart
-						for _, local := range generator.Locals {
-							vm.push(local)
-						}
-						ip = generator.Ip
-						if err := vm.throwValue(generator.PendingThrow, &f, &c, &ip); err != nil {
-							return value.UNDEFINED, err
-						}
-						generator.HasPendingThrow = false
+						vm.push(result)
 					}
 				case *native.ObjectKeys:
 					{
@@ -5420,6 +5659,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				if generator, ok := f.fn.(*native.ObjGenerator); ok {
 					generator.Done = true
+					generator.Running = false
+					generator.PendingReturn = false
+					generator.Delegating = false
+					generator.Exceptions = nil
 					returned := vm.pop()
 					result := native.NewObjectHash()
 					result.SetMember(native.KEY_VALUE, returned)
@@ -5666,11 +5909,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				f.heapScope = heap.CopyHeapScope(f.heapScope)
 				vm.frames[vm.frameCount-1].heapScope = f.heapScope
 			}
-		case chunk.OP_TRY_BLOCK_START:
+		case chunk.OP_TRY_BLOCK_START, chunk.OP_TRY_FINALLY_START:
 			{
 				catchStart := int(c.Code[ip+3]) | int(c.Code[ip+2])<<8 | int(c.Code[ip+1])<<16 | int(c.Code[ip])<<24
 				ip += 4
-				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: catchStart, stackTop: vm.stackTop, frame: vm.frameCount})
+				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: catchStart, stackTop: vm.stackTop, frame: vm.frameCount, isFinally: code == chunk.OP_TRY_FINALLY_START})
 			}
 		case chunk.OP_TRY_BLOCK_END:
 			{
@@ -5966,7 +6209,27 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_THROW:
 			{
 				err := vm.pop()
+				if generator, ok := f.fn.(*native.ObjGenerator); ok && generator.PendingReturn {
+					if err == generator.CompletionMark {
+						if vm.jumpGeneratorFinally(&f, &c, &ip, generator) {
+							continue
+						}
+						generator.Done = true
+						generator.Running = false
+						generator.PendingReturn = false
+						generator.Exceptions = nil
+						result := iteratorResult(generator.ReturnValue, true)
+						vm.stackTop = 0
+						return result, nil
+					}
+					generator.PendingReturn = false
+				}
 				if len(vm.exceptionStack) == 0 {
+					if generator, ok := f.fn.(*native.ObjGenerator); ok {
+						generator.Done = true
+						generator.Running = false
+						generator.Exceptions = nil
+					}
 					if asyncFn, ok := f.fn.(*native.ObjAsyncFunction); ok {
 						if asyncFn.Promise != nil {
 							vm.rejectPromise(asyncFn.Promise, err)
@@ -6215,26 +6478,73 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_YIELD:
 			{
-				v := native.NewObjectHash()
-				v.SetMember(native.KEY_VALUE, vm.pop())
-				d := value.FALSE
-
-				locals := make([]value.Value, vm.stackTop-f.localStart)
-				for i, v := range vm.stack[f.localStart:vm.stackTop] {
-					locals[i] = v
-					vm.pop()
-				}
-
-				f.fn.(*native.ObjGenerator).Ip = ip
-				f.fn.(*native.ObjGenerator).Locals = locals
-
-				v.SetMember(native.KEY_DONE, d)
-
+				generator := f.fn.(*native.ObjGenerator)
+				result := vm.suspendGenerator(generator, ip, &f, vm.pop())
 				ip = f.returnIp
 				vm.frameCount--
 				f = vm.currentFrame()
 				c = *f.fn.ValueChunk()
-				vm.push(value.EncodeHandle(heap.Allocate(v)))
+				vm.push(result)
+			}
+		case chunk.OP_YIELD_DELEGATE:
+			{
+				generator := f.fn.(*native.ObjGenerator)
+				if generator.DelegateHasResult {
+					resultValue := generator.DelegateResult
+					generator.DelegateHasResult = false
+					generator.DelegateResult = value.UNDEFINED
+					vm.push(resultValue)
+					continue
+				}
+				if !generator.Delegating {
+					delegate := vm.pop()
+					iterator, err := vm.acquireIterator(delegate, compiler.ITERATOR_FOR_OF)
+					if err != nil {
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
+					generator.DelegateIterator = iterator
+					generator.Delegating = true
+					generator.DelegateStarted = false
+				}
+				input := value.UNDEFINED
+				if generator.DelegateStarted {
+					input = vm.pop()
+				} else {
+					generator.DelegateStarted = true
+				}
+				result, err := vm.iteratorNextWithInput(generator.DelegateIterator, input)
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				done, resultValue, err := vm.iteratorResultParts(result)
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				if done {
+					generator.Delegating = false
+					generator.DelegateIterator = value.UNDEFINED
+					generator.DelegateStarted = false
+					vm.push(resultValue)
+					continue
+				}
+				yieldResult := vm.suspendGenerator(generator, ip-1, &f, resultValue)
+				ip = f.returnIp
+				vm.frameCount--
+				f = vm.currentFrame()
+				c = *f.fn.ValueChunk()
+				vm.push(yieldResult)
 			}
 		case chunk.OP_IMPORT:
 			{
