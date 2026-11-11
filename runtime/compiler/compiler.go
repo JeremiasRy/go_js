@@ -3185,11 +3185,6 @@ func compactBlockSlots(table *FunctionScope, oldSlot int) {
 			}
 		}
 	}
-	for _, v := range table.vars {
-		if v.scope != HEAP && v.slot > oldSlot {
-			v.slot--
-		}
-	}
 }
 
 func blockLocalVarCount(block *BlockScope) int {
