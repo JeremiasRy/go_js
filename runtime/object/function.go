@@ -28,6 +28,7 @@ type ObjFunction struct {
 	rest      bool
 	arguments bool
 	ArgumentsHeapSlot int
+	Cloned bool
 }
 
 const NOT_IN_HEAP_SCOPE int = -1

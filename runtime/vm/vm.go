@@ -582,7 +582,11 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 		return v
 	}
 	if fn, ok := obj.(*object.ObjFunction); ok {
+		if fn.Cloned {
+			return v
+		}
 		clone := fn.Clone().(*object.ObjFunction)
+		clone.Cloned = true
 		if fn.GetHeapScope() == object.NOT_IN_HEAP_SCOPE {
 			clone.SetHeapScope(scope)
 		}
@@ -4319,6 +4323,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if fn, ok := obj.(*object.ObjFunction); ok {
 							vm.pop()
 							clone := fn.Clone().(*object.ObjFunction)
+							clone.Cloned = true
 							clone.SetHeapScope(f.heapScope)
 							if clone.IsArrow {
 								clone.LexicalThis = f.thisCtx

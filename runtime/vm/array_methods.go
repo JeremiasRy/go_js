@@ -687,6 +687,40 @@ func (vm *VM) callArrayIterationMethod(kind string, this value.Value, argCount i
 		return value.UNDEFINED, nil
 	case "map":
 		result := native.NewArrayFrom(make([]value.Value, length))
+		resultValue := value.EncodeHandle(heap.Allocate(result))
+		speciesResult := value.UNDEFINED
+		if native.SYMBOL_SPECIES != 0 {
+			if ctor, err := vm.getMemberValue(this, value.EncodeHandle(heap.Allocate(native.NewLightString("constructor")))); err == nil && ctor.IsObject() {
+				if species, err := vm.getMemberValue(ctor, native.SYMBOL_SPECIES); err == nil && species != value.UNDEFINED && species != value.NULL {
+					if speciesObj, err := heap.GetObject(species.GetHandle()); err == nil {
+						if speciesCtor, ok := speciesObj.(object.Callable); ok {
+							resultValue, err = vm.construct(speciesCtor, []value.Value{value.ValueFromFloat64(float64(length))}, species)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							speciesResult = resultValue
+						}
+					}
+				}
+			}
+		}
+		if speciesResult != value.UNDEFINED {
+			for i := 0; i < length; i++ {
+				item, present := vm.arrayIterationElement(this, arr, i)
+				if !present {
+					continue
+				}
+				item, err := vm.invokeCallback(callback, thisArg, []value.Value{item, native.IndexValue(i), this})
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				if err := vm.setMemberValue(resultValue, native.IndexValue(i), item); err != nil {
+					return value.UNDEFINED, err
+				}
+			}
+			vm.setMemberValue(resultValue, value.EncodeHandle(heap.Allocate(native.NewLightString("length"))), value.ValueFromFloat64(float64(length)))
+			return resultValue, nil
+		}
 		for i := 0; i < length; i++ {
 			item, present := vm.arrayIterationElement(this, arr, i)
 			if !present {
@@ -804,6 +838,38 @@ func (vm *VM) callArrayStaticMethod(method *native.ArrayStaticMethod, argCount i
 		}
 		if !source.IsObject() {
 			return value.UNDEFINED, fmt.Errorf("Array.from requires an array-like object")
+		}
+		if native.SYMBOL_ITERATOR != 0 {
+			method, err := vm.getMemberValue(source, native.SYMBOL_ITERATOR)
+			if err == nil && method != value.UNDEFINED && method != value.NULL {
+				iterator, err := vm.acquireIterator(source, 0)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				items := []value.Value{}
+				for {
+					done, err := vm.iteratorNext(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if done {
+						break
+					}
+					item, err := vm.iteratorCurrent(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if hasMap {
+						item, err = vm.invokeCallback(mapFn, thisArg, []value.Value{item, native.IndexValue(len(items))})
+						if err != nil {
+							vm.closeIterator(iterator)
+							return value.UNDEFINED, err
+						}
+					}
+					items = append(items, item)
+				}
+				return value.EncodeHandle(heap.Allocate(native.NewArrayFrom(items))), nil
+			}
 		}
 		lengthValue, err := vm.getMemberValue(source, value.EncodeHandle(heap.Allocate(native.NewLightString("length"))))
 		if err != nil {
