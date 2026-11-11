@@ -3466,7 +3466,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						proto := vm.pop()
 						target := vm.pop()
-						vm.push(fn.SetPrototypeOf(target, proto))
+						result := fn.SetPrototypeOf(target, proto)
+						if result == value.UNDEFINED {
+							errValue := vm.makeError("TypeError", "Cyclic __proto__ value or non-extensible object")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case *native.ObjectHasOwn:
 					{

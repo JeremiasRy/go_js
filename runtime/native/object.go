@@ -343,15 +343,42 @@ func (*ObjectGetPrototypeOf) GetPrototypeOf(target value.Value) value.Value {
 
 func (*ObjectSetPrototypeOf) SetPrototypeOf(target, proto value.Value) value.Value {
 	if !target.IsObject() {
-		return target
+		return value.UNDEFINED
+	}
+	if proto != value.NULL && !proto.IsObject() {
+		return value.UNDEFINED
 	}
 	obj, err := heap.GetObject(target.GetHandle())
 	if err != nil {
-		return target
+		return value.UNDEFINED
 	}
-	if o, ok := obj.(interface{ SetPrototypeValue(value.Value) }); ok {
-		o.SetPrototypeValue(proto)
+	o, ok := obj.(interface {
+		SetPrototypeValue(value.Value)
+		PrototypeValue() value.Value
+		Extensible() bool
+	})
+	if !ok {
+		return value.UNDEFINED
 	}
+	if !o.Extensible() && o.PrototypeValue() != proto {
+		return value.UNDEFINED
+	}
+	current := proto
+	for current.IsObject() {
+		if heap.GetPointer(current.GetHandle()) == heap.GetPointer(target.GetHandle()) {
+			return value.UNDEFINED
+		}
+		currentObj, err := heap.GetObject(current.GetHandle())
+		if err != nil {
+			break
+		}
+		p, ok := currentObj.(interface{ PrototypeValue() value.Value })
+		if !ok {
+			break
+		}
+		current = p.PrototypeValue()
+	}
+	o.SetPrototypeValue(proto)
 	return target
 }
 
