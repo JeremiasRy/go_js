@@ -40,6 +40,7 @@ func (oa *ObjArr) GetReferencingValues() []value.Value {
 			arr = append(arr, v)
 		}
 	}
+	arr = append(arr, oa.ObjObject.GetReferencingValues()...)
 
 	return arr
 }

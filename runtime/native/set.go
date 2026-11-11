@@ -21,6 +21,16 @@ func (*Set) Type() object.ObjType {
 	return object.OBJ_SET
 }
 
+func (s *Set) GetReferencingValues() []value.Value {
+	arr := []value.Value{}
+	arr = append(arr, s.order...)
+	for key := range s.values {
+		arr = append(arr, key)
+	}
+	arr = append(arr, s.ObjObject.GetReferencingValues()...)
+	return arr
+}
+
 func NewSet() *Set {
 	s := &Set{}
 

@@ -22,12 +22,7 @@ func (oc *ObjClass) String() string {
 }
 
 func (o *ObjClass) GetReferencingValues() []value.Value {
-	arr := []value.Value{}
-	for _, v := range o.Members {
-		if v.Value.IsObject() {
-			arr = append(arr, v.Value)
-		}
-	}
+	arr := o.ObjObject.GetReferencingValues()
 
 	for k, v := range o.properties {
 		arr = append(arr, k, v)

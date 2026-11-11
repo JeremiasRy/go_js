@@ -56,6 +56,17 @@ func (*ObjAsyncFunction) Type() object.ObjType {
 	return object.OBJ_ASYNC_FUNCTION
 }
 
+func (asyncFn *ObjAsyncFunction) GetReferencingValues() []value.Value {
+	arr := asyncFn.ObjFunction.GetReferencingValues()
+	if asyncFn.State != nil {
+		arr = append(arr, asyncFn.State.Stack...)
+	}
+	if asyncFn.RejectValue.IsObject() {
+		arr = append(arr, asyncFn.RejectValue)
+	}
+	return arr
+}
+
 func (asyncFn *ObjAsyncFunction) String() string {
 	return "<async fn " + asyncFn.Name + ">"
 }

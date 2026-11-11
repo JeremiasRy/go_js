@@ -27,6 +27,9 @@ type Heap struct {
 	init                bool
 	roots               []value.Value
 	asyncWorkKeepAlive  map[uintptr][]value.Value
+	asyncScopeKeepAlive map[uintptr]int
+	callbackRoots       map[uintptr][]value.Value
+	nextCallbackRoot    uintptr
 	greyStack           []object.Object
 	gcCycleDeterminator uint32
 }
@@ -43,13 +46,16 @@ var a = &Heap{
 
 	roots:               []value.Value{},
 	asyncWorkKeepAlive:  map[uintptr][]value.Value{},
+	asyncScopeKeepAlive: map[uintptr]int{},
+	callbackRoots:       map[uintptr][]value.Value{},
+	nextCallbackRoot:    1,
 	greyStack:           []object.Object{},
 	gcCycleDeterminator: 20,
 	init:                false,
 }
 
 func ShouldRunGCCycle() bool {
-	return false
+	return a.shouldRunGCCycle()
 }
 
 func GetHeapVar(scope, depth, slot int) value.Value {
@@ -221,6 +227,30 @@ func GetPointer(handle uint32) uint32 {
 }
 
 // GARBAGE COLLECTION
+func markValue(v value.Value) {
+	if !v.IsObject() {
+		return
+	}
+	obj, err := GetObject(v.GetHandle())
+	if err != nil {
+		return
+	}
+	pushGrey(obj)
+}
+
+func (a *Heap) markScope(scope int) {
+	for scope > 0 {
+		values, found := a.heapVars[scope]
+		if !found {
+			return
+		}
+		for _, v := range values.Values {
+			markValue(v)
+		}
+		scope = values.Parent
+	}
+}
+
 func markAndSweep(stackValues []value.Value) {
 	if flags.Debug {
 		fmt.Println("-- GC DEBUG --")
@@ -228,40 +258,39 @@ func markAndSweep(stackValues []value.Value) {
 	}
 
 	for _, v := range append(a.roots, stackValues...) {
-		if v.IsObject() {
-			obj, _ := GetObject(v.GetHandle())
-			pushGrey(obj)
-		}
+		markValue(v)
 	}
 
 	for _, items := range a.asyncWorkKeepAlive {
 		for _, v := range items {
-			if v.IsObject() {
-				obj, _ := GetObject(v.GetHandle())
-				pushGrey(obj)
-			}
+			markValue(v)
+		}
+	}
+
+	for _, scope := range a.asyncScopeKeepAlive {
+		a.markScope(scope)
+	}
+
+	for _, items := range a.callbackRoots {
+		for _, v := range items {
+			markValue(v)
 		}
 	}
 
 	current := popGrey()
 
 	for current != nil {
-		for _, v := range current.GetReferencingValues() {
-			obj, _ := GetObject(v.GetHandle())
-			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
-				if scope, found := a.heapVars[fn.HeapScope]; found {
-					for _, v := range scope.Values {
-						if v.IsObject() {
-							obj, _ := GetObject(v.GetHandle())
-							pushGrey(obj)
-						}
-					}
-				}
-			}
-
-			pushGrey(obj)
+		if current.Marked() {
+			current = popGrey()
+			continue
 		}
 		current.Mark()
+		for _, v := range current.GetReferencingValues() {
+			markValue(v)
+		}
+		if callable, ok := current.(object.Callable); ok && callable.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+			a.markScope(callable.GetHeapScope())
+		}
 		current = popGrey()
 	}
 	a.sweep()
@@ -384,4 +413,25 @@ func StoreAsyncFunctionStack(ptr uintptr, v []value.Value) {
 }
 func ClearAsyncFunctionStack(ptr uintptr) {
 	delete(a.asyncWorkKeepAlive, ptr)
+}
+
+func StoreAsyncFunctionScope(ptr uintptr, scope int) {
+	a.asyncScopeKeepAlive[ptr] = scope
+}
+func ClearAsyncFunctionScope(ptr uintptr) {
+	delete(a.asyncScopeKeepAlive, ptr)
+}
+
+func NewCallbackRoot() uintptr {
+	key := a.nextCallbackRoot
+	a.nextCallbackRoot++
+	return key
+}
+
+func StoreCallbackRoot(key uintptr, values ...value.Value) {
+	a.callbackRoots[key] = values
+}
+
+func ClearCallbackRoot(key uintptr) {
+	delete(a.callbackRoots, key)
 }

@@ -201,6 +201,7 @@ type SetTimeout struct {
 	ObjNativeFn
 	time     int
 	callback object.Callback
+	rootKey  uintptr
 }
 
 func NewSetTimeout() *SetTimeout {
@@ -218,10 +219,16 @@ func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
 	}
 }
 
+func (st *SetTimeout) SetRootKey(key uintptr) {
+	st.rootKey = key
+}
+
 func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	callback := st.callback
+	callback.RootKey = st.rootKey
 	message := &object.JobChannelMessage{
 		Job:      nil,
-		Callback: st.callback,
+		Callback: callback,
 		Done:     done,
 	}
 	if st.time == 0 {

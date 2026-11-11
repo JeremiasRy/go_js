@@ -74,6 +74,15 @@ func (fn *ObjFunction) GetReferencingValues() []value.Value {
 			arr = append(arr, v)
 		}
 	}
+	if fn.Prototype.IsObject() {
+		arr = append(arr, fn.Prototype)
+	}
+	if fn.LexicalThis.IsObject() {
+		arr = append(arr, fn.LexicalThis)
+	}
+	if fn.LexicalNewTarget.IsObject() {
+		arr = append(arr, fn.LexicalNewTarget)
+	}
 	return arr
 }
 

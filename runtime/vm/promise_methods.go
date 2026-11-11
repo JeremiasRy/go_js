@@ -4,7 +4,6 @@ import (
 	"go_js/heap"
 	"go_js/native"
 	"go_js/object"
-	"go_js/queue"
 	"go_js/value"
 )
 
@@ -119,6 +118,7 @@ func (vm *VM) callPromiseAll(argCount int, thisCtx value.Value) (value.Value, er
 		vm.resolvePromise(result, vm.promiseArray(results))
 		return resultValue, nil
 	}
+	roots := append([]value.Value{resultValue}, items...)
 	for i, item := range items {
 		index := i
 		if p, ok := vm.promiseFromValue(item); ok {
@@ -130,7 +130,7 @@ func (vm *VM) callPromiseAll(argCount int, thisCtx value.Value) (value.Value, er
 				}
 			}, func(reason value.Value) {
 				vm.rejectPromise(result, reason)
-			})
+			}, roots...)
 		} else {
 			results[index] = item
 			remaining--
@@ -161,6 +161,7 @@ func (vm *VM) callPromiseAllSettled(argCount int) (value.Value, error) {
 		vm.resolvePromise(result, vm.promiseArray(results))
 		return resultValue, nil
 	}
+	roots := append([]value.Value{resultValue}, items...)
 	for i, item := range items {
 		index := i
 		settle := func(v value.Value, status string) {
@@ -178,7 +179,7 @@ func (vm *VM) callPromiseAllSettled(argCount int) (value.Value, error) {
 			}
 		}
 		if p, ok := vm.promiseFromValue(item); ok {
-			vm.addPromiseObserver(p, func(v value.Value) { settle(v, "fulfilled") }, func(reason value.Value) { settle(reason, "rejected") })
+			vm.addPromiseObserver(p, func(v value.Value) { settle(v, "fulfilled") }, func(reason value.Value) { settle(reason, "rejected") }, roots...)
 		} else {
 			settle(item, "fulfilled")
 		}
@@ -200,6 +201,7 @@ func (vm *VM) callPromiseRace(argCount int) (value.Value, error) {
 		return resultValue, nil
 	}
 	settled := false
+	roots := append([]value.Value{resultValue}, items...)
 	for _, item := range items {
 		if p, ok := vm.promiseFromValue(item); ok {
 			vm.addPromiseObserver(p, func(v value.Value) {
@@ -212,15 +214,16 @@ func (vm *VM) callPromiseRace(argCount int) (value.Value, error) {
 					settled = true
 					vm.rejectPromise(result, reason)
 				}
-			})
+			}, roots...)
 		} else {
 			item := item
-			queue.Enqueue(object.Callback{Native: func() {
+			callbackRoots := []value.Value{resultValue, item}
+			vm.enqueueNativeCallback(callbackRoots, func() {
 				if !settled {
 					settled = true
 					vm.resolvePromise(result, item)
 				}
-			}}, queue.MICRO_TASK, false)
+			})
 		}
 	}
 	return resultValue, nil
@@ -246,6 +249,7 @@ func (vm *VM) callPromiseAny(argCount int) (value.Value, error) {
 		vm.rejectPromise(result, vm.makeAggregateError(reasons))
 		return resultValue, nil
 	}
+	roots := append([]value.Value{resultValue}, items...)
 	for i, item := range items {
 		index := i
 		if p, ok := vm.promiseFromValue(item); ok {
@@ -260,15 +264,16 @@ func (vm *VM) callPromiseAny(argCount int) (value.Value, error) {
 				if remaining == 0 && !settled {
 					vm.rejectPromise(result, vm.makeAggregateError(reasons))
 				}
-			})
+			}, roots...)
 		} else {
 			item := item
-			queue.Enqueue(object.Callback{Native: func() {
+			callbackRoots := []value.Value{resultValue, item}
+			vm.enqueueNativeCallback(callbackRoots, func() {
 				if !settled {
 					settled = true
 					vm.resolvePromise(result, item)
 				}
-			}}, queue.MICRO_TASK, false)
+			})
 		}
 	}
 	return resultValue, nil

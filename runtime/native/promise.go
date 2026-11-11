@@ -37,6 +37,7 @@ type ObjPromise struct {
 type PromiseObserver struct {
 	Fulfilled func(value.Value)
 	Rejected  func(value.Value)
+	Roots     []value.Value
 }
 
 type PromiseReaction struct {
@@ -70,11 +71,11 @@ func (op *ObjPromise) GetReferencingValues() []value.Value {
 		arr = append(arr, reaction.OnFulfilled, reaction.OnRejected, reaction.Finalizer, reaction.Derived)
 	}
 
-	for _, v := range op.Members {
-		if v.Value.IsObject() {
-			arr = append(arr, v.Value)
-		}
+	for _, observer := range op.Observers {
+		arr = append(arr, observer.Roots...)
 	}
+
+	arr = append(arr, op.ObjObject.GetReferencingValues()...)
 
 	return arr
 }

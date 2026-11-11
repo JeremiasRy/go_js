@@ -60,6 +60,7 @@ type Callback struct {
 	ThisCtx value.Value
 	Stack   []value.Value
 	Native  func()
+	RootKey uintptr
 }
 
 type JobChannelMessage struct {

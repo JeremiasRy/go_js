@@ -49,20 +49,11 @@ func (i *ObjGenerator) Clear() {
 }
 
 func (i *ObjGenerator) GetReferencingValues() []value.Value {
-	arr := []value.Value{}
-
-	for _, v := range i.Members {
-		if v.Value.IsObject() {
-			arr = append(arr, v.Value)
-		}
-	}
-
-	for _, v := range append(i.Locals, i.ValueChunk().Constants...) {
-		if v.IsObject() {
-			arr = append(arr, v)
-		}
-	}
-
+	arr := i.ObjObject.GetReferencingValues()
+	arr = append(arr, i.ObjFunction.GetReferencingValues()...)
+	arr = append(arr, i.Locals...)
+	arr = append(arr, i.Args...)
+	arr = append(arr, i.Current, i.PendingThrow)
 	return arr
 }
 

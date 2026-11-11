@@ -24,22 +24,10 @@ func (*Map) Type() object.ObjType {
 }
 
 func (o *Map) GetReferencingValues() []value.Value {
-	arr := []value.Value{}
-	for _, v := range o.Members {
-		if v.Value.IsObject() {
-			arr = append(arr, v.Value)
-		}
-	}
+	arr := o.ObjObject.GetReferencingValues()
 
 	for k, v := range o.values {
-
-		if v.Value.IsObject() {
-			arr = append(arr, v.Value)
-		}
-
-		if k.IsObject() {
-			arr = append(arr, k)
-		}
+		arr = append(arr, k, v.Value, v.Get, v.Set)
 	}
 	return arr
 }

@@ -119,6 +119,12 @@ func (*ObjTypedArray) Type() object.ObjType {
 	return object.OBJ_TYPED_ARRAY
 }
 
+func (a *ObjTypedArray) GetReferencingValues() []value.Value {
+	arr := []value.Value{a.BufferValue}
+	arr = append(arr, a.ObjObject.GetReferencingValues()...)
+	return arr
+}
+
 func (a *ObjTypedArray) String() string {
 	return "[object TypedArray]"
 }
@@ -307,6 +313,12 @@ func NewDataView(buffer *ObjArrayBuffer, bufferValue value.Value, offset, length
 
 func (*ObjDataView) Type() object.ObjType {
 	return object.OBJ_DATA_VIEW
+}
+
+func (v *ObjDataView) GetReferencingValues() []value.Value {
+	arr := []value.Value{v.BufferValue}
+	arr = append(arr, v.ObjObject.GetReferencingValues()...)
+	return arr
 }
 
 func (v *ObjDataView) String() string {
