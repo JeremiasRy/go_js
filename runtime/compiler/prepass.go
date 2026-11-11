@@ -101,6 +101,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, node := range current.BodyNode.Body {
 			prePass(node, symbolTable)
 		}
+		if !strictContext {
+			moveUndeclaredToGlobal(symbolTable)
+		}
 		strictContext = savedStrict
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
@@ -267,21 +270,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		// check that we found anything and if it's from a upper function scope
 		if table != nil && table != symbolTable && variable.scope == LOCAL {
-			current := symbolTable
-
-			for current != nil {
-				for _, v := range current.vars {
-					if current == table && v.scope != HEAP && v.slot > variable.slot {
-						v.slot--
-					}
-				}
-				current = current.parent
-			}
-
+			oldSlot := variable.slot
+			compactBlockSlots(table, oldSlot)
 			variable.scope = HEAP
 			variable.slot = table.heapVarCount
 			table.heapVarCount++
-
 		}
 	case parser.NODE_IF_STATEMENT:
 		prePass(current.Test, symbolTable)
@@ -326,14 +319,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_EXPRESSION_STATEMENT:
 		prePass(current.Expression, symbolTable)
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
-		if current.Left.Type != parser.NODE_MEMBER_EXPRESSION {
-			if variable, _ := symbolTable.findVariable(current.Left.Name); variable == nil {
-				if strictContext {
-					prePass(current.Right, symbolTable)
-					return
-				}
-				global.addVariable(current.Left.Name, LET, true, nil)
-			}
+		if variable, _ := symbolTable.findVariable(current.Left.Name); current.Left.Type != parser.NODE_MEMBER_EXPRESSION && variable == nil && !strictContext {
+			symbolTable.addVariable(current.Left.Name, LET, true, nil)
 		}
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
@@ -514,12 +501,31 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 }
 
+func moveUndeclaredToGlobal(symbolTable *FunctionScope) {
+	for name, variable := range symbolTable.vars {
+		if variable.undeclared && variable.scope != GLOBAL {
+			delete(symbolTable.vars, name)
+			global.addVariable(name, LET, true, nil)
+		}
+	}
+}
+
 func addPatternVariables(node *parser.Node, kind VariableType, symbolTable *FunctionScope) {
 	if node == nil {
 		return
 	}
 	switch node.Type {
 	case parser.NODE_IDENTIFIER:
+		var vars Variables
+		if symbolTable.block != nil {
+			vars = symbolTable.block.vars
+		} else {
+			vars = symbolTable.vars
+		}
+		if variable, ok := vars[node.Name]; ok {
+			variable.undeclared = false
+			return
+		}
 		symbolTable.addVariable(node.Name, kind, false, nil)
 	case parser.NODE_ASSIGNMENT_PATTERN:
 		addPatternVariables(node.Left, kind, symbolTable)

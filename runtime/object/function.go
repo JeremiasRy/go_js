@@ -20,6 +20,8 @@ type ObjFunction struct {
 	HeapScope int
 	Prototype value.Value
 	Strict    bool
+	IsArrow   bool
+	LexicalThis value.Value
 	rest      bool
 	arguments bool
 }

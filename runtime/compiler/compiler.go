@@ -237,6 +237,13 @@ func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
 			variable.slot++
 		}
 	}
+	for block := fs.block; block != nil; block = block.parent {
+		for _, variable := range block.vars {
+			if variable.slot >= fs.arity {
+				variable.slot++
+			}
+		}
+	}
 	fs.vars[RESERVED_ARGUMENTS].slot = fs.arity
 	fs.needsArguments = true
 }
@@ -267,9 +274,28 @@ func (fs *FunctionScope) exitBlockScope() {
 	fs.block = fs.block.parent
 }
 
+func blockSlotCount(block *BlockScope) int {
+	count := 0
+	for _, variable := range block.vars {
+		if variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+			count++
+		}
+	}
+	return count
+}
+
+func functionSlotCount(fs *FunctionScope) int {
+	count := 0
+	for _, variable := range fs.vars {
+		if variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+			count++
+		}
+	}
+	return count
+}
 func (fs *FunctionScope) getCurrentSlot() int {
 	if fs.tableScope == GLOBAL && fs.block == nil {
-		return len(fs.vars) - 1
+		return functionSlotCount(fs) - 1
 	}
 
 	count := -1
@@ -277,7 +303,7 @@ func (fs *FunctionScope) getCurrentSlot() int {
 		current := fs.block
 
 		for current != nil {
-			count += len(current.vars)
+			count += blockSlotCount(current)
 			current = current.parent
 		}
 	}
@@ -286,7 +312,7 @@ func (fs *FunctionScope) getCurrentSlot() int {
 		return count
 	}
 
-	count += len(fs.vars)
+	count += functionSlotCount(fs)
 	return count
 }
 
@@ -844,6 +870,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				markParamsDeclared(current.Params, symbolTable)
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 				newFn.Strict = module || nodeHasUseStrict(current)
+				newFn.IsArrow = true
 
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
@@ -1103,6 +1130,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_VARIABLE_DECLARATOR:
 			{
+				if current.Identifier.Type == parser.NODE_ARRAY_PATTERN || current.Identifier.Type == parser.NODE_OBJECT_PATTERN {
+					generatePatternDeclaration(current.Identifier, current.Initializer, symbolTable, fn)
+					return
+				}
 				if current.Identifier.Type == parser.NODE_ARRAY_PATTERN {
 					pattern := current.Identifier
 					var arr *Variable
@@ -1133,12 +1164,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 						switch el.scope {
 						case LOCAL:
-							if currentLoop() != nil {
-								defineOp = chunk.OP_SET_LOCAL
-							} else {
-								defineOp = chunk.OP_DEFINE_LOCAL
-
-							}
+							defineOp = chunk.OP_DEFINE_LOCAL
 						case GLOBAL:
 							defineOp = chunk.OP_DEFINE_GLOBAL
 						case HEAP:
@@ -1155,14 +1181,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(i)))
 							fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp)
 						})
-						if currentLoop() != nil {
-							fn.ValueChunk().EmitByte(uint8(el.slot))
-						}
 					}
 
 					if arr == nil {
 						fn.ValueChunk().EmitByte(chunk.OP_POP)
 					}
+					markPatternDeclared(current.Identifier, symbolTable)
 					return
 				}
 
@@ -1243,6 +1267,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 
 					}
+					markPatternDeclared(current.Identifier, symbolTable)
 					return
 				}
 
@@ -1412,6 +1437,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					return
 				}
 				variable, owner := symbolTable.findVariable(current.Name)
+
+				if variable != nil && owner != nil && owner != symbolTable && variable.scope == LOCAL {
+					oldSlot := variable.slot
+					compactBlockSlots(owner, oldSlot)
+					variable.scope = HEAP
+					variable.slot = owner.heapVarCount
+					owner.heapVarCount++
+				}
 
 				if variable == nil {
 					if !module {
@@ -2460,6 +2493,219 @@ func assignmentOpcode(operator parser.AssignmentOperator) uint8 {
 	return chunk.OP_ADD
 }
 
+func collectPatternTargets(node *parser.Node, targets *[]*parser.Node) {
+	if node == nil {
+		return
+	}
+	switch node.Type {
+	case parser.NODE_IDENTIFIER:
+		*targets = append(*targets, node)
+	case parser.NODE_ASSIGNMENT_PATTERN:
+		collectPatternTargets(node.Left, targets)
+	case parser.NODE_REST_ELEMENT:
+		collectPatternTargets(node.Argument, targets)
+	case parser.NODE_ARRAY_PATTERN:
+		for _, element := range node.Elements {
+			collectPatternTargets(element, targets)
+		}
+	case parser.NODE_OBJECT_PATTERN:
+		for _, property := range node.Properties {
+			if property.Type == parser.NODE_PROPERTY {
+				if value, ok := property.Value.(*parser.Node); ok {
+					collectPatternTargets(value, targets)
+				}
+			} else if property.Type == parser.NODE_REST_ELEMENT {
+				collectPatternTargets(property.Argument, targets)
+			}
+		}
+	}
+}
+
+func patternValueNode(node *parser.Node) *parser.Node {
+	if node != nil && node.Type == parser.NODE_ASSIGNMENT_PATTERN {
+		return node.Left
+	}
+	return node
+}
+
+func emitSetVariable(fn object.Callable, variable *Variable) {
+	var op uint8
+	switch variable.scope {
+	case GLOBAL:
+		op = chunk.OP_SET_GLOBAL
+	case LOCAL:
+		op = chunk.OP_SET_LOCAL
+	case HEAP:
+		op = chunk.OP_SET_HEAP_VAR
+	case THIS:
+		op = chunk.OP_SET_LOCAL
+	}
+	fn.ValueChunk().EmitBytes(op, variableOperand(variable))
+}
+
+func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	targets := []*parser.Node{}
+	collectPatternTargets(pattern, &targets)
+
+	locals := []*Variable{}
+	heaps := []*Variable{}
+	globals := []*Variable{}
+	seen := map[*Variable]bool{}
+	for _, target := range targets {
+		variable, _ := symbolTable.findVariable(target.Name)
+		if variable == nil || seen[variable] {
+			continue
+		}
+		seen[variable] = true
+		switch variable.scope {
+		case LOCAL:
+			locals = append(locals, variable)
+		case HEAP:
+			heaps = append(heaps, variable)
+		case GLOBAL:
+			globals = append(globals, variable)
+		}
+	}
+	slices.SortFunc(locals, func(a, b *Variable) int { return cmp.Compare(a.slot, b.slot) })
+	slices.SortFunc(heaps, func(a, b *Variable) int { return cmp.Compare(a.slot, b.slot) })
+	slices.SortFunc(globals, func(a, b *Variable) int { return cmp.Compare(a.slot, b.slot) })
+
+	for range locals {
+		fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
+	}
+	for _, variable := range heaps {
+		fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
+	}
+	for range globals {
+		fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_GLOBAL)
+	}
+
+	if initializer != nil {
+		if initializer.Type == parser.NODE_IDENTIFIER {
+			variable, _ := symbolTable.findVariable(initializer.Name)
+			if variable != nil {
+				switch variable.scope {
+				case GLOBAL:
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, variableOperand(variable))
+				case LOCAL:
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, variableOperand(variable))
+				case HEAP:
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, variableOperand(variable))
+				}
+			} else {
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+			}
+		} else {
+			popReturnValue.push(false)
+			generateByteCode(initializer, symbolTable, fn)
+			popReturnValue.pop()
+		}
+	} else {
+		fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+	}
+
+	var assign func(*parser.Node)
+	assign = func(node *parser.Node) {
+		if node == nil {
+			return
+		}
+		switch node.Type {
+		case parser.NODE_IDENTIFIER:
+			variable, _ := symbolTable.findVariable(node.Name)
+			if variable != nil {
+				emitSetVariable(fn, variable)
+			}
+		case parser.NODE_ASSIGNMENT_PATTERN:
+			assign(node.Left)
+		case parser.NODE_REST_ELEMENT:
+			assign(node.Argument)
+		case parser.NODE_ARRAY_PATTERN:
+			for i, element := range node.Elements {
+				if element == nil {
+					continue
+				}
+				if element.Type == parser.NODE_REST_ELEMENT {
+					// Array rest is not handled recursively here.
+					fn.ValueChunk().EmitByte(chunk.OP_POP)
+					continue
+				}
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(i)))
+				fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+				assign(element)
+			}
+			fn.ValueChunk().EmitByte(chunk.OP_POP)
+		case parser.NODE_OBJECT_PATTERN:
+			excluded := []value.Value{}
+			for _, property := range node.Properties {
+				switch property.Type {
+				case parser.NODE_PROPERTY:
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+					if property.Computed {
+						popReturnValue.push(false)
+						generateByteCode(property.Key, symbolTable, fn)
+						popReturnValue.pop()
+					} else {
+						key := value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name)))
+						fn.ValueChunk().WriteConstant(key)
+					}
+					fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+					if valueNode, ok := property.Value.(*parser.Node); ok {
+						assign(patternValueNode(valueNode))
+					}
+					if !property.Computed {
+						key := value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name)))
+						excluded = append(excluded, key)
+					}
+				case parser.NODE_REST_ELEMENT:
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+					fn.ValueChunk().EmitByte(chunk.OP_CREATE_REST_OBJECT)
+					fn.ValueChunk().EmitByte(uint8(len(excluded)))
+					for _, key := range excluded {
+						fn.ValueChunk().EmitByte(fn.ValueChunk().AddConstant(key))
+					}
+					if property.Argument != nil {
+						assign(property.Argument)
+					}
+				}
+			}
+			fn.ValueChunk().EmitByte(chunk.OP_POP)
+		}
+	}
+	assign(pattern)
+	markPatternDeclared(pattern, symbolTable)
+}
+
+func markPatternDeclared(node *parser.Node, symbolTable *FunctionScope) {
+	if node == nil {
+		return
+	}
+	switch node.Type {
+	case parser.NODE_IDENTIFIER:
+		if variable, _ := symbolTable.findVariable(node.Name); variable != nil {
+			variable.declared = true
+		}
+	case parser.NODE_ASSIGNMENT_PATTERN:
+		markPatternDeclared(node.Left, symbolTable)
+	case parser.NODE_REST_ELEMENT:
+		markPatternDeclared(node.Argument, symbolTable)
+	case parser.NODE_ARRAY_PATTERN:
+		for _, element := range node.Elements {
+			markPatternDeclared(element, symbolTable)
+		}
+	case parser.NODE_OBJECT_PATTERN:
+		for _, property := range node.Properties {
+			if property.Type == parser.NODE_PROPERTY {
+				if value, ok := property.Value.(*parser.Node); ok {
+					markPatternDeclared(value, symbolTable)
+				}
+			} else if property.Type == parser.NODE_REST_ELEMENT {
+				markPatternDeclared(property.Argument, symbolTable)
+			}
+		}
+	}
+}
+
 func nodeHasUseStrict(node *parser.Node) bool {
 	if node == nil || node.BodyNode == nil {
 		return false
@@ -2503,6 +2749,21 @@ func initializerLocalVariableCount(node *parser.Node, symbolTable *FunctionScope
 		}
 	}
 	return count
+}
+
+func compactBlockSlots(table *FunctionScope, oldSlot int) {
+	for block := table.block; block != nil; block = block.parent {
+		for _, v := range block.vars {
+			if v.scope != HEAP && v.slot > oldSlot {
+				v.slot--
+			}
+		}
+	}
+	for _, v := range table.vars {
+		if v.scope != HEAP && v.slot > oldSlot {
+			v.slot--
+		}
+	}
 }
 
 func blockLocalVarCount(block *BlockScope) int {

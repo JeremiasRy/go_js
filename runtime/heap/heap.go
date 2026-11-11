@@ -51,6 +51,11 @@ func GetHeapVar(scope, slot int) value.Value {
 	return a.getHeapVar(scope, slot)
 }
 
+func HasHeapVar(scope, slot int) bool {
+	values, found := a.heapVars[scope]
+	return found && slot >= 0 && slot < len(values)
+}
+
 func SetHeapVar(scope, slot int, v value.Value) {
 	a.setHeapVar(scope, slot, v)
 }
@@ -80,6 +85,9 @@ func CopyHeapScope(old int) (scope int) {
 }
 
 func (a *Heap) shouldRunGCCycle() bool {
+	if a.gcCycleDeterminator <= 0 {
+		a.gcCycleDeterminator = 1
+	}
 	return a.handleCount%a.gcCycleDeterminator == 0
 }
 

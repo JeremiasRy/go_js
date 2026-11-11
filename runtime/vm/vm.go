@@ -1136,6 +1136,9 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	if fn.HasArguments() {
 		items := make([]value.Value, argCount)
 		copy(items, vm.stack[vm.stackTop-argCount:vm.stackTop])
+		if argCount > fn.GetArity() {
+			vm.stackTop = f.localStart + fn.GetArity()
+		}
 		arr := native.NewArrayFrom(items)
 		v := value.EncodeHandle(heap.Allocate(arr))
 		vm.push(v)
@@ -1237,6 +1240,19 @@ func (vm *VM) runGC() {
 
 	for _, v := range g {
 		glob = append(glob, v)
+	}
+	if vm.globalObject.IsObject() {
+		if _, found := g[heap.GetPointer(vm.globalObject.GetHandle())]; !found {
+			glob = append(glob, vm.globalObject)
+		}
+	}
+	if vm.completionValue.IsObject() {
+		glob = append(glob, vm.completionValue)
+	}
+	for _, v := range vm.catchValues {
+		if v.IsObject() {
+			glob = append(glob, v)
+		}
 	}
 
 	heap.RequestGC(append(vm.stack[:vm.stackTop], glob...))
@@ -1897,6 +1913,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				slot := c.Code[ip]
 				ip++
+				if !heap.HasHeapVar(f.fn.GetHeapScope(), int(slot)) {
+					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				v := heap.GetHeapVar(f.fn.GetHeapScope(), int(slot))
 				vm.push(v)
 			}
@@ -3126,9 +3149,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.peek()
 				if v.IsObject() {
 					if obj, err := heap.GetObject(v.GetHandle()); err == nil {
-						if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+						if fn, ok := obj.(*object.ObjFunction); ok && (fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE || fn.IsArrow) {
 							vm.pop()
-							vm.push(value.EncodeHandle(heap.Allocate(fn.Clone())))
+							clone := fn.Clone().(*object.ObjFunction)
+							if clone.IsArrow {
+								clone.LexicalThis = f.thisCtx
+							}
+							vm.push(value.EncodeHandle(heap.Allocate(clone)))
 						}
 					}
 				}
@@ -3429,7 +3456,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_THIS:
 			{
-				vm.push(f.thisCtx)
+				if fn, ok := f.fn.(*object.ObjFunction); ok && fn.IsArrow {
+					vm.push(fn.LexicalThis)
+				} else {
+					vm.push(f.thisCtx)
+				}
 			}
 		case chunk.OP_YIELD:
 			{
