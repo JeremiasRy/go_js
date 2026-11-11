@@ -49,6 +49,8 @@ flowchart TD
 
 The runtime is not a _full_ ECMAScript implementation, for example `var` is completely omitted, it can handle an [Advent Of Code](test/aoc/solution.js) puzzle which encompasses a lot of useful language features, also scripts in the [test-scripts](test/test-scripts/) folder give a good representation of the language features implemented.
 
+See the [ECMAScript implementation roadmap](ECMASCRIPT_ROADMAP.md) for prioritized features, implementation dependencies, and JavaScript regression tests.
+
 ## How to run
 Requires go version `1.22.5`
 1. `git clone` the repo
@@ -62,9 +64,15 @@ The test runner is neatly packaged in to a docker container.
 
 **[`test.sh`](/test.sh)**
 
-1. Run [test-scripts](test/test-scripts/) against NodeJS
-2. Run [test-scripts](test/test-scripts/) against GO_JS
-3. Assert that the outputs are identical
+1. Discover all top-level `.js` files in [test-scripts](test/test-scripts/) and the configured [negative tests](test/negative-scripts/).
+2. Run each case against NodeJS and GO_JS with the same Script or Module source goal.
+3. Compare stdout and verify expected error classes/phases. Timeouts, crashes, and mismatches fail the suite.
+
+```sh
+./test.sh
+```
+
+The expanded ECMAScript tests run through this same Docker suite. [`test/cases.json`](test/cases.json) configures source-goal overrides, expected-error cases, and the per-process timeout. Imported fixtures are loaded by their entrypoints. The suite reports every case and exits nonzero if any regression, puzzle, or benchmark execution fails.
 
 After the test run few benchmark scripts are also ran against nodeJS to compare the performance (essentially comparing against V8). Below is one example run summarized (The test suite was ran on my local machine)
 

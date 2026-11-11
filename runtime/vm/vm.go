@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go_js/chunk"
 	"go_js/compiler"
+	"go_js/diagnostic"
 	"go_js/eventloop"
 	"go_js/flags"
 	"go_js/heap"
@@ -12,7 +13,6 @@ import (
 	"go_js/object"
 	"go_js/queue"
 	"go_js/value"
-	"log"
 	"math"
 	"slices"
 	"strconv"
@@ -477,7 +477,7 @@ Run:
 		_, err := vm.run(f, c)
 
 		if err != nil {
-			log.Fatalf("runtime error: %s", err.Error())
+			diagnostic.Fatal("runtime", "Error", err)
 		}
 		callback, errDequeue = queue.Dequeue()
 	}
