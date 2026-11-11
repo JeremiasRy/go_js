@@ -190,6 +190,21 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 			symbolTable.enterBlockScope(current)
 			for _, node := range current.Body {
+				if node.Type == parser.NODE_FUNCTION_DECLARATION {
+					name := node.Identifier.Name
+					arity := len(node.Params)
+					var fn object.Callable
+					if node.IsAsync {
+						fn = native.NewAsyncFunction(name, arity, nil)
+					} else if node.IsGenerator {
+						fn = native.NewGenerator(name, arity, nil)
+					} else {
+						fn = object.NewFunction(name, arity, nil)
+					}
+					symbolTable.addVariable(name, FUNCTION, false, fn)
+				}
+			}
+			for _, node := range current.Body {
 				prePass(node, symbolTable)
 			}
 			symbolTable.exitBlockScope()

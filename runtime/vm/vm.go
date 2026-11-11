@@ -791,6 +791,10 @@ func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
 	return false, nil
 }
 
+func isMethodHandle(v value.Value) bool {
+	return v == value.TAG_METHOD_HANDLE
+}
+
 func boolValue(b bool) value.Value {
 	if b {
 		return value.TRUE
@@ -2669,6 +2673,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 					if vm.stackTop > 0 {
 						value = vm.pop()
+						if isMethodHandle(value) {
+							value = vm.pop()
+							vm.pop()
+						}
 					}
 
 					promise.Resolve(value)
@@ -2697,6 +2705,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 					if vm.stackTop > 0 {
 						value = vm.pop()
+						if isMethodHandle(value) {
+							value = vm.pop()
+							vm.pop()
+						}
 					}
 
 					if vm.frameCount <= 0 {

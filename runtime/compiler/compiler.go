@@ -698,6 +698,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			{
 				nextFn, _ := symbolTable.findVariable(current.Identifier.Name)
 				symbolTable = FUNCTION_SCOPES[current]
+				markParamsDeclared(current.Params, symbolTable)
 
 				fn = nextFn.fn
 				isInHeapScopeAlready := symbolTable.isInHeapScope()
@@ -780,6 +781,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			{
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
+				markParamsDeclared(current.Params, symbolTable)
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 
 				if symbolTable.hasRestParameter {
@@ -865,6 +867,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			{
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
+				markParamsDeclared(current.Params, symbolTable)
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
@@ -893,6 +896,20 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_BLOCK_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current)
+				functions := []*Variable{}
+				for _, variable := range symbolTable.block.vars {
+					if variable.type_ == FUNCTION {
+						functions = append(functions, variable)
+					}
+				}
+				slices.SortFunc(functions, func(a, b *Variable) int {
+					return cmp.Compare(a.slot, b.slot)
+				})
+				for _, variable := range functions {
+					fnValue := heap.Allocate(variable.fn)
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
+					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+				}
 				for _, node := range current.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
@@ -959,7 +976,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				} else {
 					var calledWithSpread uint8 = 0 // false
 					if callee, _ := symbolTable.findVariable(current.Callee.Name); callee != nil && callee.fn != nil {
-						if (len(current.Arguments) > 1 || argumentsContainSpread(current.Arguments)) || callee.fn.HasRestParameter() {
+						if argumentsContainSpread(current.Arguments) || callee.fn.HasRestParameter() {
 							fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
 							if !callee.fn.HasRestParameter() && argumentsContainSpread(current.Arguments) {
 								calledWithSpread = 1
@@ -1207,6 +1224,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_EXPRESSION_STATEMENT:
 			{
+				if current.Directive != "" {
+					return
+				}
 				generateByteCode(current.Expression, symbolTable, fn)
 			}
 		case parser.NODE_IF_STATEMENT:
@@ -2291,6 +2311,23 @@ func assignmentOpcode(operator parser.AssignmentOperator) uint8 {
 		return chunk.OP_B_XOR
 	}
 	return chunk.OP_ADD
+}
+
+func markParamsDeclared(params []*parser.Node, symbolTable *FunctionScope) {
+	for _, param := range params {
+		switch param.Type {
+		case parser.NODE_IDENTIFIER:
+			if variable, _ := symbolTable.findVariable(param.Name); variable != nil {
+				variable.declared = true
+			}
+		case parser.NODE_REST_ELEMENT:
+			if param.Argument != nil && param.Argument.Type == parser.NODE_IDENTIFIER {
+				if variable, _ := symbolTable.findVariable(param.Argument.Name); variable != nil {
+					variable.declared = true
+				}
+			}
+		}
+	}
 }
 
 func blockLocalVarCount(block *BlockScope) int {

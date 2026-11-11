@@ -1796,8 +1796,10 @@ func (p *Parser) isDirectiveCandidate(statement *Node) bool {
 	literalAndString := false
 
 	if statement.Expression != nil && statement.Expression.Type == NODE_LITERAL {
-		_, ok := statement.Expression.Value.(string)
-		literalAndString = ok
+		switch statement.Expression.Value.(type) {
+		case string, []byte:
+			literalAndString = true
+		}
 	}
 	return p.getEcmaVersion() >= 5 && statement.Type == NODE_EXPRESSION_STATEMENT && literalAndString && /* Reject parenthesized strings.*/ (p.input[statement.Start] == '"' || p.input[statement.Start] == '\'')
 }
