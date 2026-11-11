@@ -83,6 +83,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			switch param.Type {
 			case parser.NODE_IDENTIFIER:
 				symbolTable.addVariable(param.Name, LET, false, nil)
+			case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
+				addPatternVariables(param, LET, symbolTable)
 			case parser.NODE_REST_ELEMENT:
 				symbolTable.hasRestParameter = true
 				switch param.Argument.Type {
@@ -133,6 +135,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			switch param.Type {
 			case parser.NODE_IDENTIFIER:
 				symbolTable.addVariable(param.Name, LET, false, nil)
+			case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
+				addPatternVariables(param, LET, symbolTable)
 			case parser.NODE_REST_ELEMENT:
 				symbolTable.hasRestParameter = true
 				switch param.Argument.Type {
@@ -181,6 +185,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				switch param.Type {
 				case parser.NODE_IDENTIFIER:
 					symbolTable.addVariable(param.Name, LET, false, nil)
+				case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
+					addPatternVariables(param, LET, symbolTable)
 				case parser.NODE_REST_ELEMENT:
 					symbolTable.hasRestParameter = true
 					switch param.Argument.Type {

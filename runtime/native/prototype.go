@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	PROTOTYPE_PROPERTY_STRING string = "prototype"
+	PROTOTYPE_PROPERTY_STRING string = "\x00proto"
 	OBJECT_CONSTRUCTOR_NAME   string = "Object"
 	ARRAY_CONSTRUCTOR_NAME    string = "Array"
 	STRING_CONSTRUCTOR_NAME   string = "String"
@@ -71,6 +71,7 @@ func initObjectPrototype() {
 
 	p.SetMember(KEY_TOSTRING, handle)
 	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(heap.Allocate(NewHasOwnProperty())))
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("valueOf"))), value.EncodeHandle(heap.Allocate(NewObjectValueOf())))
 
 	PROTOTYPE_OBJECT = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -114,6 +115,50 @@ func initArrayPrototype() {
 	p.SetMember(KEY_SHIFT, shift)
 	p.SetMember(KEY_REVERSE, reverse)
 	p.SetMember(KEY_FILL, fill)
+
+	arrayMethods := []struct {
+		name string
+		kind ArrayMethodKind
+	}{
+		{"includes", ARRAY_INCLUDES},
+		{"indexOf", ARRAY_INDEX_OF},
+		{"lastIndexOf", ARRAY_LAST_INDEX_OF},
+		{"at", ARRAY_AT},
+		{"pop", ARRAY_POP},
+		{"unshift", ARRAY_UNSHIFT},
+		{"slice", ARRAY_SLICE},
+		{"splice", ARRAY_SPLICE},
+		{"concat", ARRAY_CONCAT},
+		{"flat", ARRAY_FLAT},
+		{"toSorted", ARRAY_TO_SORTED},
+		{"toReversed", ARRAY_TO_REVERSED},
+		{"toSpliced", ARRAY_TO_SPLICED},
+		{"with", ARRAY_WITH},
+	}
+	for _, method := range arrayMethods {
+		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
+		p.SetMember(key, value.EncodeHandle(heap.Allocate(NewArrayMethod(method.name, method.kind))))
+		heap.PushToRoots(key)
+	}
+
+	callbackMethods := []struct {
+		name string
+		kind ArrayCallbackKind
+	}{
+		{"some", ARRAY_SOME},
+		{"every", ARRAY_EVERY},
+		{"find", ARRAY_FIND},
+		{"findIndex", ARRAY_FIND_INDEX},
+		{"findLast", ARRAY_FIND_LAST_CB},
+		{"findLastIndex", ARRAY_FIND_LAST_INDEX_CB},
+		{"sort", ARRAY_SORT},
+		{"flatMap", ARRAY_FLAT_MAP},
+	}
+	for _, method := range callbackMethods {
+		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
+		p.SetMember(key, value.EncodeHandle(heap.Allocate(NewArrayCallbackMethod(method.name, method.kind))))
+		heap.PushToRoots(key)
+	}
 	p.SetMember(KEY_LENGTH, value.ValueFromFloat64(0))
 
 	PROTOTYPE_ARRAY = value.EncodeHandle(heap.Allocate(p))

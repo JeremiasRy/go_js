@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"math"
+	"strconv"
 
 	"go_js/chunk"
 	"go_js/flags"
@@ -142,10 +143,11 @@ type LoopBreakPoint struct {
 }
 
 type Loop struct {
-	points   []*LoopBreakPoint
-	block    *BlockScope
-	label    string
-	isSwitch bool
+	points       []*LoopBreakPoint
+	block        *BlockScope
+	label        string
+	isSwitch     bool
+	iteratorSlot int
 }
 
 var loopStack = []*Loop{}
@@ -178,16 +180,16 @@ func findLoop(label string, breakAllowed bool) *Loop {
 }
 
 func pushLoop(block *BlockScope) {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel})
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, iteratorSlot: -1})
 	pendingLoopLabel = ""
 }
 
 func pushLabeledLoop(block *BlockScope, label string) {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: label})
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: label, iteratorSlot: -1})
 }
 
 func pushSwitchLoop(block *BlockScope) {
-	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, isSwitch: true})
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, isSwitch: true, iteratorSlot: -1})
 	pendingLoopLabel = ""
 }
 
@@ -196,6 +198,29 @@ func popLoop() {
 		return
 	}
 	loopStack = loopStack[:len(loopStack)-1]
+}
+
+func emitIteratorClosesTo(fn object.Callable, target *Loop, includeTarget bool) {
+	for i := len(loopStack) - 1; i >= 0; i-- {
+		l := loopStack[i]
+		if l == target {
+			if includeTarget && l.iteratorSlot >= 0 {
+				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot))
+			}
+			break
+		}
+		if l.iteratorSlot >= 0 {
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(l.iteratorSlot))
+		}
+	}
+}
+
+func emitAllIteratorCloses(fn object.Callable) {
+	for i := len(loopStack) - 1; i >= 0; i-- {
+		if loopStack[i].iteratorSlot >= 0 {
+			fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_CLOSE_SLOT, uint8(loopStack[i].iteratorSlot))
+		}
+	}
 }
 
 func emitAbruptFinalizers(symbolTable *FunctionScope, fn object.Callable) {
@@ -382,7 +407,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 }
 
 func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	objCtor := native.NewObjectConstructor()
+	objCtor := native.NewObjectMethodConstructor()
 	objCtorHandle := heap.Allocate(objCtor)
 
 	symbolTable.addVariable(native.OBJECT_CONSTRUCTOR_NAME, CONST, false, nil)
@@ -391,7 +416,7 @@ func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 }
 
 func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	arrCtor := &native.ArrayConstructor{}
+	arrCtor := native.NewArrayConstructor()
 	arrCtorHandle := heap.Allocate(arrCtor)
 
 	symbolTable.addVariable(native.ARRAY_CONSTRUCTOR_NAME, CONST, false, nil)
@@ -491,6 +516,25 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineSymbolConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	symbolCtor := native.NewSymbolConstructor()
+	handle := heap.Allocate(symbolCtor)
+
+	symbolTable.addVariable(native.SYMBOL_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineStringConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	stringCtor := &native.StringConstructor{}
+	stringCtor.Members = map[string]native.ObjectValueEntry{}
+	handle := heap.Allocate(stringCtor)
+
+	symbolTable.addVariable(native.STRING_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 var module = false
 
@@ -528,6 +572,8 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineParseInt(setup, global)
 	defineNumberConstructor(setup, global)
 	defineJSONObject(setup, global)
+	defineSymbolConstructor(setup, global)
+	defineStringConstructor(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
 	}
@@ -640,15 +686,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(left.Object, symbolTable, fn)
 					if left.Computed {
 						generateByteCode(left.Property, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
 					} else {
 						key := heap.Allocate(native.NewLightString(left.Property.Name))
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(key))
 					}
 
+					memberSetOp := chunk.OP_SET_MEMBER_RETURN
+					if isStrictFunction(fn) {
+						memberSetOp = chunk.OP_SET_MEMBER_STRICT_RETURN
+					}
+
 					switch operator {
 					case parser.ASSIGN:
 						generateByteCode(current.Right, symbolTable, fn)
-						fn.ValueChunk().EmitByte(chunk.OP_SET_MEMBER_RETURN)
+						fn.ValueChunk().EmitByte(memberSetOp)
 					case parser.LOGICAL_AND_ASSIGN, parser.LOGICAL_OR_ASSIGN, parser.NULLISH_ASSIGN:
 						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, chunk.OP_GET_OBJECT_MEMBER, chunk.OP_DUP)
 						var jump uint8
@@ -664,7 +716,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						skipJump := len(fn.ValueChunk().Code) - 4
 						fn.ValueChunk().EmitByte(chunk.OP_POP)
 						generateByteCode(current.Right, symbolTable, fn)
-						fn.ValueChunk().EmitByte(chunk.OP_SET_MEMBER_RETURN)
+						fn.ValueChunk().EmitByte(memberSetOp)
 						fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 						endJump := len(fn.ValueChunk().Code) - 4
 						fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
@@ -674,7 +726,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, chunk.OP_GET_OBJECT_MEMBER)
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(assignmentOpcode(operator))
-						fn.ValueChunk().EmitByte(chunk.OP_SET_MEMBER_RETURN)
+						fn.ValueChunk().EmitByte(memberSetOp)
 					}
 				} else {
 					variable, owner := symbolTable.findVariable(left.Name)
@@ -832,7 +884,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					for i, n := range current.Params {
 						withAstTracking(n, fn, func() {
-							if v, found := symbolTable.vars[n.Name]; found {
+							if v, found := symbolTable.vars[parameterName(n)]; found {
 								if v.scope == HEAP {
 									heapVars = append(heapVars, i)
 								}
@@ -847,6 +899,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 					}
 				}
+
+				emitParameterDefaults(current.Params, symbolTable, fn)
 
 				popReturnValue.push(true)
 				withAstTracking(current.BodyNode, fn, func() {
@@ -917,7 +971,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					for i, n := range current.Params {
 						withAstTracking(n, fn, func() {
-							if v, found := symbolTable.vars[n.Name]; found {
+							if v, found := symbolTable.vars[parameterName(n)]; found {
 								if v.scope == HEAP {
 									heapVars = append(heapVars, i)
 								}
@@ -932,6 +986,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 					}
 				}
+
+				emitParameterDefaults(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -1033,8 +1089,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitUint32(uint32(len(current.Elements)))
 
 				for _, item := range current.Elements {
+					if item == nil {
+						fn.ValueChunk().WriteConstant(value.EMPTY_ARRAY_ITEM)
+						fn.ValueChunk().EmitByte(chunk.OP_PUSH_ELEMENT)
+						continue
+					}
+					if item.Type == parser.NODE_SPREAD_ELEMENT {
+						generateByteCode(item.Argument, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_SPREAD_INTO_ARRAY)
+						continue
+					}
 					generateByteCode(item, symbolTable, fn)
-
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_ELEMENT)
 				}
 				popReturnValue.pop()
@@ -1116,6 +1181,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				if current.Computed {
 					generateByteCode(current.Property, symbolTable, fn)
+					fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
 				} else {
 					withAstTracking(current.Property, fn, func() {
 						handle := heap.Allocate(native.NewLightString(current.Property.Name))
@@ -1324,7 +1390,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Directive != "" {
 					return
 				}
+				popReturnValue.push(false)
 				generateByteCode(current.Expression, symbolTable, fn)
+				popReturnValue.pop()
+				fn.ValueChunk().EmitByte(chunk.OP_POP)
 			}
 		case parser.NODE_IF_STATEMENT:
 			{
@@ -1412,8 +1481,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if len(finalizerStack) > 0 {
 					fn.ValueChunk().EmitByte(chunk.OP_SAVE_COMPLETION)
+					emitAllIteratorCloses(fn)
 					emitAbruptFinalizers(symbolTable, fn)
 					fn.ValueChunk().EmitByte(chunk.OP_RESTORE_COMPLETION)
+				} else {
+					emitAllIteratorCloses(fn)
 				}
 
 				fn.ValueChunk().EmitByte(chunk.OP_RETURN)
@@ -1524,6 +1596,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				l := findLoop(label, false)
 
+				emitIteratorClosesTo(fn, l, false)
 				emitAbruptFinalizers(symbolTable, fn)
 
 				currentBlock := symbolTable.block
@@ -1551,6 +1624,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				l := findLoop(label, true)
 
+				emitIteratorClosesTo(fn, l, true)
 				emitAbruptFinalizers(symbolTable, fn)
 
 				currentBlock := symbolTable.block
@@ -1738,6 +1812,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				parseForDotDotLoopVariable(current, symbolTable, fn)
 
 				pushLoop(BLOCK_SCOPES[current.BodyNode])
+				currentLoop().iteratorSlot = int(iteratorVariable.slot)
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
@@ -1861,11 +1936,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				for _, property := range current.Properties {
 					switch property.Type {
 					case parser.NODE_PROPERTY:
+						if !property.Computed && objectPropertyKeyName(property.Key) == "__proto__" {
+							generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
+							fn.ValueChunk().EmitByte(chunk.OP_SET_OBJECT_PROTOTYPE)
+							continue
+						}
 						if property.Computed {
 							generateByteCode(property.Key, symbolTable, fn)
+							fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
 						} else {
 							withAstTracking(property.Key, fn, func() {
-								fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name))))
+								fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key)))))
 							})
 						}
 						generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
@@ -2092,12 +2173,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(current.Argument, symbolTable, fn)
 					fn.ValueChunk().EmitByte(chunk.OP_BITWISE_NOT)
 				case parser.UNARY_DELETE:
-					if current.Argument.Type == parser.NODE_MEMBER_EXPRESSION {
-						generateByteCode(current.Argument.Object, symbolTable, fn)
-						if current.Argument.Computed {
-							generateByteCode(current.Argument.Property, symbolTable, fn)
+					argument := current.Argument
+					for argument != nil && (argument.Type == parser.NODE_CHAIN_EXPRESSION || argument.Type == parser.NODE_PARENTHESIZED_EXPRESSION) {
+						argument = argument.Expression
+					}
+					if argument != nil && argument.Type == parser.NODE_MEMBER_EXPRESSION {
+						generateByteCode(argument.Object, symbolTable, fn)
+						if argument.Computed {
+							generateByteCode(argument.Property, symbolTable, fn)
 						} else {
-							handle := heap.Allocate(native.NewLightString(current.Argument.Property.Name))
+							handle := heap.Allocate(native.NewLightString(argument.Property.Name))
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_DELETE)
@@ -2441,6 +2526,29 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 							}
 							return
 						}
+					case parser.NODE_ARRAY_PATTERN:
+						{
+							pattern := declaration.Identifier
+							fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
+							for _, element := range pattern.Elements {
+								if element == nil {
+									fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_POP)
+									continue
+								}
+								if element.Type == parser.NODE_REST_ELEMENT {
+									fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_REST)
+									variable, _ := symbolTable.findVariable(element.Argument.Name)
+									emitSetVariable(fn, variable)
+									continue
+								}
+								fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_NEXT)
+								fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_VALUE_OR_UNDEFINED)
+								variable, _ := symbolTable.findVariable(element.Name)
+								emitSetVariable(fn, variable)
+							}
+							fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_CLOSE_POP)
+							return
+						}
 					default:
 						parser.PrintNode(current)
 						panic("unsupported for of variable declaration")
@@ -2576,8 +2684,8 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 	for _, variable := range heaps {
 		fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
 	}
-	for range globals {
-		fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_GLOBAL)
+	for _, variable := range globals {
+		fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_SET_GLOBAL, uint8(variable.slot))
 	}
 
 	if initializer != nil {
@@ -2616,64 +2724,156 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 				emitSetVariable(fn, variable)
 			}
 		case parser.NODE_ASSIGNMENT_PATTERN:
+			fn.ValueChunk().EmitByte(chunk.OP_DUP)
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NOT_UNDEFINED, 0, 0, 0, 0)
+			skipJump := len(fn.ValueChunk().Code) - 4
+			fn.ValueChunk().EmitByte(chunk.OP_POP)
+			popReturnValue.push(false)
+			generateByteCode(node.Right, symbolTable, fn)
+			popReturnValue.pop()
+			fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
 			assign(node.Left)
 		case parser.NODE_REST_ELEMENT:
 			assign(node.Argument)
 		case parser.NODE_ARRAY_PATTERN:
-			for i, element := range node.Elements {
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
+			for _, element := range node.Elements {
 				if element == nil {
+					fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_POP)
 					continue
 				}
 				if element.Type == parser.NODE_REST_ELEMENT {
-					// Array rest is not handled recursively here.
-					fn.ValueChunk().EmitByte(chunk.OP_POP)
+					fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_REST)
+					assign(element.Argument)
 					continue
 				}
-				fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
-				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(float64(i)))
-				fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+				fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_NEXT)
+				fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_VALUE_OR_UNDEFINED)
 				assign(element)
 			}
-			fn.ValueChunk().EmitByte(chunk.OP_POP)
+			fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_CLOSE_POP)
 		case parser.NODE_OBJECT_PATTERN:
+			hasRest := false
+			for _, property := range node.Properties {
+				if property.Type == parser.NODE_REST_ELEMENT {
+					hasRest = true
+				}
+			}
 			excluded := []value.Value{}
+			excludedCount := 0
 			for _, property := range node.Properties {
 				switch property.Type {
 				case parser.NODE_PROPERTY:
-					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
-					if property.Computed {
-						popReturnValue.push(false)
-						generateByteCode(property.Key, symbolTable, fn)
-						popReturnValue.pop()
+					if hasRest {
+						excludedCount++
+						if property.Computed {
+							popReturnValue.push(false)
+							generateByteCode(property.Key, symbolTable, fn)
+							fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+							popReturnValue.pop()
+						} else {
+							key := value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key))))
+							fn.ValueChunk().WriteConstant(key)
+						}
+						fn.ValueChunk().EmitByte(chunk.OP_DUP2)
+						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						if valueNode, ok := property.Value.(*parser.Node); ok {
+							assign(patternValueNode(valueNode))
+						}
 					} else {
-						key := value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name)))
-						fn.ValueChunk().WriteConstant(key)
-					}
-					fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
-					if valueNode, ok := property.Value.(*parser.Node); ok {
-						assign(patternValueNode(valueNode))
-					}
-					if !property.Computed {
-						key := value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name)))
-						excluded = append(excluded, key)
+						fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+						if property.Computed {
+							popReturnValue.push(false)
+							generateByteCode(property.Key, symbolTable, fn)
+							fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+							popReturnValue.pop()
+						} else {
+							key := value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key))))
+							fn.ValueChunk().WriteConstant(key)
+						}
+						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						if valueNode, ok := property.Value.(*parser.Node); ok {
+							assign(patternValueNode(valueNode))
+						}
+						if !property.Computed {
+							key := value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key))))
+							excluded = append(excluded, key)
+						}
 					}
 				case parser.NODE_REST_ELEMENT:
-					fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
-					fn.ValueChunk().EmitByte(chunk.OP_CREATE_REST_OBJECT)
-					fn.ValueChunk().EmitByte(uint8(len(excluded)))
-					for _, key := range excluded {
-						fn.ValueChunk().EmitByte(fn.ValueChunk().AddConstant(key))
+					if hasRest {
+						fn.ValueChunk().EmitBytes(chunk.OP_CREATE_REST_OBJECT_DYNAMIC, uint8(excludedCount))
+					} else {
+						fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+						fn.ValueChunk().EmitByte(chunk.OP_CREATE_REST_OBJECT)
+						fn.ValueChunk().EmitByte(uint8(len(excluded)))
+						for _, key := range excluded {
+							fn.ValueChunk().EmitByte(fn.ValueChunk().AddConstant(key))
+						}
 					}
 					if property.Argument != nil {
 						assign(property.Argument)
 					}
 				}
 			}
-			fn.ValueChunk().EmitByte(chunk.OP_POP)
+			if !hasRest {
+				fn.ValueChunk().EmitByte(chunk.OP_POP)
+			}
 		}
 	}
 	assign(pattern)
 	markPatternDeclared(pattern, symbolTable)
+}
+
+func objectPropertyKeyName(node *parser.Node) string {
+	if node == nil {
+		return ""
+	}
+	switch value := node.Value.(type) {
+	case []byte:
+		return string(value)
+	case string:
+		return value
+	case float64:
+		return formatJSNumber(value)
+	case int:
+		return fmt.Sprintf("%d", value)
+	case int64:
+		return fmt.Sprintf("%d", value)
+	case bool:
+		if value {
+			return "true"
+		}
+		return "false"
+	}
+	return node.Name
+}
+
+func formatJSNumber(n float64) string {
+	return nativeNumberStringForCompiler(n)
+}
+
+func nativeNumberStringForCompiler(n float64) string {
+	if math.IsNaN(n) {
+		return "NaN"
+	}
+	if math.IsInf(n, 1) {
+		return "Infinity"
+	}
+	if math.IsInf(n, -1) {
+		return "-Infinity"
+	}
+	if n == 0 {
+		return "0"
+	}
+	return strconv.FormatFloat(n, 'f', -1, 64)
+}
+
+func isStrictFunction(fn object.Callable) bool {
+	if fnObj, ok := fn.(*object.ObjFunction); ok {
+		return module || fnObj.Strict
+	}
+	return module
 }
 
 func markPatternDeclared(node *parser.Node, symbolTable *FunctionScope) {
@@ -2719,20 +2919,52 @@ func nodeHasUseStrict(node *parser.Node) bool {
 	return false
 }
 
+func parameterName(node *parser.Node) string {
+	if node == nil {
+		return ""
+	}
+	switch node.Type {
+	case parser.NODE_ASSIGNMENT_PATTERN:
+		return parameterName(node.Left)
+	case parser.NODE_REST_ELEMENT:
+		return parameterName(node.Argument)
+	}
+	return node.Name
+}
+
+func emitParameterDefaults(params []*parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	for _, param := range params {
+		if param == nil || param.Type != parser.NODE_ASSIGNMENT_PATTERN {
+			continue
+		}
+		if param.Left == nil || param.Left.Type != parser.NODE_IDENTIFIER {
+			continue
+		}
+		variable, _ := symbolTable.findVariable(param.Left.Name)
+		if variable == nil {
+			continue
+		}
+		getOp := chunk.OP_GET_LOCAL
+		setOp := chunk.OP_SET_LOCAL
+		if variable.scope == HEAP {
+			getOp = chunk.OP_GET_HEAP_VAR
+			setOp = chunk.OP_SET_HEAP_VAR
+		}
+		fn.ValueChunk().EmitBytes(getOp, variableOperand(variable), chunk.OP_DUP)
+		fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NOT_UNDEFINED, 0, 0, 0, 0)
+		skipJump := len(fn.ValueChunk().Code) - 4
+		fn.ValueChunk().EmitByte(chunk.OP_POP)
+		popReturnValue.push(false)
+		generateByteCode(param.Right, symbolTable, fn)
+		popReturnValue.pop()
+		fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+		fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
+	}
+}
+
 func markParamsDeclared(params []*parser.Node, symbolTable *FunctionScope) {
 	for _, param := range params {
-		switch param.Type {
-		case parser.NODE_IDENTIFIER:
-			if variable, _ := symbolTable.findVariable(param.Name); variable != nil {
-				variable.declared = true
-			}
-		case parser.NODE_REST_ELEMENT:
-			if param.Argument != nil && param.Argument.Type == parser.NODE_IDENTIFIER {
-				if variable, _ := symbolTable.findVariable(param.Argument.Name); variable != nil {
-					variable.declared = true
-				}
-			}
-		}
+		markPatternDeclared(param, symbolTable)
 	}
 }
 

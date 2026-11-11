@@ -1,6 +1,7 @@
 package native
 
 import (
+	"fmt"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
@@ -65,7 +66,14 @@ func NewObjectConstructor() *ObjectConstructor {
 	oc.SetMember(KEY_VALUES, value.EncodeHandle(heap.Allocate(NewObjectValues())))
 	oc.SetMember(KEY_KEYS, value.EncodeHandle(heap.Allocate(NewObjectKeys())))
 	oc.SetMember(KEY_CREATE, value.EncodeHandle(heap.Allocate(NewCreate())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_OBJECT)
 	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("hasOwn"))), value.EncodeHandle(heap.Allocate(NewObjectHasOwn())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getPrototypeOf"))), value.EncodeHandle(heap.Allocate(NewObjectGetPrototypeOf())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("setPrototypeOf"))), value.EncodeHandle(heap.Allocate(NewObjectSetPrototypeOf())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getOwnPropertySymbols"))), value.EncodeHandle(heap.Allocate(NewObjectGetOwnPropertySymbols())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getOwnPropertyNames"))), value.EncodeHandle(heap.Allocate(NewObjectGetOwnPropertyNames())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("defineProperty"))), value.EncodeHandle(heap.Allocate(NewObjectDefineProperty())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getOwnPropertyDescriptor"))), value.EncodeHandle(heap.Allocate(NewObjectGetOwnPropertyDescriptor())))
 
 	return oc
 }
@@ -102,6 +110,16 @@ type ArrayConstructor struct {
 	ObjObject
 }
 
+func NewArrayConstructor() *ArrayConstructor {
+	a := &ArrayConstructor{}
+	a.Members = map[string]ObjectValueEntry{}
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_ARRAY)
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isArray"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("isArray", ARRAY_STATIC_IS_ARRAY))))
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("of"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("of", ARRAY_STATIC_OF))))
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("from"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("from", ARRAY_STATIC_FROM))))
+	return a
+}
+
 func (*ArrayConstructor) String() string {
 	return "function Array"
 }
@@ -111,21 +129,32 @@ func (*ArrayConstructor) Type() object.ObjType {
 }
 
 func (*ArrayConstructor) New(params ...any) (object.Object, error) {
-	length := 8 // default length
-
+	if len(params) == 0 {
+		return NewArrayFrom([]value.Value{}), nil
+	}
 	if len(params) == 1 {
-		if num, ok := params[0].(value.Value); ok {
-			length = int(num.AsNumber())
+		if v, ok := params[0].(value.Value); ok {
+			if v.IsNumber() {
+				n := v.AsNumber()
+				if n < 0 || math.Trunc(n) != n || n >= 4294967296 {
+					return nil, fmt.Errorf("Invalid array length")
+				}
+				length := int(n)
+				items := make([]value.Value, length)
+				for i := range items {
+					items[i] = value.EMPTY_ARRAY_ITEM
+				}
+				return NewArrayFrom(items), nil
+			}
 		}
 	}
-
-	from := make([]value.Value, length)
-	for i := range from {
-		from[i] = value.EMPTY_ARRAY_ITEM
+	items := make([]value.Value, len(params))
+	for i, param := range params {
+		if v, ok := param.(value.Value); ok {
+			items[i] = v
+		}
 	}
-
-	arr := NewArrayFrom(from)
-	return arr, nil
+	return NewArrayFrom(items), nil
 }
 
 type StringConstructor struct {

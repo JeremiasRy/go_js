@@ -392,6 +392,168 @@ func (vm *VM) normalizeThis(fn object.Callable, this value.Value) value.Value {
 	return this
 }
 
+func (vm *VM) arrayIndexFromValue(v value.Value) (int, bool) {
+	if v.IsInteger() {
+		n := v.AsNumber()
+		if n >= 0 && n < 4294967295 {
+			return int(n), true
+		}
+	}
+	if s, ok := vm.valueAsString(v); ok && s != "" {
+		if s == "0" {
+			return 0, true
+		}
+		if s[0] == '0' {
+			return 0, false
+		}
+		n := 0
+		for i := 0; i < len(s); i++ {
+			if s[i] < '0' || s[i] > '9' {
+				return 0, false
+			}
+			n = n*10 + int(s[i]-'0')
+			if n >= 4294967295 {
+				return 0, false
+			}
+		}
+		return n, true
+	}
+	return 0, false
+}
+
+func (vm *VM) acquireIterator(iteratee value.Value, iteratorType uint8) (value.Value, error) {
+	if !iteratee.IsObject() {
+		return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iteratee))
+	}
+	obj, err := heap.GetObject(iteratee.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	if _, ok := obj.(*object.Iterator); ok {
+		return iteratee, nil
+	}
+	if _, ok := obj.(*native.JSIterator); ok {
+		return iteratee, nil
+	}
+	if iteratorType == compiler.ITERATOR_FOR_IN {
+		if iterable, ok := obj.(object.Iterable); ok {
+			return value.EncodeHandle(heap.Allocate(object.NewKeyIterator(iterable))), nil
+		}
+		return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iteratee))
+	}
+	if native.SYMBOL_ITERATOR != 0 {
+		method, err := vm.getMemberValue(iteratee, native.SYMBOL_ITERATOR)
+		if err == nil && method != value.UNDEFINED {
+			iterator, err := vm.callValue(method, iteratee, nil)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			if !iterator.IsObject() {
+				return value.UNDEFINED, fmt.Errorf("Result of the Symbol.iterator method is not an object")
+			}
+			next, err := vm.getMemberValue(iterator, value.EncodeHandle(heap.Allocate(native.NewLightString("next"))))
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			jsIterator := native.NewJSIterator(iterator)
+			jsIterator.NextMethod = next
+			return value.EncodeHandle(heap.Allocate(jsIterator)), nil
+		}
+	}
+	if s, ok := vm.valueAsString(iteratee); ok {
+		items := []value.Value{}
+		for _, r := range []rune(s) {
+			items = append(items, value.EncodeHandle(heap.Allocate(native.NewLightString(string(r)))))
+		}
+		return value.EncodeHandle(heap.Allocate(object.NewValueIterator(native.NewArrayFrom(items)))), nil
+	}
+	if iterable, ok := obj.(object.Iterable); ok {
+		switch obj.(type) {
+		case *native.ObjArr, *native.Map, *native.Set:
+			return value.EncodeHandle(heap.Allocate(object.NewValueIterator(iterable))), nil
+		}
+	}
+	return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iteratee))
+}
+
+func (vm *VM) iteratorNext(iteratorValue value.Value) (bool, error) {
+	obj, err := heap.GetObject(iteratorValue.GetHandle())
+	if err != nil {
+		return false, err
+	}
+	switch iterator := obj.(type) {
+	case *object.Iterator:
+		return iterator.Next(), nil
+	case *native.JSIterator:
+		if iterator.Done {
+			return true, nil
+		}
+		result, err := vm.callValue(iterator.NextMethod, iterator.Iterator, nil)
+		if err != nil {
+			return false, err
+		}
+		if !result.IsObject() {
+			return false, fmt.Errorf("Iterator result is not an object")
+		}
+		doneValue, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("done"))))
+		if err != nil {
+			return false, err
+		}
+		iterator.Done = truthyValue(doneValue)
+		if !iterator.Done {
+			valueResult, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("value"))))
+			if err != nil {
+				return false, err
+			}
+			iterator.Current = valueResult
+		} else {
+			iterator.Current = value.UNDEFINED
+		}
+		return iterator.Done, nil
+	}
+	return false, fmt.Errorf("not an iterator")
+}
+
+func (vm *VM) iteratorCurrent(iteratorValue value.Value) (value.Value, error) {
+	obj, err := heap.GetObject(iteratorValue.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	switch iterator := obj.(type) {
+	case *object.Iterator:
+		return iterator.Current(), nil
+	case *native.JSIterator:
+		return iterator.Current, nil
+	}
+	return value.UNDEFINED, fmt.Errorf("not an iterator")
+}
+
+func (vm *VM) closeIterator(iteratorValue value.Value) error {
+	obj, err := heap.GetObject(iteratorValue.GetHandle())
+	if err != nil {
+		return err
+	}
+	jsIterator, ok := obj.(*native.JSIterator)
+	if !ok || jsIterator.Done {
+		return nil
+	}
+	returnMethod, err := vm.getMemberValue(jsIterator.Iterator, value.EncodeHandle(heap.Allocate(native.NewLightString("return"))))
+	if err != nil || returnMethod == value.UNDEFINED {
+		return nil
+	}
+	_, err = vm.callValue(returnMethod, jsIterator.Iterator, nil)
+	return err
+}
+
+func keyValueFromString(key string) value.Value {
+	if len(key) > 0 && key[0] == 0 {
+		if symbol, found := native.SymbolByKey(key); found {
+			return symbol
+		}
+	}
+	return value.EncodeHandle(heap.Allocate(native.NewLightString(key)))
+}
+
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
 	obj, err := heap.GetObject(fn.GetHandle())
 	if err != nil {
@@ -410,6 +572,10 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 }
 
 func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
+	return vm.setMemberValueStrict(objValue, key, v, false)
+}
+
+func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, strict bool) error {
 	if !objValue.IsObject() {
 		return fmt.Errorf("cannot set property on non-object")
 	}
@@ -420,9 +586,39 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 	if k, ok := vm.valueAsString(key); ok {
 		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
 	}
-	if arr, ok := obj.(*native.ObjArr); ok && key.IsInteger() {
-		i := int(key.AsNumber())
-		if i >= 0 {
+	if arr, ok := obj.(*native.ObjArr); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "length" {
+			if entry, found := arr.GetOwnEntry(key); found && !entry.Writable() {
+				if strict {
+					return fmt.Errorf("Cannot assign to read only property 'length'")
+				}
+				return nil
+			}
+			n, err := vm.toNumber(v)
+			if err != nil {
+				return err
+			}
+			if math.IsNaN(n) || n < 0 || math.Trunc(n) != n || n >= 4294967296 {
+				return fmt.Errorf("Invalid array length")
+			}
+			arr.SetLength(int(n))
+			return nil
+		}
+	}
+	if arr, ok := obj.(*native.ObjArr); ok {
+		if i, isIndex := vm.arrayIndexFromValue(key); isIndex {
+			if !arr.Extensible() {
+				if strict {
+					return fmt.Errorf("Cannot add property, object is not extensible")
+				}
+				return nil
+			}
+			if entry, found := arr.GetOwnEntry(value.EncodeHandle(heap.Allocate(native.NewLightString("length")))); found && !entry.Writable() {
+				if strict {
+					return fmt.Errorf("Cannot assign to read only property")
+				}
+				return nil
+			}
 			arr.SetElementAt(i, v)
 			return nil
 		}
@@ -437,12 +633,24 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 					_, err := vm.callValue(entry.Set, objValue, []value.Value{v})
 					return err
 				}
+				if strict {
+					return fmt.Errorf("Cannot set property which has only a getter")
+				}
 				return nil
 			}
 			if !entry.Writable() {
+				if strict {
+					return fmt.Errorf("Cannot assign to read only property")
+				}
 				return nil
 			}
 		} else {
+			if o, ok := obj.(interface{ Extensible() bool }); ok && !o.Extensible() {
+				if strict {
+					return fmt.Errorf("Cannot add property, object is not extensible")
+				}
+				return nil
+			}
 			current := own.PrototypeValue()
 			for current.IsObject() {
 				currentObj, err := heap.GetObject(current.GetHandle())
@@ -461,6 +669,9 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 						if entry.Set != value.UNDEFINED {
 							_, err := vm.callValue(entry.Set, objValue, []value.Value{v})
 							return err
+						}
+						if strict {
+							return fmt.Errorf("Cannot set property which has only a getter")
 						}
 						return nil
 					}
@@ -482,6 +693,10 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 }
 
 func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value, error) {
+	return vm.getMemberValueWithReceiver(objValue, key, objValue)
+}
+
+func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, receiver value.Value) (value.Value, error) {
 	if !objValue.IsObject() {
 		return value.UNDEFINED, nil
 	}
@@ -515,12 +730,29 @@ func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value
 			}
 		}
 	}
-	if arr, ok := obj.(*native.ObjArr); ok && key.IsInteger() {
-		i := int(key.AsNumber())
-		if i >= 0 && i < len(arr.Values()) {
-			return arr.GetElementAt(i), nil
+	if class, ok := obj.(*native.ObjClass); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "prototype" {
+			return class.GetMember(native.KEY_PROTO), nil
 		}
-		return value.UNDEFINED, nil
+	}
+	if obj.Type() == object.OBJ_NATIVE_FN {
+		if keyString, ok := vm.valueAsString(key); ok {
+			switch keyString {
+			case "call":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionCall())), nil
+			case "apply":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionApply())), nil
+			case "bind":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionBind())), nil
+			}
+		}
+	}
+	if arr, ok := obj.(*native.ObjArr); ok {
+		if i, isIndex := vm.arrayIndexFromValue(key); isIndex {
+			if arr.HasIndex(i) {
+				return arr.GetElementAt(i), nil
+			}
+		}
 	}
 	if objString, ok := obj.(*native.LightString); ok {
 		return native.NewObjString(objString.String()).GetMember(key), nil
@@ -537,13 +769,13 @@ func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value
 				if entry.Get == value.UNDEFINED {
 					return value.UNDEFINED, nil
 				}
-				return vm.callValue(entry.Get, objValue, nil)
+				return vm.callValue(entry.Get, receiver, nil)
 			}
 			return entry.Value, nil
 		}
 		proto := own.PrototypeValue()
 		if proto.IsObject() && heap.GetPointer(proto.GetHandle()) != heap.GetPointer(objValue.GetHandle()) {
-			return vm.getMemberValue(proto, key)
+			return vm.getMemberValueWithReceiver(proto, key, receiver)
 		}
 		return value.UNDEFINED, nil
 	}
@@ -556,6 +788,34 @@ func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value
 func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
 	if !v.IsObject() {
 		return v, nil
+	}
+	if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+		if _, ok := obj.(*native.ObjSymbol); ok {
+			return value.UNDEFINED, fmt.Errorf("Cannot convert a Symbol value to a string")
+		}
+	}
+	if native.SYMBOL_TO_PRIMITIVE != 0 {
+		method, err := vm.getMemberValue(v, native.SYMBOL_TO_PRIMITIVE)
+		if err == nil && method != value.UNDEFINED && method != value.NULL {
+			methodObj, err := heap.GetObject(method.GetHandle())
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			if _, ok := methodObj.(object.Callable); !ok {
+				return value.UNDEFINED, fmt.Errorf("Symbol.toPrimitive is not a function")
+			}
+			hintValue := value.EncodeHandle(heap.Allocate(native.NewLightString(hint)))
+			result, err := vm.callValue(method, v, []value.Value{hintValue})
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			if result.IsObject() {
+				if _, ok := vm.valueAsString(result); !ok {
+					return value.UNDEFINED, fmt.Errorf("Cannot convert object to primitive value")
+				}
+			}
+			return result, nil
+		}
 	}
 	order := []string{"valueOf", "toString"}
 	if hint == "string" {
@@ -721,6 +981,17 @@ func formatNumber(n float64) string {
 	return s
 }
 
+func (vm *VM) toPropertyKey(v value.Value) (value.Value, error) {
+	if v.IsObject() {
+		if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+			if _, ok := obj.(*native.ObjSymbol); ok {
+				return v, nil
+			}
+		}
+	}
+	return vm.toStringValue(v)
+}
+
 func (vm *VM) toStringValue(v value.Value) (value.Value, error) {
 	if s, ok := vm.valueAsString(v); ok {
 		return value.EncodeHandle(heap.Allocate(native.NewLightString(s))), nil
@@ -779,6 +1050,8 @@ func (vm *VM) typeofValue(v value.Value) string {
 			return "function"
 		case *native.LightString, *native.ObjString, *native.ObjStringBuilder:
 			return "string"
+		case *native.ObjSymbol:
+			return "symbol"
 		}
 		return "object"
 	}
@@ -1002,14 +1275,14 @@ func (vm *VM) looseEquals(a, b value.Value) (bool, error) {
 		return false, nil
 	}
 	if a.IsObject() && !aString {
-		primitive, err := vm.toPrimitive(a, "number")
+		primitive, err := vm.toPrimitive(a, "default")
 		if err != nil {
 			return false, err
 		}
 		return vm.looseEquals(primitive, b)
 	}
 	if b.IsObject() && !bString {
-		primitive, err := vm.toPrimitive(b, "number")
+		primitive, err := vm.toPrimitive(b, "default")
 		if err != nil {
 			return false, err
 		}
@@ -1100,7 +1373,7 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn, globals) {
+	if currentIp != nil && !calledWithSpread && vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn, globals) {
 		if flags.Debug {
 			fmt.Println("-- CALLING JIT FUNCTION --")
 		}
@@ -1108,7 +1381,9 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		err := jit.JITFunction(&vm.stack[f.localStart], &globals[0], fn)
 
 		if err == nil {
-			*currentIp = f.returnIp
+			if currentIp != nil {
+				*currentIp = f.returnIp
+			}
 
 			vm.frameCount--
 
@@ -1116,7 +1391,9 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 			c = *f.fn.ValueChunk()
 
 			// jitted function writes to the start of locals, if this is more than one we need to pop the arguments
-			vm.popN(argCount - 1)
+			if argCount > 0 {
+				vm.popN(argCount - 1)
+			}
 
 			if flags.Debug {
 				fmt.Println("-- JIT CALL DONE --")
@@ -1162,6 +1439,13 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 
 		for _, v := range arguments {
 			vm.push(v)
+		}
+		vm.frames[vm.frameCount-1].localStart = f.localStart
+	}
+
+	if !fn.HasRestParameter() && !calledWithSpread {
+		for vm.stackTop < f.localStart+fn.GetArity() {
+			vm.push(value.UNDEFINED)
 		}
 	}
 
@@ -1338,6 +1622,26 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				vm.pop()
 				vm.push(v)
 			}
+		case chunk.OP_SET_MEMBER_STRICT_RETURN:
+			{
+				v := vm.pop()
+				k := vm.pop()
+				objValue := vm.pop()
+				if err := vm.setMemberValueStrict(objValue, k, v, true); err != nil {
+					name := "TypeError"
+					message := err.Error()
+					if jsErr, ok := err.(*JSException); ok {
+						name = jsErr.Name
+						message = jsErr.Message
+					}
+					errValue := vm.makeError(name, message)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(v)
+			}
 		case chunk.OP_SET_MEMBER_RETURN:
 			{
 				v := vm.pop()
@@ -1406,13 +1710,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				b := vm.pop()
 				a := vm.pop()
 
-				pa, err := vm.toPrimitive(a, "number")
+				pa, err := vm.toPrimitive(a, "default")
 				if err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
-				pb, err := vm.toPrimitive(b, "number")
+				pb, err := vm.toPrimitive(b, "default")
 				if err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 				as, aIsString := vm.valueAsString(pa)
 				bs, bIsString := vm.valueAsString(pb)
@@ -1659,11 +1971,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				has := value.FALSE
 
-				if obj, err := heap.GetObject(obj.GetHandle()); err == nil {
-					v := obj.(object.Hashable).GetMember(prop)
-
-					if v != value.UNDEFINED {
-						has = value.TRUE
+				if obj.IsObject() {
+					objValue, err := heap.GetObject(obj.GetHandle())
+					if err == nil {
+						if hashable, ok := objValue.(object.Hashable); ok && hashable.HasOwn(prop) {
+							has = value.TRUE
+						} else if v, err := vm.getMemberValue(obj, prop); err == nil && v != value.UNDEFINED {
+							has = value.TRUE
+						}
 					}
 				}
 
@@ -1692,17 +2007,38 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.push(value.ValueFromFloat64(n))
 			}
+		case chunk.OP_TO_PROPERTY_KEY:
+			{
+				key, err := vm.toPropertyKey(vm.pop())
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(key)
+			}
 		case chunk.OP_TO_STRING:
 			{
 				s, err := vm.toStringValue(vm.pop())
 				if err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 				vm.push(s)
 			}
 		case chunk.OP_TYPEOF:
 			{
-				vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(vm.typeofValue(vm.pop())))))
+				v := vm.pop()
+				if isMethodHandle(v) {
+					v = vm.pop()
+					vm.pop()
+				}
+				vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(vm.typeofValue(v)))))
 			}
 		case chunk.OP_VOID:
 			{
@@ -1833,19 +2169,62 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_SPREAD:
 			{
 				v := vm.pop()
-
-				if !v.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%v cannot be spread", native.String(v))
-				}
-				obj, _ := heap.GetObject(v.GetHandle())
-
-				switch obj := obj.(type) {
-				case *native.ObjArr:
-					for _, v := range obj.Values() {
-						vm.push(v)
+				iterator, err := vm.acquireIterator(v, compiler.ITERATOR_FOR_OF)
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
 					}
-				default:
-					return value.UNDEFINED, fmt.Errorf("unsupported spread operation for object %v", native.String(v))
+					continue
+				}
+				for {
+					done, err := vm.iteratorNext(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if done {
+						break
+					}
+					item, err := vm.iteratorCurrent(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					vm.push(item)
+				}
+			}
+		case chunk.OP_SPREAD_INTO_ARRAY:
+			{
+				v := vm.pop()
+				arrayValue := vm.peek()
+				obj, err := heap.GetObject(arrayValue.GetHandle())
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				arr, ok := obj.(*native.ObjArr)
+				if !ok {
+					return value.UNDEFINED, fmt.Errorf("spread target is not an array")
+				}
+				iterator, err := vm.acquireIterator(v, compiler.ITERATOR_FOR_OF)
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				for {
+					done, err := vm.iteratorNext(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if done {
+						break
+					}
+					item, err := vm.iteratorCurrent(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					arr.PushElement(item)
 				}
 			}
 		case chunk.OP_JUMP_IF_FALSE:
@@ -1872,6 +2251,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if v == value.NULL || v == value.UNDEFINED {
+					ip = jump
+				}
+			}
+		case chunk.OP_JUMP_IF_NOT_UNDEFINED:
+			{
+				v := vm.pop()
+				jump := c.ReadInt(&ip)
+
+				if v != value.UNDEFINED {
 					ip = jump
 				}
 			}
@@ -1991,11 +2379,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				global := c.Code[ip]
 				ip++
 				if int(global) >= globalsCount {
-					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
-					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
-						return value.UNDEFINED, err
+					for len(globals) <= int(global) {
+						globals = append(globals, value.UNDEFINED)
 					}
-					continue
+					globalsCount = int(global) + 1
 				}
 				v := vm.pop()
 				if v.IsObject() {
@@ -2112,6 +2499,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				vm.push(value.EncodeHandle(handle))
 			}
+		case chunk.OP_SET_OBJECT_PROTOTYPE:
+			{
+				proto := vm.pop()
+				objValue := vm.peek()
+				if objValue.IsObject() {
+					if obj, err := heap.GetObject(objValue.GetHandle()); err == nil {
+						if o, ok := obj.(interface{ SetPrototypeValue(value.Value) }); ok {
+							o.SetPrototypeValue(proto)
+						}
+					}
+				}
+			}
 		case chunk.OP_SET_OBJECT_GETTER:
 			{
 				getter := vm.pop()
@@ -2200,7 +2599,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				v, err := vm.getMemberValue(objValue, member)
 				if err != nil {
-					return value.UNDEFINED, err
+					name := "TypeError"
+					message := err.Error()
+					if jsErr, ok := err.(*JSException); ok {
+						name = jsErr.Name
+						message = jsErr.Message
+					}
+					errValue := vm.makeError(name, message)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 
 				if v.IsObject() {
@@ -2337,171 +2746,200 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						arg := vm.popN(argCount)
 						this, _ := heap.GetObject(thisCtx.GetHandle())
-						vm.push(fn.Push(this.(*native.ObjArr), arg))
+						arr := this.(*native.ObjArr)
+						lengthEntry, found := arr.GetOwnEntry(value.EncodeHandle(heap.Allocate(native.NewLightString("length"))))
+						if !arr.Extensible() || (found && !lengthEntry.Writable()) {
+							errValue := vm.makeError("TypeError", "Cannot add property, object is not extensible")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(fn.Push(arr, arg))
 					}
 				case *native.ArrayForEach:
 					{
-						callback := vm.pop()
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-						iterator := object.NewValueIterator(this.(object.Iterable))
-						done := iterator.Next()
-
-						obj, err := heap.GetObject(callback.GetHandle())
-
+						result, err := vm.callArrayIterationMethod("forEach", thisCtx, argCount)
 						if err != nil {
-							return value.UNDEFINED, err
-						}
-						runner := NewVM(false, vm.output)
-						if fn, ok := obj.(*object.ObjFunction); ok {
-							for !done {
-
-								item := iterator.Current()
-								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
-								runner.run(f, c)
-								done = iterator.Next()
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
 							}
-						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
+							continue
 						}
-
-						vm.push(value.UNDEFINED)
+						vm.push(result)
 					}
 				case *native.ArrayFilter:
 					{
-						callback := vm.pop()
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-						iterator := object.NewValueIterator(this.(object.Iterable))
-						done := iterator.Next()
-
-						obj, err := heap.GetObject(callback.GetHandle())
-
+						result, err := vm.callArrayIterationMethod("filter", thisCtx, argCount)
 						if err != nil {
-							return value.UNDEFINED, err
-						}
-
-						arr := []value.Value{}
-						runner := NewVM(false, vm.output)
-						if fn, ok := obj.(*object.ObjFunction); ok {
-							for !done {
-
-								item := iterator.Current()
-								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
-								result, err := runner.run(f, c)
-
-								if err != nil {
-									return value.UNDEFINED, err
-								}
-
-								if truthyValue(result) {
-									arr = append(arr, item)
-								}
-
-								done = iterator.Next()
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
 							}
-						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
+							continue
 						}
-						length := len(arr)
-						objArr := native.NewArray(length)
-
-						for _, item := range arr {
-							objArr.PushElement(item)
-						}
-
-						v := value.EncodeHandle(heap.Allocate(objArr))
-						vm.push(v)
+						vm.push(result)
 					}
 				case *native.ArrayMap:
 					{
-						callback := vm.pop()
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-						iterator := object.NewValueIterator(this.(object.Iterable))
-						done := iterator.Next()
-
-						obj, err := heap.GetObject(callback.GetHandle())
-
+						result, err := vm.callArrayIterationMethod("map", thisCtx, argCount)
 						if err != nil {
-							return value.UNDEFINED, err
-						}
-
-						arr := []value.Value{}
-						runner := NewVM(false, vm.output)
-						if fn, ok := obj.(*object.ObjFunction); ok {
-							for !done {
-
-								item := iterator.Current()
-								runner.push(item)
-								f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
-								result, err := runner.run(f, c)
-
-								if err != nil {
-									return value.UNDEFINED, err
-								}
-
-								arr = append(arr, result)
-								done = iterator.Next()
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
 							}
-						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
+							continue
 						}
-						length := len(arr)
-						objArr := native.NewArray(length)
-
-						for _, item := range arr {
-							objArr.PushElement(item)
-						}
-
-						v := value.EncodeHandle(heap.Allocate(objArr))
-						vm.push(v)
+						vm.push(result)
 					}
 				case *native.ArrayReduce:
 					{
-						initialValue := vm.pop()
-						callback := vm.pop()
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-						iterator := object.NewValueIterator(this.(object.Iterable))
-						done := iterator.Next()
-
-						obj, err := heap.GetObject(callback.GetHandle())
-
+						result, err := vm.callArrayIterationMethod("reduce", thisCtx, argCount)
 						if err != nil {
-							return value.UNDEFINED, err
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
 						}
-
-						runner := NewVM(false, vm.output)
-						if fn, ok := obj.(*object.ObjFunction); ok {
-							for !done {
-								item := iterator.Current()
-								if jit.IsJittable(fn, globals) {
-									vm.push(initialValue)
-									vm.push(item)
-
-									jit.JITFunction(&vm.stack[vm.stackTop-2], &globals[0], fn)
-									vm.pop()
-									initialValue = vm.pop()
-
-								} else {
-									runner.push(initialValue)
-									runner.push(item)
-
-									f, c := runner.Call(fn, nil, value.UNDEFINED, argCount, calledWithSpread)
-									result, err := runner.run(f, c)
-
-									if err != nil {
-										return value.UNDEFINED, err
-									}
-
-									initialValue = result
+						vm.push(result)
+					}
+				case *native.StringConstructor:
+					{
+						if argCount == 0 {
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(""))))
+						} else {
+							arg := vm.pop()
+							if description, ok := native.SymbolDescription(arg); ok {
+								vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString("Symbol(" + description + ")"))))
+							} else {
+								s, err := vm.toStringValue(arg)
+								if err != nil {
+									return value.UNDEFINED, err
 								}
-
-								done = iterator.Next()
+								vm.push(s)
+							}
+						}
+					}
+				case *native.SymbolConstructor:
+					{
+						description := ""
+						if argCount > 0 {
+							arg := vm.pop()
+							if arg != value.UNDEFINED {
+								if s, ok := vm.valueAsString(arg); ok {
+									description = s
+								} else {
+									description = native.String(arg)
+								}
+							}
+						}
+						symbolValue := value.EncodeHandle(heap.Allocate(native.NewSymbol(description)))
+						native.RegisterSymbol(symbolValue)
+						vm.push(symbolValue)
+					}
+				case *native.SymbolFor:
+					{
+						description := ""
+						if argCount > 0 {
+							arg := vm.pop()
+							if s, ok := vm.valueAsString(arg); ok {
+								description = s
+							} else {
+								description = native.String(arg)
+							}
+						}
+						vm.push(native.SymbolForDescription(description))
+					}
+				case *native.SymbolKeyFor:
+					{
+						result := value.UNDEFINED
+						if argCount > 0 {
+							arg := vm.pop()
+							if description, ok := native.SymbolDescription(arg); ok {
+								if _, found := native.SymbolKeyForDescription(description); found {
+									result = value.EncodeHandle(heap.Allocate(native.NewLightString(description)))
+								}
+							} else {
+								errValue := vm.makeError("TypeError", "Symbol.keyFor requires a symbol")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+						}
+						vm.push(result)
+					}
+				case *native.ArrayConstructor:
+					{
+						args := vm.popN(argCount)
+						params := make([]any, len(args))
+						for i, arg := range args {
+							params[i] = arg
+						}
+						obj, err := fn.New(params...)
+						if err != nil {
+							errValue := vm.makeError("RangeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(obj)))
+					}
+				case *native.ObjectConstructor:
+					{
+						if argCount > 0 {
+							arg := vm.pop()
+							if arg.IsObject() {
+								vm.push(arg)
+							} else {
+								vm.push(value.EncodeHandle(heap.Allocate(native.NewObject())))
 							}
 						} else {
-							return value.UNDEFINED, fmt.Errorf("callback was not a function %s", native.String(callback))
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewObject())))
 						}
-						vm.push(initialValue)
+					}
+				case *native.ArrayMethod:
+					{
+						result, err := vm.callArrayMethod(fn, thisCtx, argCount)
+						if err != nil {
+							name := "TypeError"
+							if fn.Kind == native.ARRAY_WITH {
+								name = "RangeError"
+							}
+							errValue := vm.makeError(name, err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ArrayCallbackMethod:
+					{
+						result, err := vm.callArrayCallbackMethod(fn, thisCtx, argCount)
+						if err != nil {
+							errValue := vm.makeError("Error", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ArrayStaticMethod:
+					{
+						result, err := vm.callArrayStaticMethod(fn, argCount)
+						if err != nil {
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case *native.ArrayJoin:
 					{
@@ -2613,6 +3051,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						vm.push(fn.Replace(owner, search.String(), replace.String()))
 					}
+				case *native.ObjectValueOf:
+					{
+						vm.push(thisCtx)
+					}
 				case *native.ToString:
 					{
 						this, _ := heap.GetObject(thisCtx.GetHandle())
@@ -2705,6 +3147,62 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						o := native.NewObjectFromObject(arg)
 						vm.push(value.EncodeHandle(heap.Allocate(o)))
 					}
+				case *native.ObjectMethod:
+					{
+						result, err := vm.callObjectMethod(fn, argCount)
+						if err != nil {
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ObjectGetOwnPropertySymbols:
+					{
+						target := vm.pop()
+						symbols := fn.Symbols(target)
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(symbols))))
+					}
+				case *native.ObjectGetOwnPropertyNames:
+					{
+						target := vm.pop()
+						names := fn.Names(target)
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(names))))
+					}
+				case *native.ObjectDefineProperty:
+					{
+						descriptor := vm.pop()
+						key := vm.pop()
+						target := vm.pop()
+						result := fn.Define(target, key, descriptor)
+						if result == value.UNDEFINED {
+							errValue := vm.makeError("TypeError", "Cannot redefine property")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ObjectGetOwnPropertyDescriptor:
+					{
+						key := vm.pop()
+						target := vm.pop()
+						vm.push(fn.Descriptor(target, key))
+					}
+				case *native.ObjectGetPrototypeOf:
+					{
+						target := vm.pop()
+						vm.push(fn.GetPrototypeOf(target))
+					}
+				case *native.ObjectSetPrototypeOf:
+					{
+						proto := vm.pop()
+						target := vm.pop()
+						vm.push(fn.SetPrototypeOf(target, proto))
+					}
 				case *native.ObjectHasOwn:
 					{
 						prop := vm.pop()
@@ -2795,6 +3293,36 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						callable, ok := obj.(object.Callable)
 						if !ok {
+							switch nativeFn := obj.(type) {
+							case *native.ArrayMethod:
+								for _, arg := range rest {
+									vm.push(arg)
+								}
+								result, err := vm.callArrayMethod(nativeFn, thisArg, len(rest))
+								if err != nil {
+									errValue := vm.makeError("Error", err.Error())
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+								vm.push(result)
+								continue
+							case *native.ArrayCallbackMethod:
+								for _, arg := range rest {
+									vm.push(arg)
+								}
+								result, err := vm.callArrayCallbackMethod(nativeFn, thisArg, len(rest))
+								if err != nil {
+									errValue := vm.makeError("Error", err.Error())
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+								vm.push(result)
+								continue
+							}
 							errValue := vm.makeError("TypeError", "Value is not callable")
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
@@ -3051,92 +3579,98 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_GET_ITERATOR:
 			{
-
-				iteratee := vm.peek()
+				iteratee := vm.pop()
 				type_ := c.Code[ip]
 				ip++
-
-				if !iteratee.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iteratee))
-				}
-
-				obj, err := heap.GetObject(iteratee.GetHandle())
-
+				iterator, err := vm.acquireIterator(iteratee, type_)
 				if err != nil {
-					return value.UNDEFINED, err
-				}
-
-				if _, ok := obj.(*object.Iterator); ok {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
 					continue
 				}
-
-				vm.pop()
-
-				iteratorObj, ok := obj.(object.Iterable)
-
-				if !ok {
-					return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iteratee))
-				}
-
-				var iterator *object.Iterator
-
-				if type_ == compiler.ITERATOR_FOR_IN {
-					iterator = object.NewKeyIterator(iteratorObj)
-				} else {
-					iterator = object.NewValueIterator(iteratorObj)
-				}
-
-				vm.push(value.EncodeHandle(heap.Allocate(iterator)))
+				vm.push(iterator)
 			}
 		case chunk.OP_ITERATOR_NEXT:
 			{
 				iterator := vm.peek()
-
-				if !iterator.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iterator))
-				}
-
-				obj, err := heap.GetObject(iterator.GetHandle())
-
+				done, err := vm.iteratorNext(iterator)
 				if err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
-
-				iteratorObj, ok := obj.(*object.Iterator)
-
-				if !ok {
-					return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iterator))
-				}
-
-				done := iteratorObj.Next()
-
-				if done {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
-				}
+				vm.push(boolValue(done))
 			}
 		case chunk.OP_ITERATOR_CURRENT:
 			{
 				iterator := vm.peek()
-
-				if !iterator.IsObject() {
-					return value.UNDEFINED, fmt.Errorf("%s is not an object", native.String(iterator))
-				}
-
-				obj, err := heap.GetObject(iterator.GetHandle())
-
+				current, err := vm.iteratorCurrent(iterator)
 				if err != nil {
 					return value.UNDEFINED, err
 				}
-
-				iteratorObj, ok := obj.(*object.Iterator)
-
-				if !ok {
-					return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iterator))
+				vm.push(current)
+			}
+		case chunk.OP_ITERATOR_VALUE_OR_UNDEFINED:
+			{
+				done := vm.pop()
+				iterator := vm.peek()
+				if truthyValue(done) {
+					vm.push(value.UNDEFINED)
+				} else {
+					current, err := vm.iteratorCurrent(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					vm.push(current)
 				}
-
-				vm.push(iteratorObj.Current())
+			}
+		case chunk.OP_ITERATOR_REST:
+			{
+				iterator := vm.peek()
+				items := []value.Value{}
+				for {
+					done, err := vm.iteratorNext(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if done {
+						break
+					}
+					current, err := vm.iteratorCurrent(iterator)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					items = append(items, current)
+				}
+				vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(items))))
+			}
+		case chunk.OP_ITERATOR_CLOSE_POP:
+			{
+				iterator := vm.pop()
+				if err := vm.closeIterator(iterator); err != nil {
+					errValue := vm.makeError("Error", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+			}
+		case chunk.OP_ITERATOR_CLOSE_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				iterator := vm.stack[f.localStart+slot]
+				if err := vm.closeIterator(iterator); err != nil {
+					errValue := vm.makeError("Error", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 			}
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
@@ -3197,6 +3731,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				switch ctor := obj.(type) {
+				case *native.SymbolConstructor:
+					{
+						errValue := vm.makeError("TypeError", "Symbol is not a constructor")
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
 				case *native.ObjClass:
 					{
 						instance := ctor.NewInstance()
@@ -3561,13 +4103,59 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				newObj := native.NewObjectHash()
 
-				for _, k := range obj.(*native.ObjObject).Keys() {
-					if k == native.KEY_PROTO {
-						continue
+				if src, ok := obj.(*native.ObjObject); ok {
+					for keyString, entry := range src.Members {
+						if keyString == native.PROTOTYPE_PROPERTY_STRING || !entry.Enumerable() {
+							continue
+						}
+						k := keyValueFromString(keyString)
+						if k.IsObject() {
+							ptr := value.EncodeHandle(heap.GetPointer(k.GetHandle()))
+							if _, found := exludeMap[ptr]; found {
+								continue
+							}
+						}
+						v, err := vm.getMemberValue(origin, k)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						newObj.SetMember(k, v)
 					}
-					ptr := value.EncodeHandle(heap.GetPointer(k.GetHandle()))
-					if _, found := exludeMap[ptr]; !found {
-						newObj.SetMember(k, obj.(*native.ObjObject).GetMember(k))
+				}
+				vm.push(value.EncodeHandle(heap.Allocate(newObj)))
+			}
+		case chunk.OP_CREATE_REST_OBJECT_DYNAMIC:
+			{
+				count := int(c.Code[ip])
+				ip++
+				excluded := make([]value.Value, count)
+				for i := count - 1; i >= 0; i-- {
+					excluded[i] = vm.pop()
+				}
+				origin := vm.pop()
+				obj, _ := heap.GetObject(origin.GetHandle())
+				newObj := native.NewObjectHash()
+				if src, ok := obj.(*native.ObjObject); ok {
+					for keyString, entry := range src.Members {
+						if keyString == native.PROTOTYPE_PROPERTY_STRING || !entry.Enumerable() {
+							continue
+						}
+						k := keyValueFromString(keyString)
+						skip := false
+						for _, ex := range excluded {
+							if strictEquals(k, ex) {
+								skip = true
+								break
+							}
+						}
+						if skip {
+							continue
+						}
+						v, err := vm.getMemberValue(origin, k)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						newObj.SetMember(k, v)
 					}
 				}
 				vm.push(value.EncodeHandle(heap.Allocate(newObj)))
@@ -3580,12 +4168,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				dstObj, _ := heap.GetObject(destination.GetHandle())
 
-				for _, k := range obj.(*native.ObjObject).Keys() {
-					if k == native.KEY_PROTO {
-						continue
+				if src, ok := obj.(*native.ObjObject); ok {
+					if dst, ok := dstObj.(*native.ObjObject); ok {
+						for keyString, entry := range src.Members {
+							if keyString == native.PROTOTYPE_PROPERTY_STRING || !entry.Enumerable() {
+								continue
+							}
+							k := keyValueFromString(keyString)
+							v, err := vm.getMemberValue(source, k)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							dst.SetMember(k, v)
+						}
 					}
-
-					dstObj.(*native.ObjObject).SetMember(k, obj.(*native.ObjObject).GetMember(k))
 				}
 			}
 		}
