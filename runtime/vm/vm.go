@@ -53,6 +53,7 @@ type CallFrame struct {
 	returnIp   int
 	heapScope  int
 	ownScope   bool
+	newTarget  value.Value
 }
 
 func InitFileRoot(path string) {
@@ -66,6 +67,7 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 	cf.thisCtx = this
 	cf.heapScope = fn.GetHeapScope()
 	cf.ownScope = false
+	cf.newTarget = value.UNDEFINED
 }
 
 type JSException struct {
@@ -588,6 +590,29 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 	return v
 }
 
+func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget value.Value) (value.Value, error) {
+	instance := native.NewObject()
+	if fn, ok := callable.(*object.ObjFunction); ok && fn.Prototype.IsObject() {
+		instance.SetPrototypeValue(fn.Prototype)
+	}
+	instanceValue := value.EncodeHandle(heap.Allocate(instance))
+	runner := NewVM(false, vm.output)
+	for _, arg := range args {
+		runner.push(arg)
+	}
+	f, c := runner.Call(callable, nil, instanceValue, len(args), false)
+	f.newTarget = newTarget
+	runner.frames[runner.frameCount-1].newTarget = newTarget
+	result, err := runner.run(f, c)
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	if result.IsObject() {
+		return result, nil
+	}
+	return instanceValue, nil
+}
+
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
 	obj, err := heap.GetObject(fn.GetHandle())
 	if err != nil {
@@ -632,6 +657,12 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 	}
 	if k, ok := vm.valueAsString(key); ok {
 		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
+	}
+	if fn, ok := obj.(*object.ObjFunction); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "prototype" {
+			fn.Prototype = v
+			return nil
+		}
 	}
 	if arr, ok := obj.(*native.ObjArr); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "length" {
@@ -784,11 +815,17 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 			case "name":
 				return value.EncodeHandle(heap.Allocate(native.NewLightString(fn.Name))), nil
 			case "length":
-				return value.ValueFromFloat64(float64(fn.GetArity())), nil
+				return value.ValueFromFloat64(float64(fn.Length)), nil
 			case "prototype":
-				if fn.Prototype.IsObject() {
-					return fn.Prototype, nil
+				if fn.IsArrow || fn.IsMethod {
+					return value.UNDEFINED, nil
 				}
+				if !fn.Prototype.IsObject() {
+					proto := native.NewObject()
+					proto.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("constructor"))), objValue)
+					fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
+				}
+				return fn.Prototype, nil
 			}
 		}
 	}
@@ -4136,6 +4173,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							clone.SetHeapScope(f.heapScope)
 							if clone.IsArrow {
 								clone.LexicalThis = f.thisCtx
+								if outer, ok := f.fn.(*object.ObjFunction); ok && outer.IsArrow {
+									clone.LexicalNewTarget = outer.LexicalNewTarget
+								} else {
+									clone.LexicalNewTarget = f.newTarget
+								}
 							}
 							vm.push(value.EncodeHandle(heap.Allocate(clone)))
 						}
@@ -4257,6 +4299,63 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, fmt.Errorf("contructor was not an function %s", native.String(ctor))
 						}
 
+					}
+				case *object.ObjFunction:
+					{
+						if ctor.IsArrow || ctor.IsMethod {
+							errValue := vm.makeError("TypeError", "Value is not a constructor")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						args := vm.popN(int(argCount))
+						result, err := vm.construct(ctor, args, callee)
+						if err != nil {
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ObjBoundFunction:
+					{
+						args := vm.popN(int(argCount))
+						target := ctor.Target
+						allArgs := append(append([]value.Value{}, ctor.Args...), args...)
+						if targetObj, err := heap.GetObject(target.GetHandle()); err == nil {
+							if inner, ok := targetObj.(*native.ObjBoundFunction); ok {
+								target = inner.Target
+								allArgs = append(append([]value.Value{}, inner.Args...), allArgs...)
+							}
+						}
+						targetObj, err := heap.GetObject(target.GetHandle())
+						if err != nil {
+							errValue := vm.makeError("TypeError", "Value is not a constructor")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						callable, ok := targetObj.(object.Callable)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Value is not a constructor")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						result, err := vm.construct(callable, allArgs, callee)
+						if err != nil {
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case native.Constructor:
 					{
@@ -4485,6 +4584,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(fn.LexicalThis)
 				} else {
 					vm.push(f.thisCtx)
+				}
+			}
+		case chunk.OP_NEW_TARGET:
+			{
+				if fn, ok := f.fn.(*object.ObjFunction); ok && fn.IsArrow {
+					vm.push(fn.LexicalNewTarget)
+				} else {
+					vm.push(f.newTarget)
 				}
 			}
 		case chunk.OP_YIELD:

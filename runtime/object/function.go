@@ -17,11 +17,14 @@ type ObjFunction struct {
 	Name      string
 	Chunk     *value.ValueChunk
 	Arity     int
+	Length    int
 	HeapScope int
 	Prototype value.Value
 	Strict    bool
 	IsArrow   bool
+	IsMethod  bool
 	LexicalThis value.Value
+	LexicalNewTarget value.Value
 	rest      bool
 	arguments bool
 }
@@ -36,6 +39,7 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 		Name:      name,
 		Chunk:     chunk,
 		Arity:     arity,
+		Length:    arity,
 		HeapScope: NOT_IN_HEAP_SCOPE,
 	}
 }

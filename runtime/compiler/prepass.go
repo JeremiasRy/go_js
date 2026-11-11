@@ -50,6 +50,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, node := range current.Body {
 			prePass(node, symbolTable)
 		}
+	case parser.NODE_ASSIGNMENT_PATTERN:
+		prePass(current.Left, symbolTable)
+		prePass(current.Right, symbolTable)
 	case parser.NODE_BINARY_EXPRESSION:
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
@@ -85,13 +88,16 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				symbolTable.addVariable(param.Name, LET, false, nil)
 			case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
 				addPatternVariables(param, LET, symbolTable)
+				if param.Type == parser.NODE_ASSIGNMENT_PATTERN {
+					prePass(param.Right, symbolTable)
+				}
 			case parser.NODE_REST_ELEMENT:
 				symbolTable.hasRestParameter = true
 				switch param.Argument.Type {
 				case parser.NODE_IDENTIFIER:
 					symbolTable.addVariable(param.Argument.Name, LET, false, nil)
 				default:
-					panic("unsupported rest element argument")
+					addPatternVariables(param.Argument, LET, symbolTable)
 				}
 			}
 		}
@@ -137,13 +143,16 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				symbolTable.addVariable(param.Name, LET, false, nil)
 			case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
 				addPatternVariables(param, LET, symbolTable)
+				if param.Type == parser.NODE_ASSIGNMENT_PATTERN {
+					prePass(param.Right, symbolTable)
+				}
 			case parser.NODE_REST_ELEMENT:
 				symbolTable.hasRestParameter = true
 				switch param.Argument.Type {
 				case parser.NODE_IDENTIFIER:
 					symbolTable.addVariable(param.Argument.Name, LET, false, nil)
 				default:
-					panic("unsupported rest element argument")
+					addPatternVariables(param.Argument, LET, symbolTable)
 				}
 			}
 		}
@@ -187,13 +196,16 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					symbolTable.addVariable(param.Name, LET, false, nil)
 				case parser.NODE_ASSIGNMENT_PATTERN, parser.NODE_ARRAY_PATTERN, parser.NODE_OBJECT_PATTERN:
 					addPatternVariables(param, LET, symbolTable)
+					if param.Type == parser.NODE_ASSIGNMENT_PATTERN {
+						prePass(param.Right, symbolTable)
+					}
 				case parser.NODE_REST_ELEMENT:
 					symbolTable.hasRestParameter = true
 					switch param.Argument.Type {
 					case parser.NODE_IDENTIFIER:
 						symbolTable.addVariable(param.Argument.Name, LET, false, nil)
 					default:
-						panic("unsupported rest element argument")
+						addPatternVariables(param.Argument, LET, symbolTable)
 					}
 				}
 			}

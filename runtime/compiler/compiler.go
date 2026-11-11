@@ -158,6 +158,7 @@ var finalizerStack = []*parser.Node{}
 var chainJumpStack = [][]int{}
 var pendingLoopLabel = ""
 var wantMethodHandle = false
+var nextFunctionIsMethod = false
 
 func currentLoop() *Loop {
 	if len(loopStack) == 0 {
@@ -911,6 +912,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				fn = nextFn.fn
+				if objFn, ok := fn.(*object.ObjFunction); ok {
+					objFn.Length = functionLength(current.Params)
+				}
 				if symbolTable.hasRestParameter && symbolTable.needsArguments {
 					log.Fatal("Let's not do both arguments anr rest parameter")
 				}
@@ -998,6 +1002,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 				newFn.Strict = module || nodeHasUseStrict(current)
 				newFn.IsArrow = true
+				newFn.Length = functionLength(current.Params)
 
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
@@ -1088,6 +1093,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				markParamsDeclared(current.Params, symbolTable)
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 				newFn.Strict = module || nodeHasUseStrict(current)
+				newFn.IsMethod = nextFunctionIsMethod
+				newFn.Length = functionLength(current.Params)
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
 				}
@@ -1283,6 +1290,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_THIS_EXPRESSION:
 			{
 				fn.ValueChunk().EmitByte(chunk.OP_THIS)
+			}
+		case parser.NODE_META_PROPERTY:
+			{
+				fn.ValueChunk().EmitByte(chunk.OP_NEW_TARGET)
 			}
 		case parser.NODE_VARIABLE_DECLARATOR:
 			{
@@ -2048,7 +2059,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 								fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key)))))
 							})
 						}
+						if property.IsMethod || property.Kind == parser.KIND_PROPERTY_GET || property.Kind == parser.KIND_PROPERTY_SET {
+							nextFunctionIsMethod = true
+						}
 						generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
+						nextFunctionIsMethod = false
 
 						switch property.Kind {
 						case parser.KIND_PROPERTY_GET:
@@ -2343,6 +2358,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				function := current.Value.(*parser.Node)
 				method := object.NewFunction(fmt.Sprintf("Class method %s", name), len(function.Params), nil)
 				method.Strict = true
+				method.IsMethod = true
+				method.Length = functionLength(function.Params)
 				markParamsDeclared(function.Params, symbolTable)
 
 				if symbolTable.hasHeapVars {
@@ -2889,6 +2906,17 @@ func patternValueNode(node *parser.Node) *parser.Node {
 		return node.Left
 	}
 	return node
+}
+
+func functionLength(params []*parser.Node) int {
+	length := 0
+	for _, param := range params {
+		if param == nil || param.Type == parser.NODE_ASSIGNMENT_PATTERN || param.Type == parser.NODE_REST_ELEMENT {
+			break
+		}
+		length++
+	}
+	return length
 }
 
 func emitVarInitializers(symbolTable *FunctionScope, fn object.Callable) {
