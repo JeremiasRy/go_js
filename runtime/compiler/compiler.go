@@ -585,7 +585,13 @@ func (p *PopRValue) pop() {
 	p.s = p.s[:len(p.s)-1]
 }
 
+func SetModule(isModule bool) {
+	module = isModule
+}
+
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
+	savedStrict := strictContext
+	strictContext = module
 	setup := object.NewFunction(object.SETUP_FN_NAME, 0, nil)
 	setup.ValueChunk().SetCompTimeAstId(INITIAL_SETUP_AST_ID)
 	defineObjectConstructor(setup, global)
@@ -625,17 +631,19 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	}
 	generateByteCode(ast, global, main)
 	main.ValueChunk().EmitByte(chunk.OP_RETURN)
+	strictContext = savedStrict
 
 	return setup, nil
 }
 
 func CompileModule(src string) (*object.ObjFunction, error) {
+	savedModule := module
 	module = true
 	main := object.NewFunction(fmt.Sprintf("MODULE %s", src), 0, nil)
 	generateByteCode(imports[src], global, main)
 
 	main.ValueChunk().EmitByte(chunk.OP_RETURN)
-	module = false
+	module = savedModule
 	return main, nil
 }
 
@@ -672,23 +680,33 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		switch current.Type {
 		case parser.NODE_PROGRAM:
 			{
-				functions := []*Variable{}
-				for _, variable := range symbolTable.vars {
+				type functionEntry struct {
+					name     string
+					variable *Variable
+				}
+				functions := []functionEntry{}
+				for name, variable := range symbolTable.vars {
 					if variable.type_ == FUNCTION {
-						functions = append(functions, variable)
+						functions = append(functions, functionEntry{name, variable})
 					}
 				}
 
-				slices.SortFunc(functions, func(a *Variable, b *Variable) int {
-					return cmp.Compare(a.slot, b.slot)
+				slices.SortFunc(functions, func(a, b functionEntry) int {
+					return cmp.Compare(a.variable.slot, b.variable.slot)
 				})
 
-				for _, variable := range functions {
+				for _, entry := range functions {
+					variable := entry.variable
 					if !variable.allocated {
 						fnValue := heap.Allocate(variable.fn)
 
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+						if module {
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+						} else {
+							name := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(entry.name))))
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot), name)
+						}
 						variable.allocated = true
 					}
 				}
@@ -1562,19 +1580,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if variable == nil {
-					if !module {
-						arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
-						fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL_BY_NAME, arg)
-						return
-					}
-					msg := value.EncodeHandle(heap.Allocate(native.NewLightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
-
-					err := native.NewError()
-					err.SetMember(native.KEY_MESSAGE, msg)
-					err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString("ReferenceError"))))
-
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
-					fn.ValueChunk().EmitByte(chunk.OP_THROW)
+					arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL_BY_NAME, arg)
 					return
 				}
 

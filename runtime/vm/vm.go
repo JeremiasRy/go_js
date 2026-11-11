@@ -2459,6 +2459,33 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				globals[global] = v
 			}
+		case chunk.OP_SET_GLOBAL_NAMED:
+			{
+				global := c.Code[ip]
+				ip++
+				name := c.Constants[c.Code[ip]]
+				ip++
+				if int(global) >= globalsCount {
+					for len(globals) <= int(global) {
+						globals = append(globals, value.UNINITIALIZED)
+					}
+					globalsCount = int(global) + 1
+				}
+				v := vm.pop()
+				if v.IsObject() {
+					obj, err := heap.GetObject(v.GetHandle())
+					if err != nil {
+						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_SET_GLOBAL_NAMED %s", err)
+					}
+					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+						v = value.EncodeHandle(heap.Allocate(fn.Clone()))
+					}
+				}
+				globals[global] = v
+				globalValue := vm.ensureGlobalObject()
+				globalObj, _ := heap.GetObject(globalValue.GetHandle())
+				globalObj.(object.Hashable).SetMember(name, v)
+			}
 		case chunk.OP_POP_LOCAL:
 			{
 				vm.stackTop--
