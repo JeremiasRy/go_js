@@ -7,8 +7,13 @@ import (
 	"go_js/value"
 )
 
+type HeapScope struct {
+	Parent int
+	Values []value.Value
+}
+
 type Heap struct {
-	heapVars       map[int][]value.Value
+	heapVars       map[int]*HeapScope
 	heapScopeCount int
 
 	handleLayer map[uint32]uint32
@@ -27,7 +32,7 @@ type Heap struct {
 }
 
 var a = &Heap{
-	heapVars:       map[int][]value.Value{},
+	heapVars:       map[int]*HeapScope{},
 	heapScopeCount: 0,
 	handleLayer:    map[uint32]uint32{},
 	handleCount:    0,
@@ -47,17 +52,18 @@ func ShouldRunGCCycle() bool {
 	return a.shouldRunGCCycle()
 }
 
-func GetHeapVar(scope, slot int) value.Value {
-	return a.getHeapVar(scope, slot)
+func GetHeapVar(scope, depth, slot int) value.Value {
+	return a.getHeapVar(scope, depth, slot)
 }
 
-func HasHeapVar(scope, slot int) bool {
+func HasHeapVar(scope, depth, slot int) bool {
+	scope = a.resolveScope(scope, depth)
 	values, found := a.heapVars[scope]
-	return found && slot >= 0 && slot < len(values)
+	return found && slot >= 0 && slot < len(values.Values)
 }
 
-func SetHeapVar(scope, slot int, v value.Value) {
-	a.setHeapVar(scope, slot, v)
+func SetHeapVar(scope, depth, slot int, v value.Value) {
+	a.setHeapVar(scope, depth, slot, v)
 }
 
 func DefineHeapVar(scope int, v value.Value) {
@@ -68,18 +74,39 @@ func DefineHeapVarAt(scope, slot int, v value.Value) {
 	a.defineHeapVarAt(scope, slot, v)
 }
 
-func CreateHeapScope() (scope int) {
-	scope = a.createHeapScope()
+func CreateHeapScope(parent int) (scope int) {
+	scope = a.createHeapScope(parent)
 	return scope
 }
 
+func ScopeValues(scope int) []value.Value {
+	if s, found := a.heapVars[scope]; found {
+		return s.Values
+	}
+	return nil
+}
+
+func ParentScope(scope int) int {
+	if s, found := a.heapVars[scope]; found {
+		return s.Parent
+	}
+	return 0
+}
+
 func CopyHeapScope(old int) (scope int) {
-	scope = a.createHeapScope()
+	scope = a.createHeapScope(0)
 	if old > 0 {
 		values := a.heapVars[old]
-		copied := make([]value.Value, len(values))
-		copy(copied, values)
-		a.heapVars[scope] = copied
+		copied := make([]value.Value, len(values.Values))
+		copy(copied, values.Values)
+		a.heapVars[scope] = &HeapScope{Parent: values.Parent, Values: copied}
+	}
+	return scope
+}
+
+func (a *Heap) resolveScope(scope, depth int) int {
+	for i := 0; i < depth && scope > 0; i++ {
+		scope = a.heapVars[scope].Parent
 	}
 	return scope
 }
@@ -91,28 +118,37 @@ func (a *Heap) shouldRunGCCycle() bool {
 	return a.handleCount%a.gcCycleDeterminator == 0
 }
 
-func (a *Heap) getHeapVar(scope, slot int) value.Value {
-	return a.heapVars[scope][slot]
+func (a *Heap) getHeapVar(scope, depth, slot int) value.Value {
+	scope = a.resolveScope(scope, depth)
+	values := a.heapVars[scope]
+	if values == nil || slot < 0 || slot >= len(values.Values) {
+		return value.UNINITIALIZED
+	}
+	return values.Values[slot]
 }
 
-func (a *Heap) setHeapVar(scope, slot int, v value.Value) {
-	a.heapVars[scope][slot] = v
+func (a *Heap) setHeapVar(scope, depth, slot int, v value.Value) {
+	scope = a.resolveScope(scope, depth)
+	for len(a.heapVars[scope].Values) <= slot {
+		a.heapVars[scope].Values = append(a.heapVars[scope].Values, value.UNINITIALIZED)
+	}
+	a.heapVars[scope].Values[slot] = v
 }
 
 func (a *Heap) defineHeapVar(scope int, v value.Value) {
-	a.heapVars[scope] = append(a.heapVars[scope], v)
+	a.heapVars[scope].Values = append(a.heapVars[scope].Values, v)
 }
 
 func (a *Heap) defineHeapVarAt(scope, slot int, v value.Value) {
-	for len(a.heapVars[scope]) <= slot {
-		a.heapVars[scope] = append(a.heapVars[scope], value.UNDEFINED)
+	for len(a.heapVars[scope].Values) <= slot {
+		a.heapVars[scope].Values = append(a.heapVars[scope].Values, value.UNINITIALIZED)
 	}
-	a.heapVars[scope][slot] = v
+	a.heapVars[scope].Values[slot] = v
 }
 
-func (a *Heap) createHeapScope() (scope int) {
+func (a *Heap) createHeapScope(parent int) (scope int) {
 	a.heapScopeCount++
-	a.heapVars[a.heapScopeCount] = []value.Value{}
+	a.heapVars[a.heapScopeCount] = &HeapScope{Parent: parent}
 	scope = a.heapScopeCount
 	return scope
 }
@@ -213,10 +249,12 @@ func markAndSweep(stackValues []value.Value) {
 		for _, v := range current.GetReferencingValues() {
 			obj, _ := GetObject(v.GetHandle())
 			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
-				for _, v := range a.heapVars[fn.HeapScope] {
-					if v.IsObject() {
-						obj, _ := GetObject(v.GetHandle())
-						pushGrey(obj)
+				if scope, found := a.heapVars[fn.HeapScope]; found {
+					for _, v := range scope.Values {
+						if v.IsObject() {
+							obj, _ := GetObject(v.GetHandle())
+							pushGrey(obj)
+						}
 					}
 				}
 			}
@@ -244,12 +282,6 @@ func (a *Heap) sweep() {
 				fmt.Println("Cleaning up:", obj.String())
 			}
 			a.freeList[uint32(i)] = struct{}{}
-			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
-				if flags.Debug {
-					fmt.Println("removing heap scope", fn.HeapScope)
-				}
-				delete(a.heapVars, fn.HeapScope)
-			}
 		}
 	}
 

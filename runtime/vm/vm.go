@@ -49,6 +49,8 @@ type CallFrame struct {
 	thisCtx    value.Value
 	localStart int
 	returnIp   int
+	heapScope  int
+	ownScope   bool
 }
 
 func InitFileRoot(path string) {
@@ -60,6 +62,8 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 	cf.localStart = localStart
 	cf.returnIp = returnIp
 	cf.thisCtx = this
+	cf.heapScope = fn.GetHeapScope()
+	cf.ownScope = false
 }
 
 type JSException struct {
@@ -561,6 +565,22 @@ func keyValueFromString(key string) value.Value {
 		}
 	}
 	return value.EncodeHandle(heap.Allocate(native.NewLightString(key)))
+}
+
+func cloneFunctionValue(v value.Value, scope int) value.Value {
+	if !v.IsObject() {
+		return v
+	}
+	obj, err := heap.GetObject(v.GetHandle())
+	if err != nil {
+		return v
+	}
+	if fn, ok := obj.(*object.ObjFunction); ok {
+		clone := fn.Clone().(*object.ObjFunction)
+		clone.SetHeapScope(scope)
+		return value.EncodeHandle(heap.Allocate(clone))
+	}
+	return v
 }
 
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
@@ -1568,6 +1588,13 @@ func (vm *VM) runGC() {
 			glob = append(glob, v)
 		}
 	}
+	for i := 0; i < vm.frameCount; i++ {
+		scope := vm.frames[i].heapScope
+		for scope > 0 {
+			glob = append(glob, heap.ScopeValues(scope)...)
+			scope = heap.ParentScope(scope)
+		}
+	}
 
 	heap.RequestGC(append(vm.stack[:vm.stackTop], glob...))
 }
@@ -2334,7 +2361,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					variable = vm.pop()
 					vm.pop() // pop this context
 				}
-				heap.DefineHeapVar(f.fn.GetHeapScope(), variable)
+				variable = cloneFunctionValue(variable, f.heapScope)
+				heap.DefineHeapVar(f.heapScope, variable)
 			}
 		case chunk.OP_DEFINE_HEAP_VAR_AT:
 			{
@@ -2345,27 +2373,39 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					variable = vm.pop()
 					vm.pop() // pop this context
 				}
-				heap.DefineHeapVarAt(f.fn.GetHeapScope(), slot, variable)
+				variable = cloneFunctionValue(variable, f.heapScope)
+				heap.DefineHeapVarAt(f.heapScope, slot, variable)
 			}
 		case chunk.OP_GET_HEAP_VAR:
 			{
+				depth := int(c.Code[ip])
+				ip++
 				slot := c.Code[ip]
 				ip++
-				if !heap.HasHeapVar(f.fn.GetHeapScope(), int(slot)) {
+				if !heap.HasHeapVar(f.heapScope, depth, int(slot)) {
 					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 						return value.UNDEFINED, err
 					}
 					continue
 				}
-				v := heap.GetHeapVar(f.fn.GetHeapScope(), int(slot))
+				v := heap.GetHeapVar(f.heapScope, depth, int(slot))
+				if v == value.UNINITIALIZED {
+					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				vm.push(v)
 			}
 		case chunk.OP_SET_HEAP_VAR:
 			{
+				depth := int(c.Code[ip])
+				ip++
 				slot := c.Code[ip]
 				ip++
-				heap.SetHeapVar(f.fn.GetHeapScope(), int(slot), vm.pop())
+				heap.SetHeapVar(f.heapScope, depth, int(slot), cloneFunctionValue(vm.pop(), f.heapScope))
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{
@@ -2383,9 +2423,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					switch obj := obj.(type) {
 					case *object.ObjFunction:
 						{
-							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								v = value.EncodeHandle(heap.Allocate(obj.Clone()))
-							}
+							v = cloneFunctionValue(v, f.heapScope)
 						}
 					case *native.ObjStringBuilder:
 						{
@@ -2448,12 +2486,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_GLOBAL %s", err)
 					}
-					switch obj := obj.(type) {
+					switch obj.(type) {
 					case *object.ObjFunction:
 						{
-							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								v = value.EncodeHandle(heap.Allocate(obj.Clone()))
-							}
+							v = cloneFunctionValue(v, f.heapScope)
 						}
 					}
 				}
@@ -2477,8 +2513,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_SET_GLOBAL_NAMED %s", err)
 					}
-					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-						v = value.EncodeHandle(heap.Allocate(fn.Clone()))
+					if _, ok := obj.(*object.ObjFunction); ok {
+						v = cloneFunctionValue(v, f.heapScope)
 					}
 				}
 				globals[global] = v
@@ -2526,21 +2562,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if err != nil {
 						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_LOCAL %s", err)
 					}
-					switch obj := obj.(type) {
+					switch obj.(type) {
 					case *object.ObjFunction:
 						{
-							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								vm.push(value.EncodeHandle(heap.Allocate(obj.Clone())))
-								vm.pop()
-							}
+							v = cloneFunctionValue(v, f.heapScope)
 						}
 					case *native.ObjPromise:
 						{
-							vm.push(obj.Value)
-							vm.pop()
+							v = obj.(*native.ObjPromise).Value
 						}
 					}
 				}
+				vm.stack[vm.stackTop] = v
 				vm.stackTop++
 			}
 		case chunk.OP_GET_LOCAL:
@@ -2564,9 +2597,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					switch obj := obj.(type) {
 					case *object.ObjFunction:
 						{
-							if obj.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-								v = value.EncodeHandle(heap.Allocate(obj.Clone()))
-							}
+							v = cloneFunctionValue(v, f.heapScope)
 						}
 					case *native.ObjStringBuilder:
 						{
@@ -2599,6 +2630,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				getter := vm.pop()
 				k := vm.pop()
+				getter = cloneFunctionValue(getter, f.heapScope)
 				objValue := vm.peek()
 				if objValue.IsObject() {
 					obj, _ := heap.GetObject(objValue.GetHandle())
@@ -2611,6 +2643,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				setter := vm.pop()
 				k := vm.pop()
+				setter = cloneFunctionValue(setter, f.heapScope)
 				objValue := vm.peek()
 				if objValue.IsObject() {
 					obj, _ := heap.GetObject(objValue.GetHandle())
@@ -2634,8 +2667,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, _ := heap.GetObject(v.GetHandle())
 
 					// check if we have a closure in hand
-					if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-						v = value.EncodeHandle(heap.Allocate(fn.Clone()))
+					if _, ok := obj.(*object.ObjFunction); ok {
+						v = cloneFunctionValue(v, f.heapScope)
 					}
 				}
 
@@ -4036,18 +4069,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
-				scope := heap.CreateHeapScope()
-				setHeapScopes(f.fn.ValueChunk(), scope)
-				f.fn.SetHeapScope(scope)
+				f.heapScope = heap.CreateHeapScope(f.heapScope)
+				f.ownScope = true
 			}
 		case chunk.OP_CLONE_FUNCTION:
 			{
 				v := vm.peek()
 				if v.IsObject() {
 					if obj, err := heap.GetObject(v.GetHandle()); err == nil {
-						if fn, ok := obj.(*object.ObjFunction); ok && (fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE || fn.IsArrow) {
+						if fn, ok := obj.(*object.ObjFunction); ok {
 							vm.pop()
 							clone := fn.Clone().(*object.ObjFunction)
+							clone.SetHeapScope(f.heapScope)
 							if clone.IsArrow {
 								clone.LexicalThis = f.thisCtx
 							}
@@ -4058,18 +4091,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_ENSURE_HEAP_SCOPE:
 			{
-				if f.fn.GetHeapScope() == object.NOT_IN_HEAP_SCOPE {
-					scope := heap.CreateHeapScope()
-					setHeapScopes(f.fn.ValueChunk(), scope)
-					f.fn.SetHeapScope(scope)
+				if !f.ownScope {
+					f.heapScope = heap.CreateHeapScope(f.heapScope)
+					f.ownScope = true
 				}
 			}
 		case chunk.OP_COPY_HEAP_SCOPE:
 			{
-				old := f.fn.GetHeapScope()
-				scope := heap.CopyHeapScope(old)
-				setHeapScopes(f.fn.ValueChunk(), scope)
-				f.fn.SetHeapScope(scope)
+				f.heapScope = heap.CopyHeapScope(f.heapScope)
 			}
 		case chunk.OP_TRY_BLOCK_START:
 			{
@@ -4299,9 +4328,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				for range amount {
 					idx := int(c.Code[ip])
-					removeMap[idx] = true
 					ip++
-					heap.DefineHeapVar(f.fn.GetHeapScope(), vm.stack[f.localStart+idx])
+					slot := int(c.Code[ip])
+					ip++
+					removeMap[idx] = true
+					heap.DefineHeapVarAt(f.heapScope, slot, vm.stack[f.localStart+idx])
 				}
 
 				localCount := (vm.stackTop - f.localStart) - int(amount)
@@ -4355,11 +4386,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(method))
 				}
 
-				if m, ok := methodObj.(object.Callable); ok {
-					if m.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
-						m = m.Clone()
-						method = value.EncodeHandle(heap.Allocate(m))
-					}
+				if _, ok := methodObj.(object.Callable); ok {
+					method = cloneFunctionValue(method, f.heapScope)
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s was not an function", native.String(method))
 				}

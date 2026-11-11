@@ -279,8 +279,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			oldSlot := variable.slot
 			compactBlockSlots(table, oldSlot)
 			variable.scope = HEAP
-			variable.slot = table.heapVarCount
-			table.heapVarCount++
+			variable.slot = allocateHeapSlot(table)
+			table.hasHeapVars = true
 		}
 	case parser.NODE_IF_STATEMENT:
 		prePass(current.Test, symbolTable)

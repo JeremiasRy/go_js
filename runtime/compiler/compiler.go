@@ -54,6 +54,7 @@ type Variable struct {
 	fn         object.Callable
 	allocated  bool // for imported functions
 	catchId    int
+	owner      *FunctionScope
 }
 
 var ThisVariable *Variable = &Variable{scope: THIS}
@@ -74,6 +75,7 @@ type FunctionScope struct {
 	hasRestParameter bool
 	needsArguments   bool
 	heapVarCount     int
+	hasHeapVars      bool
 }
 
 const (
@@ -356,7 +358,7 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 		return
 	}
 
-	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn, undeclared: undeclared}
+	variable := &Variable{scope: fs.tableScope, type_: type_, slot: -1, fn: fn, undeclared: undeclared, owner: fs}
 	mapToAddTo[name] = variable
 	if mapToAddTo != nil && fs.block == nil {
 		fs.varOrder = append(fs.varOrder, variable)
@@ -567,6 +569,12 @@ func defineBooleanConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 var module = false
 
+func allocateHeapSlot(owner *FunctionScope) int {
+	slot := owner.heapVarCount
+	owner.heapVarCount++
+	return slot
+}
+
 type PopRValue struct {
 	s []bool
 }
@@ -680,6 +688,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		switch current.Type {
 		case parser.NODE_PROGRAM:
 			{
+				if symbolTable.hasHeapVars {
+					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+				}
 				type functionEntry struct {
 					name     string
 					variable *Variable
@@ -835,10 +846,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							variable.undeclared = false
 							variable.declared = true
 						} else {
-							fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+							emitVarOp(fn, setOp, symbolTable, variable)
 						}
 					case parser.LOGICAL_AND_ASSIGN, parser.LOGICAL_OR_ASSIGN, parser.NULLISH_ASSIGN:
-						fn.ValueChunk().EmitBytes(getOp, variableOperand(variable), chunk.OP_DUP)
+						emitVarOp(fn, getOp, symbolTable, variable)
+						fn.ValueChunk().EmitByte(chunk.OP_DUP)
 						var jump uint8
 						switch operator {
 						case parser.LOGICAL_AND_ASSIGN:
@@ -856,18 +868,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						} else {
 							generateByteCode(current.Right, symbolTable, fn)
 							fn.ValueChunk().EmitByte(chunk.OP_DUP)
-							fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+							emitVarOp(fn, setOp, symbolTable, variable)
 						}
 						fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 						endJump := len(fn.ValueChunk().Code) - 4
 						fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
 						fn.ValueChunk().PatchUint32(uint32(endJump), uint32(len(fn.ValueChunk().Code)))
 					default:
-						fn.ValueChunk().EmitBytes(getOp, variableOperand(variable))
+						emitVarOp(fn, getOp, symbolTable, variable)
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(assignmentOpcode(operator))
 						fn.ValueChunk().EmitByte(chunk.OP_DUP)
-						fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+						emitVarOp(fn, setOp, symbolTable, variable)
 					}
 				}
 
@@ -886,7 +898,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				fn = nextFn.fn
-				isInHeapScopeAlready := symbolTable.isInHeapScope()
 				if symbolTable.hasRestParameter && symbolTable.needsArguments {
 					log.Fatal("Let's not do both arguments anr rest parameter")
 				}
@@ -899,16 +910,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.SetHasArguments()
 				}
 
+				if symbolTable.hasHeapVars {
+					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+				}
+
 				functions := []*Variable{}
 				for _, variable := range symbolTable.vars {
 					if variable.type_ == FUNCTION {
 						functions = append(functions, variable)
-					}
-
-					// if not in heap scope we'll create a new one
-					if !isInHeapScopeAlready && variable.scope == HEAP {
-						fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
-						isInHeapScopeAlready = true
 					}
 				}
 
@@ -935,14 +944,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						withAstTracking(n, fn, func() {
 							if v, found := symbolTable.vars[parameterName(n)]; found {
 								if v.scope == HEAP {
-									heapVars = append(heapVars, i)
+									heapVars = append(heapVars, i, v.slot)
 								}
 							}
 						})
 					}
 
 					if len(heapVars) > 0 {
-						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)))
+						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
 						for _, slot := range heapVars {
 							fn.ValueChunk().EmitByte(uint8(slot))
 						}
@@ -986,17 +995,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				handle := heap.Allocate(newFn)
 				v := value.EncodeHandle(handle)
 
+				if symbolTable.hasHeapVars {
+					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+				}
+
 				functions := []*Variable{}
-				isInHeapScopeAlready := symbolTable.isInHeapScope()
 				for _, variable := range symbolTable.vars {
 					if variable.type_ == FUNCTION {
 						functions = append(functions, variable)
-					}
-
-					// if not in heap scope we'll create a new one
-					if !isInHeapScopeAlready && variable.scope == HEAP {
-						newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
-						isInHeapScopeAlready = true
 					}
 				}
 
@@ -1022,14 +1028,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						withAstTracking(n, fn, func() {
 							if v, found := symbolTable.vars[parameterName(n)]; found {
 								if v.scope == HEAP {
-									heapVars = append(heapVars, i)
+									heapVars = append(heapVars, i, v.slot)
 								}
 							}
 						})
 					}
 
 					if len(heapVars) > 0 {
-						newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)))
+						newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
 						for _, slot := range heapVars {
 							newFn.ValueChunk().EmitByte(uint8(slot))
 						}
@@ -1070,6 +1076,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				handle := heap.Allocate(newFn)
 				v := value.EncodeHandle(handle)
+
+				if symbolTable.hasHeapVars {
+					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+				}
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -1575,8 +1585,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					oldSlot := variable.slot
 					compactBlockSlots(owner, oldSlot)
 					variable.scope = HEAP
-					variable.slot = owner.heapVarCount
-					owner.heapVarCount++
+					variable.slot = allocateHeapSlot(owner)
+					owner.hasHeapVars = true
 				}
 
 				if variable == nil {
@@ -1605,7 +1615,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case LOCAL:
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
 				case HEAP:
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
+					emitHeapAccess(fn, chunk.OP_GET_HEAP_VAR, symbolTable, variable)
 				}
 			}
 		case parser.NODE_WHILE_STATEMENT:
@@ -1741,7 +1751,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
 						setOp = chunk.OP_SET_LOCAL
 					case HEAP:
-						fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
+						emitHeapAccess(fn, chunk.OP_GET_HEAP_VAR, symbolTable, variable)
 						setOp = chunk.OP_SET_HEAP_VAR
 					}
 				}
@@ -1759,9 +1769,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Prefix {
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
 				}
-				fn.ValueChunk().EmitByte(setOp)
-				if variable.scope != THIS {
-					fn.ValueChunk().EmitByte(variableOperand(variable))
+				if variable.scope == HEAP {
+					emitHeapAccess(fn, setOp, symbolTable, variable)
+				} else {
+					fn.ValueChunk().EmitByte(setOp)
+					if variable.scope != THIS {
+						fn.ValueChunk().EmitByte(variableOperand(variable))
+					}
 				}
 				if popReturnValue.current() {
 					fn.ValueChunk().EmitByte(chunk.OP_POP)
@@ -2295,6 +2309,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				method.Strict = true
 				markParamsDeclared(function.Params, symbolTable)
 
+				if symbolTable.hasHeapVars {
+					method.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+				}
+
 				for _, node := range function.BodyNode.Body {
 					generateByteCode(node, symbolTable, method)
 				}
@@ -2547,7 +2565,7 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 						{
 							variable, _ := symbolTable.findVariable(declaration.Identifier.Name)
 							if variable.scope == HEAP {
-								fn.ValueChunk().EmitBytes(chunk.OP_SET_HEAP_VAR, uint8(variable.slot))
+								emitHeapAccess(fn, chunk.OP_SET_HEAP_VAR, symbolTable, variable)
 							} else {
 								fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
 							}
@@ -2583,7 +2601,12 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 
 								}
 
-								fn.ValueChunk().EmitBytes(chunk.OP_GET_OBJECT_MEMBER, defineOp, uint8(property.slot))
+								fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+								if property.scope == HEAP {
+									emitHeapAccess(fn, chunk.OP_SET_HEAP_VAR, symbolTable, property)
+								} else {
+									fn.ValueChunk().EmitBytes(defineOp, uint8(property.slot))
+								}
 
 							}
 							return
@@ -2600,13 +2623,13 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 								if element.Type == parser.NODE_REST_ELEMENT {
 									fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_REST)
 									variable, _ := symbolTable.findVariable(element.Argument.Name)
-									emitSetVariable(fn, variable)
+									emitSetVariable(fn, symbolTable, variable)
 									continue
 								}
 								fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_NEXT)
 								fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_VALUE_OR_UNDEFINED)
 								variable, _ := symbolTable.findVariable(element.Name)
-								emitSetVariable(fn, variable)
+								emitSetVariable(fn, symbolTable, variable)
 							}
 							fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_CLOSE_POP)
 							return
@@ -2671,7 +2694,7 @@ func emitAssignmentTarget(node *parser.Node, symbolTable *FunctionScope, fn obje
 	case parser.NODE_IDENTIFIER:
 		variable, _ := symbolTable.findVariable(node.Name)
 		if variable != nil {
-			emitSetVariable(fn, variable)
+			emitSetVariable(fn, symbolTable, variable)
 		}
 	case parser.NODE_MEMBER_EXPRESSION:
 		fn.ValueChunk().EmitByte(chunk.OP_SAVE_COMPLETION)
@@ -2830,7 +2853,7 @@ func patternValueNode(node *parser.Node) *parser.Node {
 	return node
 }
 
-func emitSetVariable(fn object.Callable, variable *Variable) {
+func emitSetVariable(fn object.Callable, symbolTable *FunctionScope, variable *Variable) {
 	var op uint8
 	switch variable.scope {
 	case GLOBAL:
@@ -2842,7 +2865,7 @@ func emitSetVariable(fn object.Callable, variable *Variable) {
 	case THIS:
 		op = chunk.OP_SET_LOCAL
 	}
-	fn.ValueChunk().EmitBytes(op, variableOperand(variable))
+	emitVarOp(fn, op, symbolTable, variable)
 }
 
 func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
@@ -2892,7 +2915,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 				case LOCAL:
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, variableOperand(variable))
 				case HEAP:
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, variableOperand(variable))
+					emitHeapAccess(fn, chunk.OP_GET_HEAP_VAR, symbolTable, variable)
 				}
 			} else {
 				fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
@@ -2915,7 +2938,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 		case parser.NODE_IDENTIFIER:
 			variable, _ := symbolTable.findVariable(node.Name)
 			if variable != nil {
-				emitSetVariable(fn, variable)
+				emitSetVariable(fn, symbolTable, variable)
 			}
 		case parser.NODE_ASSIGNMENT_PATTERN:
 			fn.ValueChunk().EmitByte(chunk.OP_DUP)
@@ -3144,14 +3167,15 @@ func emitParameterDefaults(params []*parser.Node, symbolTable *FunctionScope, fn
 			getOp = chunk.OP_GET_HEAP_VAR
 			setOp = chunk.OP_SET_HEAP_VAR
 		}
-		fn.ValueChunk().EmitBytes(getOp, variableOperand(variable), chunk.OP_DUP)
+		emitVarOp(fn, getOp, symbolTable, variable)
+		fn.ValueChunk().EmitByte(chunk.OP_DUP)
 		fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NOT_UNDEFINED, 0, 0, 0, 0)
 		skipJump := len(fn.ValueChunk().Code) - 4
 		fn.ValueChunk().EmitByte(chunk.OP_POP)
 		popReturnValue.push(false)
 		generateByteCode(param.Right, symbolTable, fn)
 		popReturnValue.pop()
-		fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+		emitVarOp(fn, setOp, symbolTable, variable)
 		fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
 	}
 }
@@ -3175,6 +3199,34 @@ func initializerLocalVariableCount(node *parser.Node, symbolTable *FunctionScope
 		}
 	}
 	return count
+}
+
+func heapDepth(current *FunctionScope, variable *Variable) int {
+	depth := -1
+	for scope := current; scope != nil; scope = scope.parent {
+		if scope.hasHeapVars {
+			depth++
+		}
+		if scope == variable.owner {
+			if depth < 0 {
+				return 0
+			}
+			return depth
+		}
+	}
+	return 0
+}
+
+func emitVarOp(fn object.Callable, op uint8, symbolTable *FunctionScope, variable *Variable) {
+	if op == chunk.OP_GET_HEAP_VAR || op == chunk.OP_SET_HEAP_VAR {
+		emitHeapAccess(fn, op, symbolTable, variable)
+		return
+	}
+	fn.ValueChunk().EmitBytes(op, variableOperand(variable))
+}
+
+func emitHeapAccess(fn object.Callable, op uint8, symbolTable *FunctionScope, variable *Variable) {
+	fn.ValueChunk().EmitBytes(op, uint8(heapDepth(symbolTable, variable)), uint8(variable.slot))
 }
 
 func compactBlockSlots(table *FunctionScope, oldSlot int) {
