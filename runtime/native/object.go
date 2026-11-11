@@ -8,8 +8,30 @@ import (
 )
 
 type ObjectValueEntry struct {
-	Value value.Value
-	init  int
+	Value           value.Value
+	init            int
+	Get             value.Value
+	Set             value.Value
+	accessor        bool
+	nonWritable     bool
+	nonEnumerable   bool
+	nonConfigurable bool
+}
+
+func (entry ObjectValueEntry) IsAccessor() bool {
+	return entry.accessor
+}
+
+func (entry ObjectValueEntry) Writable() bool {
+	return !entry.nonWritable
+}
+
+func (entry ObjectValueEntry) Enumerable() bool {
+	return !entry.nonEnumerable
+}
+
+func (entry ObjectValueEntry) Configurable() bool {
+	return !entry.nonConfigurable
 }
 
 type ObjObject struct {
@@ -18,11 +40,104 @@ type ObjObject struct {
 	Members map[string]ObjectValueEntry
 }
 
+func (o *ObjObject) GetOwnEntry(k value.Value) (ObjectValueEntry, bool) {
+	key, ok := objectKeyString(k)
+	if !ok {
+		return ObjectValueEntry{}, false
+	}
+	entry, found := o.Members[key]
+	return entry, found
+}
+
+func (o *ObjObject) SetAccessor(k, getter, setter value.Value) {
+	key, ok := objectKeyString(k)
+	if !ok {
+		return
+	}
+	entry, found := o.Members[key]
+	if !found {
+		entry.init = o.nextInit()
+		entry.Get = value.UNDEFINED
+		entry.Set = value.UNDEFINED
+	}
+	entry.accessor = true
+	if getter != value.UNDEFINED {
+		entry.Get = getter
+	}
+	if setter != value.UNDEFINED {
+		entry.Set = setter
+	}
+	o.Members[key] = entry
+}
+
+func (o *ObjObject) PrototypeValue() value.Value {
+	if entry, ok := o.Members[PROTOTYPE_PROPERTY_STRING]; ok {
+		return entry.Value
+	}
+	return value.NULL
+}
+
+func (o *ObjObject) SetPrototypeValue(proto value.Value) {
+	key := PROTOTYPE_PROPERTY_STRING
+	entry, found := o.Members[key]
+	if !found {
+		entry.init = o.nextInit()
+	}
+	entry.Value = proto
+	o.Members[key] = entry
+}
+
+func (o *ObjObject) nextInit() int {
+	o.init++
+	return o.init
+}
+
+func objectKeyString(k value.Value) (string, bool) {
+	if k.IsObject() {
+		obj, err := heap.GetObject(k.GetHandle())
+		if err != nil {
+			return "", false
+		}
+		switch obj := obj.(type) {
+		case *LightString:
+			return obj.String(), true
+		case *ObjString:
+			return obj.String(), true
+		case *ObjStringBuilder:
+			return obj.String(), true
+		}
+	}
+	if k.IsNumber() {
+		return strconv.FormatFloat(k.AsNumber(), 'f', -1, 64), true
+	}
+	return "", false
+}
+
+func (o *ObjObject) Delete(k value.Value) bool {
+	key, ok := objectKeyString(k)
+	if !ok {
+		return true
+	}
+	if entry, found := o.Members[key]; found {
+		if !entry.Configurable() {
+			return false
+		}
+		delete(o.Members, key)
+	}
+	return true
+}
+
 func (o *ObjObject) GetReferencingValues() []value.Value {
 	arr := []value.Value{}
 	for _, v := range o.Members {
 		if v.Value.IsObject() {
 			arr = append(arr, v.Value)
+		}
+		if v.Get.IsObject() {
+			arr = append(arr, v.Get)
+		}
+		if v.Set.IsObject() {
+			arr = append(arr, v.Set)
 		}
 	}
 	return arr
@@ -176,10 +291,13 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 			key := o.String()
 
 			if v, found := obj.Members[key]; found {
+				if v.accessor {
+					return v.Get
+				}
 				return v.Value
 			}
 
-			proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
+			proto := obj.PrototypeValue()
 
 			if proto.IsType(value.NULL) {
 				return value.UNDEFINED
@@ -201,10 +319,13 @@ func (obj *ObjObject) GetMember(k value.Value) value.Value {
 		key := strconv.FormatFloat(k.AsNumber(), 'f', -1, 64)
 
 		if v, found := obj.Members[key]; found {
+			if v.accessor {
+				return v.Get
+			}
 			return v.Value
 		}
 
-		proto := obj.Members[PROTOTYPE_PROPERTY_STRING].Value
+		proto := obj.PrototypeValue()
 
 		if proto.IsType(value.NULL) {
 			return value.UNDEFINED

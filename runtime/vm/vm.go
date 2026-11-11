@@ -401,6 +401,53 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 			return nil
 		}
 	}
+	if own, ok := obj.(interface {
+		GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
+		PrototypeValue() value.Value
+	}); ok {
+		if entry, found := own.GetOwnEntry(key); found {
+			if entry.IsAccessor() {
+				if entry.Set != value.UNDEFINED {
+					_, err := vm.callValue(entry.Set, objValue, []value.Value{v})
+					return err
+				}
+				return nil
+			}
+			if !entry.Writable() {
+				return nil
+			}
+		} else {
+			current := own.PrototypeValue()
+			for current.IsObject() {
+				currentObj, err := heap.GetObject(current.GetHandle())
+				if err != nil {
+					break
+				}
+				po, ok := currentObj.(interface {
+					GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
+					PrototypeValue() value.Value
+				})
+				if !ok {
+					break
+				}
+				if entry, found := po.GetOwnEntry(key); found {
+					if entry.IsAccessor() {
+						if entry.Set != value.UNDEFINED {
+							_, err := vm.callValue(entry.Set, objValue, []value.Value{v})
+							return err
+						}
+						return nil
+					}
+					break
+				}
+				current = po.PrototypeValue()
+			}
+		}
+		if hashable, ok := obj.(object.Hashable); ok {
+			hashable.SetMember(key, v)
+		}
+		return nil
+	}
 	if hashable, ok := obj.(object.Hashable); ok {
 		hashable.SetMember(key, v)
 		return nil
@@ -409,32 +456,47 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 }
 
 func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value, error) {
+	if !objValue.IsObject() {
+		return value.UNDEFINED, nil
+	}
 	obj, err := heap.GetObject(objValue.GetHandle())
 	if err != nil {
 		return value.UNDEFINED, err
 	}
-	switch obj := obj.(type) {
-	case *native.ObjArr:
-		if key.IsInteger() {
-			i := int(key.AsNumber())
-			if i >= 0 && i < len(obj.Values()) {
-				return obj.GetElementAt(i), nil
-			}
-			return value.UNDEFINED, nil
+	if arr, ok := obj.(*native.ObjArr); ok && key.IsInteger() {
+		i := int(key.AsNumber())
+		if i >= 0 && i < len(arr.Values()) {
+			return arr.GetElementAt(i), nil
 		}
-		if key.IsObject() {
-			keyObj, _ := heap.GetObject(key.GetHandle())
-			if keyObj.Type() == object.OBJ_STRING {
-				return obj.GetMember(key), nil
+		return value.UNDEFINED, nil
+	}
+	if objString, ok := obj.(*native.LightString); ok {
+		return native.NewObjString(objString.String()).GetMember(key), nil
+	}
+	if objString, ok := obj.(*native.ObjStringBuilder); ok {
+		return native.NewObjString(objString.String()).GetMember(key), nil
+	}
+	if own, ok := obj.(interface {
+		GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
+		PrototypeValue() value.Value
+	}); ok {
+		if entry, found := own.GetOwnEntry(key); found {
+			if entry.IsAccessor() {
+				if entry.Get == value.UNDEFINED {
+					return value.UNDEFINED, nil
+				}
+				return vm.callValue(entry.Get, objValue, nil)
 			}
+			return entry.Value, nil
 		}
-		return obj.GetMember(key), nil
-	case *native.LightString:
-		return native.NewObjString(obj.String()).GetMember(key), nil
-	case *native.ObjStringBuilder:
-		return native.NewObjString(obj.String()).GetMember(key), nil
-	case object.Hashable:
-		return obj.GetMember(key), nil
+		proto := own.PrototypeValue()
+		if proto.IsObject() && heap.GetPointer(proto.GetHandle()) != heap.GetPointer(objValue.GetHandle()) {
+			return vm.getMemberValue(proto, key)
+		}
+		return value.UNDEFINED, nil
+	}
+	if hashable, ok := obj.(object.Hashable); ok {
+		return hashable.GetMember(key), nil
 	}
 	return value.UNDEFINED, nil
 }
@@ -1901,6 +1963,30 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				vm.push(value.EncodeHandle(handle))
 			}
+		case chunk.OP_SET_OBJECT_GETTER:
+			{
+				getter := vm.pop()
+				k := vm.pop()
+				objValue := vm.peek()
+				if objValue.IsObject() {
+					obj, _ := heap.GetObject(objValue.GetHandle())
+					if o, ok := obj.(*native.ObjObject); ok {
+						o.SetAccessor(k, getter, value.UNDEFINED)
+					}
+				}
+			}
+		case chunk.OP_SET_OBJECT_SETTER:
+			{
+				setter := vm.pop()
+				k := vm.pop()
+				objValue := vm.peek()
+				if objValue.IsObject() {
+					obj, _ := heap.GetObject(objValue.GetHandle())
+					if o, ok := obj.(*native.ObjObject); ok {
+						o.SetAccessor(k, value.UNDEFINED, setter)
+					}
+				}
+			}
 		case chunk.OP_SET_OBJECT_MEMBER:
 			{
 				v := vm.pop()
@@ -1908,9 +1994,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				hash := vm.peek()
 
-				isObject, handle := object.IsValueObject(hash)
-
-				if !isObject {
+				if !hash.IsObject() {
 					return value.UNDEFINED, fmt.Errorf("%v is not an object", hash)
 				}
 
@@ -1923,27 +2007,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 
-				obj, _ := heap.GetObject(handle)
-
 				if k.IsObject() {
 					keyObj, _ := heap.GetObject(k.GetHandle())
-
 					if b, ok := keyObj.(*native.ObjStringBuilder); ok {
 						key := b.Flush()
 						k = value.EncodeHandle(heap.Allocate(key))
 					}
 				}
 
-				if obj, ok := obj.(*native.ObjArr); ok && k.IsInteger() {
-					obj.SetElementAt(int(k.AsNumber()), v)
-					continue
-				}
-
-				switch obj := obj.(type) {
-				case object.Hashable:
-					obj.SetMember(k, v)
-				default:
-					return value.UNDEFINED, fmt.Errorf("we currently don't support adding properties to %s types", native.String(hash))
+				if err := vm.setMemberValue(hash, k, v); err != nil {
+					return value.UNDEFINED, err
 				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
@@ -1972,101 +2045,23 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					continue
 				}
 
-				obj, err := heap.GetObject(objValue.GetHandle())
-
+				v, err := vm.getMemberValue(objValue, member)
 				if err != nil {
-					return value.UNDEFINED, fmt.Errorf("failed to get object from %s in OP_GET_OBJECT_MEMBER %s", native.String(objValue), err)
+					return value.UNDEFINED, err
 				}
 
-				switch obj := obj.(type) {
-				case *native.ObjArr:
-					{
-						if member.IsInteger() {
-							value := obj.GetElementAt(int(member.AsNumber()))
-							vm.push(value)
-						} else {
-							v := obj.GetMember(member)
-
-							if v.IsObject() {
-								member, err := heap.GetObject(v.GetHandle())
-
-								if err != nil {
-									return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
-								}
-
-								if _, ok := member.(object.NeedsContext); ok {
-									vm.push(objValue)
-									vm.push(v)
-									vm.push(value.TAG_METHOD_HANDLE)
-									continue
-								}
-							}
+				if v.IsObject() {
+					memberObj, err := heap.GetObject(v.GetHandle())
+					if err == nil {
+						if _, ok := memberObj.(object.NeedsContext); ok {
+							vm.push(objValue)
 							vm.push(v)
+							vm.push(value.TAG_METHOD_HANDLE)
+							continue
 						}
 					}
-				case *native.LightString:
-					{
-						boxed := native.NewObjString(obj.String())
-						v := boxed.GetMember(member)
-
-						if v.IsObject() {
-							member, err := heap.GetObject(v.GetHandle())
-
-							if err != nil {
-								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
-							}
-							if _, ok := member.(object.NeedsContext); ok {
-								vm.push(objValue)
-								vm.push(v)
-								vm.push(value.TAG_METHOD_HANDLE)
-								continue
-							}
-						}
-						vm.push(v)
-					}
-				case *native.ObjStringBuilder:
-					{
-						boxed := native.NewObjString(obj.Flush().String())
-						v := boxed.GetMember(member)
-
-						if v.IsObject() {
-							member, err := heap.GetObject(v.GetHandle())
-
-							if err != nil {
-								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
-							}
-
-							if _, ok := member.(object.NeedsContext); ok {
-								vm.push(objValue)
-								vm.push(v)
-								vm.push(value.TAG_METHOD_HANDLE)
-								continue
-							}
-						}
-						vm.push(v)
-					}
-				case object.Hashable:
-					{
-						v := obj.GetMember(member)
-
-						if v.IsObject() {
-							member, err := heap.GetObject(v.GetHandle())
-
-							if err != nil {
-								return value.UNDEFINED, fmt.Errorf("failed to get object in OP_GET_OBJECT_MEMBER %e", err)
-							}
-							if _, ok := member.(object.NeedsContext); ok {
-								vm.push(objValue)
-								vm.push(v)
-								vm.push(value.TAG_METHOD_HANDLE)
-								continue
-							}
-						}
-						vm.push(v)
-					}
-				default:
-					return value.UNDEFINED, fmt.Errorf("can't get %s from %s", native.String(member), native.String(objValue))
 				}
+				vm.push(v)
 			}
 		case chunk.OP_PUSH_UNDEFINED:
 			{

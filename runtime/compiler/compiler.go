@@ -1607,25 +1607,26 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				for _, property := range current.Properties {
 					switch property.Type {
 					case parser.NODE_PROPERTY:
-						withAstTracking(property.Key, fn, func() {
-							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name))))
-						})
+						if property.Computed {
+							generateByteCode(property.Key, symbolTable, fn)
+						} else {
+							withAstTracking(property.Key, fn, func() {
+								fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(property.Key.Name))))
+							})
+						}
 						generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 
-						fn.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER)
-					case parser.NODE_SPREAD_ELEMENT:
-						item, _ := symbolTable.findVariable(property.Argument.Name)
-						var getOp uint8
-
-						switch item.scope {
-						case LOCAL:
-							getOp = chunk.OP_GET_LOCAL
-						case GLOBAL:
-							getOp = chunk.OP_GET_GLOBAL
-						case HEAP:
-							getOp = chunk.OP_GET_HEAP_VAR
+						switch property.Kind {
+						case parser.KIND_PROPERTY_GET:
+							fn.ValueChunk().EmitByte(chunk.OP_SET_OBJECT_GETTER)
+						case parser.KIND_PROPERTY_SET:
+							fn.ValueChunk().EmitByte(chunk.OP_SET_OBJECT_SETTER)
+						default:
+							fn.ValueChunk().EmitByte(chunk.OP_SET_OBJECT_MEMBER)
 						}
-						fn.ValueChunk().EmitBytes(getOp, uint8(item.slot), chunk.OP_SET_FROM_SPREAD)
+					case parser.NODE_SPREAD_ELEMENT:
+						generateByteCode(property.Argument, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_SET_FROM_SPREAD)
 					}
 				}
 				popReturnValue.pop()

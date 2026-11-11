@@ -96,6 +96,8 @@ const (
 	OP_CALL_OPTIONAL
 	OP_CALL_CALLEE_FIRST
 	OP_JUMP_IF_NOT_NULLISH
+	OP_SET_OBJECT_GETTER
+	OP_SET_OBJECT_SETTER
 )
 
 var OpNames = map[uint8]string{
@@ -192,4 +194,6 @@ var OpNames = map[uint8]string{
 	OP_CALL_OPTIONAL:                   "OP_CALL_OPTIONAL",
 	OP_CALL_CALLEE_FIRST:               "OP_CALL_CALLEE_FIRST",
 	OP_JUMP_IF_NOT_NULLISH:             "OP_JUMP_IF_NOT_NULLISH",
+	OP_SET_OBJECT_GETTER:               "OP_SET_OBJECT_GETTER",
+	OP_SET_OBJECT_SETTER:               "OP_SET_OBJECT_SETTER",
 }
