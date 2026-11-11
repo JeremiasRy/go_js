@@ -3608,15 +3608,22 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.ObjAsyncFunction:
 					{
 						fn = fn.Clone().(*native.ObjAsyncFunction)
+						pushedPromise := false
 						if !fn.ReturnArgumentIsPromise {
 							promise := native.NewPromise()
 							fn.SetPromise(promise)
 							handle := heap.Allocate(promise)
 							vm.push(value.EncodeHandle(handle))
+							pushedPromise = true
 						}
 
 						f, c = vm.Call(fn.Clone(), &ip, value.UNDEFINED, argCount, calledWithSpread)
-						f.localStart -= int(argCount)
+						if pushedPromise {
+							if argCount > 0 {
+								f.localStart--
+								vm.frames[vm.frameCount-1].localStart = f.localStart
+							}
+						}
 					}
 				case *native.ObjGenerator:
 					{
@@ -5519,6 +5526,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				f.heapScope = heap.CreateHeapScope(f.heapScope)
 				f.ownScope = true
+				vm.frames[vm.frameCount-1].heapScope = f.heapScope
+				vm.frames[vm.frameCount-1].ownScope = f.ownScope
 			}
 		case chunk.OP_CLONE_FUNCTION:
 			{
@@ -5548,11 +5557,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if !f.ownScope {
 					f.heapScope = heap.CreateHeapScope(f.heapScope)
 					f.ownScope = true
+					vm.frames[vm.frameCount-1].heapScope = f.heapScope
+					vm.frames[vm.frameCount-1].ownScope = f.ownScope
 				}
 			}
 		case chunk.OP_COPY_HEAP_SCOPE:
 			{
 				f.heapScope = heap.CopyHeapScope(f.heapScope)
+				vm.frames[vm.frameCount-1].heapScope = f.heapScope
 			}
 		case chunk.OP_TRY_BLOCK_START:
 			{
