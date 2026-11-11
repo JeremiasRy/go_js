@@ -536,6 +536,13 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineRegExpConstructor(main *object.ObjFunction) {
+	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("RegExp"))))
+	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewRegExpConstructor())))
+	main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+}
+
 func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionScope) {
 	constructors := []struct {
 		name string
@@ -666,6 +673,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineReflectObject(setup, global)
 	defineBigIntConstructor(setup, global)
 	defineBinaryConstructors(setup, global)
+	defineRegExpConstructor(setup)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
@@ -1613,8 +1621,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					return
 				}
 				if current.Regex != nil {
-					regexpObject := native.NewRegExpObject(current.Regex.Pattern, current.Regex.Flags)
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(regexpObject)))
+					pattern := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Regex.Pattern))))
+					flags := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Regex.Flags))))
+					fn.ValueChunk().EmitBytes(chunk.OP_NEW_REGEXP, pattern, flags)
 					return
 				}
 				switch v := current.Value.(type) {

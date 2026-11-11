@@ -1018,6 +1018,12 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 			return nil
 		}
 	}
+	if re, ok := obj.(*native.ObjRegExp); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "lastIndex" {
+			n, _ := vm.toNumber(v)
+			re.LastIndex = int(n)
+		}
+	}
 	if own, ok := obj.(interface {
 		GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
 		PrototypeValue() value.Value
@@ -2190,6 +2196,24 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		}
 
 		switch code {
+		case chunk.OP_NEW_REGEXP:
+			{
+				patternValue := c.Constants[c.Code[ip]]
+				ip++
+				flagsValue := c.Constants[c.Code[ip]]
+				ip++
+				pattern, _ := vm.valueAsString(patternValue)
+				flags, _ := vm.valueAsString(flagsValue)
+				obj, err := vm.compileRegExp(pattern, flags)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(value.EncodeHandle(heap.Allocate(obj)))
+			}
 		case chunk.OP_CONSTANT:
 			{
 				vm.push(c.Constants[c.Code[ip]])
@@ -3905,6 +3929,36 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						args := vm.popN(argCount)
 						view, _ := vm.dataViewFromValue(thisCtx)
 						result, err := vm.callDataViewMethod(view, fn, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.RegExpConstructor:
+					{
+						args := vm.popN(argCount)
+						result, err := vm.constructRegExp(args, false)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.RegExpTest, *native.RegExpExec:
+					{
+						re, _ := vm.regexpFromValue(thisCtx)
+						kind := "test"
+						if _, ok := fn.(*native.RegExpExec); ok {
+							kind = "exec"
+						}
+						result, err := vm.callRegExpMethod(re, kind, argCount)
 						if err != nil {
 							errValue := vm.errorValue(err)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
@@ -5657,6 +5711,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						result, err := vm.construct(callable, allArgs, callee)
 						if err != nil {
 							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.RegExpConstructor:
+					{
+						args := vm.popN(int(argCount))
+						result, err := vm.constructRegExp(args, true)
+						if err != nil {
+							errValue := vm.errorValue(err)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
 							}

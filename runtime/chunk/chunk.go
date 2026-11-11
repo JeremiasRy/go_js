@@ -125,6 +125,7 @@ const (
 	OP_GET_LOCAL_RAW
 	OP_GET_HEAP_VAR_RAW
 	OP_UPDATE
+	OP_NEW_REGEXP
 )
 
 var OpNames = map[uint8]string{
@@ -250,4 +251,5 @@ var OpNames = map[uint8]string{
 	OP_GET_LOCAL_RAW:                   "OP_GET_LOCAL_RAW",
 	OP_GET_HEAP_VAR_RAW:                "OP_GET_HEAP_VAR_RAW",
 	OP_UPDATE:                          "OP_UPDATE",
+	OP_NEW_REGEXP:                      "OP_NEW_REGEXP",
 }

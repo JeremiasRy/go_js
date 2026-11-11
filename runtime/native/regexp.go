@@ -1,6 +1,8 @@
 package native
 
 import (
+	"regexp"
+
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
@@ -11,6 +13,7 @@ type ObjRegExp struct {
 	Pattern   string
 	Flags     string
 	LastIndex int
+	Compiled  *regexp.Regexp
 }
 
 func NewRegExpObject(pattern, flags string) *ObjRegExp {
@@ -27,6 +30,8 @@ func NewRegExpObject(pattern, flags string) *ObjRegExp {
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("multiline"))), boolValueValue(hasFlag(flags, 'm')))
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("hasIndices"))), boolValueValue(hasFlag(flags, 'd')))
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("lastIndex"))), value.ValueFromFloat64(0))
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("test"))), value.EncodeHandle(heap.Allocate(NewRegExpTest())))
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("exec"))), value.EncodeHandle(heap.Allocate(NewRegExpExec())))
 	return obj
 }
 
@@ -45,4 +50,43 @@ func (*ObjRegExp) Type() object.ObjType {
 
 func (r *ObjRegExp) String() string {
 	return "/" + r.Pattern + "/" + r.Flags
+}
+
+type RegExpConstructor struct {
+	ObjObject
+}
+
+func NewRegExpConstructor() *RegExpConstructor {
+	ctor := &RegExpConstructor{}
+	ctor.Members = map[string]ObjectValueEntry{}
+	ctor.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	return ctor
+}
+
+func (*RegExpConstructor) Type() object.ObjType {
+	return object.OBJ_NATIVE_FN
+}
+
+func (*RegExpConstructor) String() string {
+	return "function RegExp"
+}
+
+type RegExpTest struct {
+	ObjNativeFn
+}
+
+func NewRegExpTest() *RegExpTest {
+	fn := &RegExpTest{}
+	fn.name = "test"
+	return fn
+}
+
+type RegExpExec struct {
+	ObjNativeFn
+}
+
+func NewRegExpExec() *RegExpExec {
+	fn := &RegExpExec{}
+	fn.name = "exec"
+	return fn
 }
