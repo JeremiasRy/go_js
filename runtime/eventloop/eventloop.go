@@ -40,7 +40,11 @@ func Start() {
 
 	go func() {
 		for message := range el.jobCallbackChannel {
-			queue.Enqueue(message.Callback, queue.TASK, true)
+			priority := queue.TASK
+			if message.Callback.MicroTask {
+				priority = queue.MICRO_TASK
+			}
+			queue.Enqueue(message.Callback, priority, true)
 			message.Done()
 		}
 	}()

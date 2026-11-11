@@ -84,12 +84,14 @@ func (e *JSException) Error() string {
 }
 
 type ExceptionState struct {
-	stackTop int
-	jumpTo   int
-	frame    int
+	stackTop  int
+	jumpTo    int
+	frame     int
+	isFinally bool
 }
 
-type VM struct {	frames         []CallFrame
+type VM struct {
+	frames         []CallFrame
 	frameCount     int
 	stack          []value.Value
 	stackTop       int
@@ -99,10 +101,10 @@ type VM struct {	frames         []CallFrame
 
 	exports *native.ObjObject
 
-	completionValue value.Value
+	completionValue   value.Value
 	completionPending bool
-	globalObject    value.Value
-	catchValues     map[int]value.Value
+	globalObject      value.Value
+	catchValues       map[int]value.Value
 
 	main bool
 }
@@ -2071,7 +2073,17 @@ Run:
 			callback.ThisCtx = vm.ensureGlobalObject()
 		}
 
-		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, callback.Fn.GetArity(), false)
+		var f CallFrame
+		var c value.ValueChunk
+		if asyncFn, ok := callback.Fn.(*native.ObjAsyncFunction); ok && asyncFn.State != nil {
+			f.initCallFrame(asyncFn, asyncFn.State.LocalStart, 0, callback.ThisCtx)
+			vm.frames[vm.frameCount] = f
+			vm.frameCount++
+			f = vm.currentFrame()
+			c = *f.fn.ValueChunk()
+		} else {
+			f, c = vm.Call(callback.Fn, nil, callback.ThisCtx, callback.Fn.GetArity(), false)
+		}
 		_, err := vm.run(f, c)
 		if callback.RootKey != 0 {
 			heap.ClearCallbackRoot(callback.RootKey)
@@ -2168,6 +2180,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				printStack(promise.State.Stack)
 				fmt.Println()
 			}
+			if vm.stackTop > promise.State.LocalStart {
+				promise.CallerStack = append([]value.Value(nil), vm.stack[promise.State.LocalStart:vm.stackTop]...)
+			} else {
+				promise.CallerStack = nil
+			}
 			f.localStart = promise.State.LocalStart
 			f.heapScope = promise.State.HeapScope
 			f.ownScope = promise.State.OwnScope
@@ -2176,7 +2193,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			vm.frames[vm.frameCount-1].heapScope = f.heapScope
 			vm.frames[vm.frameCount-1].ownScope = f.ownScope
 			for _, exception := range promise.State.Exceptions {
-				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: exception.JumpTo, stackTop: exception.StackTop, frame: vm.frameCount})
+				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: exception.JumpTo, stackTop: exception.StackTop, frame: vm.frameCount, isFinally: exception.IsFinally})
 			}
 			for _, v := range promise.State.Stack {
 				vm.push(v)
@@ -2480,7 +2497,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntBitwise(0, a, b); handled {
 					if err != nil {
 						errValue := vm.makeError("TypeError", err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2503,7 +2522,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntBitwise(1, a, b); handled {
 					if err != nil {
 						errValue := vm.makeError("TypeError", err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2526,7 +2547,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntBitwise(2, a, b); handled {
 					if err != nil {
 						errValue := vm.makeError("TypeError", err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2549,9 +2572,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntArithmetic(1, a, b); handled {
 					if err != nil {
 						name := "TypeError"
-						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") {
+							name = "RangeError"
+						}
 						errValue := vm.makeError(name, err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2574,9 +2601,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntArithmetic(3, a, b); handled {
 					if err != nil {
 						name := "TypeError"
-						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") {
+							name = "RangeError"
+						}
 						errValue := vm.makeError(name, err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2599,9 +2630,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntArithmetic(2, a, b); handled {
 					if err != nil {
 						name := "TypeError"
-						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") {
+							name = "RangeError"
+						}
 						errValue := vm.makeError(name, err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2624,9 +2659,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntArithmetic(5, a, b); handled {
 					if err != nil {
 						name := "TypeError"
-						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") {
+							name = "RangeError"
+						}
 						errValue := vm.makeError(name, err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2649,9 +2688,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntArithmetic(4, a, b); handled {
 					if err != nil {
 						name := "TypeError"
-						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") {
+							name = "RangeError"
+						}
 						errValue := vm.makeError(name, err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2896,7 +2939,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntBitwise(3, a, b); handled {
 					if err != nil {
 						errValue := vm.makeError("TypeError", err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2919,7 +2964,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v, handled, err := vm.bigIntBitwise(4, a, b); handled {
 					if err != nil {
 						errValue := vm.makeError("TypeError", err.Error())
-						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
 						continue
 					}
 					vm.push(v)
@@ -2941,12 +2988,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				a := vm.pop()
 				if _, aBig := vm.bigIntObject(a); aBig {
 					errValue := vm.makeError("TypeError", "BigInts have no unsigned right shift")
-					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
 					continue
 				}
 				if _, bBig := vm.bigIntObject(b); bBig {
 					errValue := vm.makeError("TypeError", "BigInts have no unsigned right shift")
-					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
 					continue
 				}
 				ai, err := vm.toUint32(a)
@@ -3369,7 +3420,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_POP_LOCAL:
 			{
-				vm.stackTop--
+				if vm.stackTop > f.localStart {
+					vm.stackTop--
+				}
 			}
 		case chunk.OP_CATCH_BIND:
 			{
@@ -3651,22 +3704,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.ObjAsyncFunction:
 					{
 						fn = fn.Clone().(*native.ObjAsyncFunction)
-						pushedPromise := false
 						if !fn.ReturnArgumentIsPromise {
 							promise := native.NewPromise()
 							fn.SetPromise(promise)
-							handle := heap.Allocate(promise)
-							vm.push(value.EncodeHandle(handle))
-							pushedPromise = true
+							base := vm.stackTop - argCount
+							copy(vm.stack[base+1:vm.stackTop+1], vm.stack[base:vm.stackTop])
+							vm.stack[base] = value.EncodeHandle(heap.Allocate(promise))
+							vm.stackTop++
 						}
 
 						f, c = vm.Call(fn.Clone(), &ip, value.UNDEFINED, argCount, calledWithSpread)
-						if pushedPromise {
-							if argCount > 0 {
-								f.localStart--
-								vm.frames[vm.frameCount-1].localStart = f.localStart
-							}
-						}
 					}
 				case *native.ObjGenerator:
 					{
@@ -5415,6 +5462,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					if promise.ReturnArgumentIsPromise {
 						vm.push(value)
 					}
+					for _, v := range promise.CallerStack {
+						vm.push(v)
+					}
+					promise.CallerStack = nil
 
 					f = vm.currentFrame()
 					c = *f.fn.ValueChunk()
@@ -5917,10 +5968,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				err := vm.pop()
 				if len(vm.exceptionStack) == 0 {
 					if asyncFn, ok := f.fn.(*native.ObjAsyncFunction); ok {
-						asyncFn.Promise.Reject(err)
+						if asyncFn.Promise != nil {
+							vm.rejectPromise(asyncFn.Promise, err)
+						}
 						vm.frameCount--
 						if vm.frameCount > 0 {
 							ip = f.returnIp
+							vm.stackTop = f.localStart
+							for _, v := range asyncFn.CallerStack {
+								vm.push(v)
+							}
+							asyncFn.CallerStack = nil
 							f = vm.currentFrame()
 							c = *f.fn.ValueChunk()
 						} else {
@@ -5989,17 +6047,36 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					kept := vm.exceptionStack[:0]
 					frameIndex := vm.frameCount - 1
 					for _, state := range vm.exceptionStack {
-						if state.frame >= frameIndex {
-							exceptions = append(exceptions, native.AsyncException{JumpTo: state.jumpTo, StackTop: state.stackTop, Frame: state.frame})
+						if state.frame > frameIndex {
+							exceptions = append(exceptions, native.AsyncException{JumpTo: state.jumpTo, StackTop: state.stackTop, Frame: state.frame, IsFinally: state.isFinally})
 						} else {
 							kept = append(kept, state)
 						}
 					}
 					vm.exceptionStack = kept
 					curentAsyncFn.Pause(stack, ip, f.localStart, f.heapScope, f.ownScope, exceptions)
-					curentAsyncFn.Await(promise)
+					if promise.Status != native.PENDING {
+						if len(curentAsyncFn.State.Stack) > 0 {
+							curentAsyncFn.State.Stack[len(curentAsyncFn.State.Stack)-1] = promise.Value
+						}
+						if promise.Status == native.REJECTED {
+							curentAsyncFn.RejectValue = promise.Value
+							curentAsyncFn.HasRejection = true
+						}
+						key := heap.NewCallbackRoot()
+						heap.StoreCallbackRoot(key, curentAsyncFn.State.Stack...)
+						queue.Enqueue(object.Callback{Fn: curentAsyncFn, ThisCtx: value.UNDEFINED, RootKey: key, MicroTask: true}, queue.MICRO_TASK, false)
+					} else {
+						curentAsyncFn.Await(promise)
+					}
 					heap.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
 					heap.StoreAsyncFunctionScope(uintptr(unsafe.Pointer(curentAsyncFn)), f.heapScope)
+
+					vm.stackTop = f.localStart
+					for _, v := range curentAsyncFn.CallerStack {
+						vm.push(v)
+					}
+					curentAsyncFn.CallerStack = nil
 
 					vm.frameCount--
 

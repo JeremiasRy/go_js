@@ -7,18 +7,19 @@ import (
 )
 
 type PauseState struct {
-	Stack []value.Value
-	Ip    int
+	Stack      []value.Value
+	Ip         int
 	LocalStart int
-	HeapScope int
-	OwnScope bool
+	HeapScope  int
+	OwnScope   bool
 	Exceptions []AsyncException
 }
 
 type AsyncException struct {
-	JumpTo int
-	StackTop int
-	Frame int
+	JumpTo    int
+	StackTop  int
+	Frame     int
+	IsFinally bool
 }
 
 type ObjAsyncFunction struct {
@@ -30,6 +31,7 @@ type ObjAsyncFunction struct {
 	ReturnArgumentIsPromise bool
 	RejectValue             value.Value
 	HasRejection            bool
+	CallerStack             []value.Value
 }
 
 func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsyncFunction {
@@ -64,6 +66,7 @@ func (asyncFn *ObjAsyncFunction) GetReferencingValues() []value.Value {
 	if asyncFn.RejectValue.IsObject() {
 		arr = append(arr, asyncFn.RejectValue)
 	}
+	arr = append(arr, asyncFn.CallerStack...)
 	return arr
 }
 
@@ -83,11 +86,11 @@ func (asyncFn *ObjAsyncFunction) Resolve(v value.Value) {
 
 func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int, localStart int, heapScope int, ownScope bool, exceptions []AsyncException) {
 	asyncFn.State = &PauseState{
-		Stack: s,
-		Ip:    ip,
+		Stack:      s,
+		Ip:         ip,
 		LocalStart: localStart,
-		HeapScope: heapScope,
-		OwnScope: ownScope,
+		HeapScope:  heapScope,
+		OwnScope:   ownScope,
 		Exceptions: exceptions,
 	}
 }
@@ -109,8 +112,9 @@ func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMes
 	message := &object.JobChannelMessage{
 		Job: nil,
 		Callback: object.Callback{
-			Fn:      asyncFn,
-			ThisCtx: value.UNDEFINED,
+			Fn:        asyncFn,
+			ThisCtx:   value.UNDEFINED,
+			MicroTask: true,
 		},
 		Done: done,
 	}

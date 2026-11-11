@@ -56,11 +56,12 @@ func IsValueObject(v value.Value) (bool, uint32) {
 }
 
 type Callback struct {
-	Fn      Callable
-	ThisCtx value.Value
-	Stack   []value.Value
-	Native  func()
-	RootKey uintptr
+	Fn        Callable
+	ThisCtx   value.Value
+	Stack     []value.Value
+	Native    func()
+	RootKey   uintptr
+	MicroTask bool
 }
 
 type JobChannelMessage struct {
