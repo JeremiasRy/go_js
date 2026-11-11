@@ -95,6 +95,7 @@ const (
 	OP_JUMP_IF_NULLISH
 	OP_CALL_OPTIONAL
 	OP_CALL_CALLEE_FIRST
+	OP_JUMP_IF_NOT_NULLISH
 )
 
 var OpNames = map[uint8]string{
@@ -190,4 +191,5 @@ var OpNames = map[uint8]string{
 	OP_JUMP_IF_NULLISH:                 "OP_JUMP_IF_NULLISH",
 	OP_CALL_OPTIONAL:                   "OP_CALL_OPTIONAL",
 	OP_CALL_CALLEE_FIRST:               "OP_CALL_CALLEE_FIRST",
+	OP_JUMP_IF_NOT_NULLISH:             "OP_JUMP_IF_NOT_NULLISH",
 }

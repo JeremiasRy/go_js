@@ -1858,7 +1858,7 @@ func (p *Parser) parseGetterSetter(prop *Node) error {
 	prop.Kind = kind
 	paramCount := 0
 
-	if prop.Kind == KIND_PROPERTY_GET {
+	if prop.Kind == KIND_PROPERTY_SET {
 		paramCount = 1
 	}
 

@@ -581,7 +581,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						case parser.LOGICAL_OR_ASSIGN:
 							jump = chunk.OP_JUMP_IF_TRUE
 						default:
-							jump = chunk.OP_JUMP_IF_NULLISH
+							jump = chunk.OP_JUMP_IF_NOT_NULLISH
 						}
 						fn.ValueChunk().EmitBytes(jump, 0, 0, 0, 0)
 						skipJump := len(fn.ValueChunk().Code) - 4
@@ -649,7 +649,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						case parser.LOGICAL_OR_ASSIGN:
 							jump = chunk.OP_JUMP_IF_TRUE
 						default:
-							jump = chunk.OP_JUMP_IF_NULLISH
+							jump = chunk.OP_JUMP_IF_NOT_NULLISH
 						}
 						fn.ValueChunk().EmitBytes(jump, 0, 0, 0, 0)
 						skipJump := len(fn.ValueChunk().Code) - 4
@@ -1793,11 +1793,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case logicalOr:
 					jump = chunk.OP_JUMP_IF_TRUE
 				case nullishCoalescing:
-					jump = chunk.OP_JUMP_IF_NULLISH
+					jump = chunk.OP_JUMP_IF_NOT_NULLISH
 				default:
 					jump = chunk.OP_JUMP_IF_FALSE
 				}
 
+				fn.ValueChunk().EmitByte(chunk.OP_DUP)
 				fn.ValueChunk().EmitBytes(jump, 0, 0, 0, 0)
 				jumpStart := len(fn.ValueChunk().Code) - 4
 

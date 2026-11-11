@@ -1689,6 +1689,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					ip = jump
 				}
 			}
+		case chunk.OP_JUMP_IF_NOT_NULLISH:
+			{
+				v := vm.pop()
+				jump := c.ReadInt(&ip)
+
+				if v != value.NULL && v != value.UNDEFINED {
+					ip = jump
+				}
+			}
 		case chunk.OP_JUMP:
 			{
 				jump := c.ReadInt(&ip)
