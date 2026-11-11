@@ -2139,13 +2139,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_THROW_STATEMENT:
 			{
+				generateByteCode(current.Argument, symbolTable, fn)
+				fn.ValueChunk().EmitByte(chunk.OP_SAVE_COMPLETION)
+				emitAllIteratorCloses(fn)
+				emitAbruptFinalizers(symbolTable, fn)
 				count := blockLocalVarCount(symbolTable.block)
-
 				for range count {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 				}
-				generateByteCode(current.Argument, symbolTable, fn)
-
+				fn.ValueChunk().EmitByte(chunk.OP_RESTORE_COMPLETION)
 				fn.ValueChunk().EmitByte(chunk.OP_THROW)
 			}
 		case parser.NODE_NEW_EXPRESSION:

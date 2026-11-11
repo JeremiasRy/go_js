@@ -92,6 +92,7 @@ type VM struct {	frames         []CallFrame
 	exports *native.ObjObject
 
 	completionValue value.Value
+	completionPending bool
 	globalObject    value.Value
 	catchValues     map[int]value.Value
 
@@ -2198,10 +2199,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_SAVE_COMPLETION:
 			{
 				vm.completionValue = vm.pop()
+				vm.completionPending = true
 			}
 		case chunk.OP_RESTORE_COMPLETION:
 			{
 				vm.push(vm.completionValue)
+				vm.completionPending = false
 			}
 		case chunk.OP_PUSH_UNINITIALIZED:
 			{
@@ -4060,6 +4063,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 				iterator := vm.stack[f.localStart+slot]
 				if err := vm.closeIterator(iterator); err != nil {
+					if vm.completionPending {
+						continue
+					}
 					errValue := vm.makeError("Error", err.Error())
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 						return value.UNDEFINED, err
