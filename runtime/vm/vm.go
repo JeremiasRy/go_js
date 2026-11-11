@@ -1616,7 +1616,14 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 
 	if !fn.HasRestParameter() && !calledWithSpread {
 		for vm.stackTop < f.localStart+fn.GetArity() {
-			vm.push(value.UNDEFINED)
+			missing := value.UNDEFINED
+			if objFn, ok := fn.(*object.ObjFunction); ok {
+				index := vm.stackTop - f.localStart
+				if index >= 0 && index < len(objFn.DefaultParams) && objFn.DefaultParams[index] {
+					missing = value.UNINITIALIZED
+				}
+			}
+			vm.push(missing)
 		}
 	}
 
@@ -2469,7 +2476,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := vm.pop()
 				jump := c.ReadInt(&ip)
 
-				if v != value.UNDEFINED {
+				if v != value.UNDEFINED && v != value.UNINITIALIZED {
 					ip = jump
 				}
 			}
@@ -2514,6 +2521,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				slot := int(c.Code[ip])
 				ip++
 				heap.DefineHeapVarAt(f.heapScope, slot, f.arguments)
+			}
+		case chunk.OP_GET_HEAP_VAR_RAW:
+			{
+				depth := int(c.Code[ip])
+				ip++
+				slot := int(c.Code[ip])
+				ip++
+				vm.push(heap.GetHeapVar(f.heapScope, depth, slot))
 			}
 		case chunk.OP_GET_HEAP_VAR:
 			{
@@ -2729,11 +2744,24 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				vm.stack[vm.stackTop] = v
 				vm.stackTop++
 			}
+		case chunk.OP_GET_LOCAL_RAW:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				vm.push(vm.stack[f.localStart+slot])
+			}
 		case chunk.OP_GET_LOCAL:
 			{
 				slot := int(c.Code[ip])
 				ip++
 				v := vm.stack[f.localStart+slot]
+				if v == value.UNINITIALIZED {
+					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				vm.push(v)
 			}
 		case chunk.OP_SET_LOCAL:

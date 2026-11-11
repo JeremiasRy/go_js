@@ -78,6 +78,7 @@ type FunctionScope struct {
 	heapVarCount     int
 	hasHeapVars      bool
 	isArrow          bool
+	paramNames       map[string]bool
 }
 
 const (
@@ -160,6 +161,7 @@ var chainJumpStack = [][]int{}
 var pendingLoopLabel = ""
 var wantMethodHandle = false
 var nextFunctionIsMethod = false
+var parameterFunction *FunctionScope
 
 func currentLoop() *Loop {
 	if len(loopStack) == 0 {
@@ -254,7 +256,7 @@ func newBlockScope(parent *BlockScope) *BlockScope {
 }
 
 func newFunctionScope(parent *FunctionScope, tableScope VariableScope) *FunctionScope {
-	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, block: nil}
+	return &FunctionScope{parent: parent, tableScope: tableScope, vars: Variables{}, block: nil, paramNames: map[string]bool{}}
 }
 
 func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
@@ -913,6 +915,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				fn = nextFn.fn
+				setDefaultParams(fn, current.Params)
 				if objFn, ok := fn.(*object.ObjFunction); ok {
 					objFn.Length = functionLength(current.Params)
 				}
@@ -1010,6 +1013,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.Strict = module || nodeHasUseStrict(current)
 				newFn.IsArrow = true
 				newFn.Length = functionLength(current.Params)
+				setDefaultParams(newFn, current.Params)
 
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
@@ -1106,6 +1110,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.Strict = module || nodeHasUseStrict(current)
 				newFn.IsMethod = nextFunctionIsMethod
 				newFn.Length = functionLength(current.Params)
+				setDefaultParams(newFn, current.Params)
 				if symbolTable.needsArguments {
 					newFn.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
@@ -1649,6 +1654,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					return
 				}
 				variable, owner := symbolTable.findVariable(current.Name)
+
+				if parameterFunction != nil && owner == parameterFunction && !parameterFunction.paramNames[current.Name] {
+					variable, owner = parameterFunction.parent.findVariable(current.Name)
+				}
 
 				if variable != nil && owner != nil && owner != symbolTable && variable.scope == LOCAL {
 					oldSlot := variable.slot
@@ -2414,6 +2423,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				method.Strict = true
 				method.IsMethod = true
 				method.Length = functionLength(function.Params)
+				setDefaultParams(method, function.Params)
 				if symbolTable.needsArguments {
 					method.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
@@ -2980,6 +2990,18 @@ func functionLength(params []*parser.Node) int {
 	return length
 }
 
+func setDefaultParams(fn object.Callable, params []*parser.Node) {
+	if objFn, ok := fn.(*object.ObjFunction); ok {
+		flags := make([]bool, len(params))
+		for i, param := range params {
+			if param != nil && param.Type == parser.NODE_ASSIGNMENT_PATTERN {
+				flags[i] = true
+			}
+		}
+		objFn.DefaultParams = flags
+	}
+}
+
 func emitArgumentsHeap(fn object.Callable) {
 	if objFn, ok := fn.(*object.ObjFunction); ok && objFn.ArgumentsHeapSlot >= 0 {
 		fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_ARGUMENTS_HEAP, uint8(objFn.ArgumentsHeapSlot))
@@ -3324,19 +3346,24 @@ func emitParameterDefaults(params []*parser.Node, symbolTable *FunctionScope, fn
 		if variable == nil {
 			continue
 		}
-		getOp := chunk.OP_GET_LOCAL
 		setOp := chunk.OP_SET_LOCAL
 		if variable.scope == HEAP {
-			getOp = chunk.OP_GET_HEAP_VAR
 			setOp = chunk.OP_SET_HEAP_VAR
 		}
-		emitVarOp(fn, getOp, symbolTable, variable)
+		if variable.scope == HEAP {
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR_RAW, uint8(heapDepth(symbolTable, variable)), uint8(variable.slot))
+		} else {
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL_RAW, uint8(variable.slot))
+		}
 		fn.ValueChunk().EmitByte(chunk.OP_DUP)
 		fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NOT_UNDEFINED, 0, 0, 0, 0)
 		skipJump := len(fn.ValueChunk().Code) - 4
 		fn.ValueChunk().EmitByte(chunk.OP_POP)
 		popReturnValue.push(false)
+		savedParameterFunction := parameterFunction
+		parameterFunction = symbolTable
 		generateByteCode(param.Right, symbolTable, fn)
+		parameterFunction = savedParameterFunction
 		popReturnValue.pop()
 		emitVarOp(fn, setOp, symbolTable, variable)
 		fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))

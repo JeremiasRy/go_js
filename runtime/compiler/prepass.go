@@ -103,6 +103,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 		symbolTable.arity = len(current.Params)
+		markParamNames(current.Params, symbolTable)
 
 		savedStrict := strictContext
 		strictContext = strictContext || nodeHasUseStrict(current) || module
@@ -158,6 +159,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 		}
 		symbolTable.arity = len(current.Params)
+		markParamNames(current.Params, symbolTable)
 
 		if current.IsExpression {
 			prePass(current.BodyNode, symbolTable)
@@ -211,6 +213,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				}
 			}
 			symbolTable.arity = len(current.Params)
+		markParamNames(current.Params, symbolTable)
 
 			if current.IsExpression {
 				prePass(current.BodyNode, symbolTable)
@@ -554,6 +557,40 @@ func moveUndeclaredToGlobal(symbolTable *FunctionScope) {
 			delete(symbolTable.vars, name)
 			global.addVariable(name, LET, true, nil)
 		}
+	}
+}
+
+func markParamNames(params []*parser.Node, symbolTable *FunctionScope) {
+	var collect func(*parser.Node)
+	collect = func(node *parser.Node) {
+		if node == nil {
+			return
+		}
+		switch node.Type {
+		case parser.NODE_IDENTIFIER:
+			symbolTable.paramNames[node.Name] = true
+		case parser.NODE_ASSIGNMENT_PATTERN:
+			collect(node.Left)
+		case parser.NODE_REST_ELEMENT:
+			collect(node.Argument)
+		case parser.NODE_ARRAY_PATTERN:
+			for _, element := range node.Elements {
+				collect(element)
+			}
+		case parser.NODE_OBJECT_PATTERN:
+			for _, property := range node.Properties {
+				if property.Type == parser.NODE_PROPERTY {
+					if value, ok := property.Value.(*parser.Node); ok {
+						collect(value)
+					}
+				} else if property.Type == parser.NODE_REST_ELEMENT {
+					collect(property.Argument)
+				}
+			}
+		}
+	}
+	for _, param := range params {
+		collect(param)
 	}
 }
 
