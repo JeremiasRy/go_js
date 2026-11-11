@@ -1266,6 +1266,9 @@ func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
 		if _, ok := obj.(*native.ObjBigInt); ok {
 			return v, nil
 		}
+		if _, ok := obj.(*native.ObjStringBuilder); ok {
+			return v, nil
+		}
 	}
 	if native.SYMBOL_TO_PRIMITIVE != 0 {
 		method, err := vm.getMemberValue(v, native.SYMBOL_TO_PRIMITIVE)
@@ -2417,7 +2420,28 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						bs, _ = vm.valueAsString(bsValue)
 					}
-					vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(as + bs))))
+					if pa.IsObject() {
+						if obj, err := heap.GetObject(pa.GetHandle()); err == nil {
+							if builder, ok := obj.(*native.ObjStringBuilder); ok {
+								builder.Concatenate(bs)
+								vm.push(pa)
+								continue
+							}
+						}
+					}
+					if pb.IsObject() {
+						if obj, err := heap.GetObject(pb.GetHandle()); err == nil {
+							if builder, ok := obj.(*native.ObjStringBuilder); ok {
+								result := native.NewStringBuilder(native.NewLightString(as))
+								result.Concatenate(builder.String())
+								vm.push(value.EncodeHandle(heap.Allocate(result)))
+								continue
+							}
+						}
+					}
+					result := native.NewStringBuilder(native.NewLightString(as))
+					result.Concatenate(bs)
+					vm.push(value.EncodeHandle(heap.Allocate(result)))
 				} else {
 					an, err := vm.toNumber(pa)
 					if err != nil {
