@@ -66,6 +66,9 @@ func (op *ObjPromise) String() string {
 }
 
 func (op *ObjPromise) Resolve(v value.Value) {
+	if op.Status != PENDING {
+		return
+	}
 	op.Status = RESOLVED
 	op.Value = v
 
@@ -73,6 +76,9 @@ func (op *ObjPromise) Resolve(v value.Value) {
 }
 
 func (op *ObjPromise) Reject(v value.Value) {
+	if op.Status != PENDING {
+		return
+	}
 	op.Status = REJECTED
 	op.Value = v
 
@@ -151,4 +157,42 @@ func (o *ResolveFunc) Clear() {
 
 func (resolve *ResolveFunc) Resolve(v value.Value) {
 	resolve.owner.Resolve(v)
+}
+
+type RejectFunc struct {
+	object.Ctx
+	owner  *ObjPromise
+	marked bool
+}
+
+func (*RejectFunc) GetReferencingValues() []value.Value {
+	return []value.Value{}
+}
+
+func NewRejectFunc(owner *ObjPromise) *RejectFunc {
+	return &RejectFunc{owner: owner}
+}
+
+func (*RejectFunc) Type() object.ObjType {
+	return object.OBJ_RESOLVE_FUNCTION
+}
+
+func (*RejectFunc) String() string {
+	return "function Reject"
+}
+
+func (o *RejectFunc) Mark() {
+	o.marked = true
+}
+
+func (o *RejectFunc) Marked() bool {
+	return o.marked
+}
+
+func (o *RejectFunc) Clear() {
+	o.marked = false
+}
+
+func (reject *RejectFunc) Reject(v value.Value) {
+	reject.owner.Reject(v)
 }

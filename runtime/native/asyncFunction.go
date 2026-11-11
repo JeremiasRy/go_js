@@ -9,6 +9,7 @@ import (
 type PauseState struct {
 	Stack []value.Value
 	Ip    int
+	LocalStart int
 }
 
 type ObjAsyncFunction struct {
@@ -18,6 +19,8 @@ type ObjAsyncFunction struct {
 	Promise                 *ObjPromise
 	Awaiting                *ObjPromise
 	ReturnArgumentIsPromise bool
+	RejectValue             value.Value
+	HasRejection            bool
 }
 
 func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsyncFunction {
@@ -58,10 +61,11 @@ func (asyncFn *ObjAsyncFunction) Resolve(v value.Value) {
 	}
 }
 
-func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int) {
+func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int, localStart int) {
 	asyncFn.State = &PauseState{
 		Stack: s,
 		Ip:    ip,
+		LocalStart: localStart,
 	}
 }
 
@@ -72,6 +76,13 @@ func (asyncFn *ObjAsyncFunction) Await(p *ObjPromise) {
 
 func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	asyncFn.Awaiting.Listen()
+	if asyncFn.State != nil && len(asyncFn.State.Stack) > 0 {
+		asyncFn.State.Stack[len(asyncFn.State.Stack)-1] = asyncFn.Awaiting.Value
+	}
+	if asyncFn.Awaiting.Status == REJECTED {
+		asyncFn.RejectValue = asyncFn.Awaiting.Value
+		asyncFn.HasRejection = true
+	}
 	message := &object.JobChannelMessage{
 		Job: nil,
 		Callback: object.Callback{
