@@ -77,6 +77,7 @@ type FunctionScope struct {
 	needsArguments   bool
 	heapVarCount     int
 	hasHeapVars      bool
+	isArrow          bool
 }
 
 const (
@@ -925,6 +926,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if symbolTable.needsArguments {
 					fn.SetHasArguments()
+					if objFn, ok := fn.(*object.ObjFunction); ok {
+						if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
+							objFn.ArgumentsHeapSlot = variable.slot
+						}
+					}
 				}
 
 				if symbolTable.hasHeapVars {
@@ -955,6 +961,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				emitVarInitializers(symbolTable, fn)
+				emitArgumentsHeap(fn)
 
 				if fn.GetArity() > 0 {
 					heapVars := []int{}
@@ -1010,6 +1017,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if symbolTable.needsArguments {
 					newFn.SetHasArguments()
+					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
+						newFn.ArgumentsHeapSlot = variable.slot
+					}
 				}
 
 				handle := heap.Allocate(newFn)
@@ -1032,16 +1042,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				for _, variable := range functions {
 					fnValue := heap.Allocate(variable.fn)
-					slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
+					slot := newFn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
 
 					if uint8(variable.slot) != slot {
 						panic("things went south")
 					}
 
-					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+					newFn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 				}
 
-				emitVarInitializers(symbolTable, fn)
+				emitVarInitializers(symbolTable, newFn)
+				emitArgumentsHeap(newFn)
 
 				if len(current.Params) > 0 {
 					heapVars := []int{}
@@ -1095,6 +1106,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				newFn.Strict = module || nodeHasUseStrict(current)
 				newFn.IsMethod = nextFunctionIsMethod
 				newFn.Length = functionLength(current.Params)
+				if symbolTable.needsArguments {
+					newFn.SetHasArguments()
+					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
+						newFn.ArgumentsHeapSlot = variable.slot
+					}
+				}
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
 				}
@@ -1106,6 +1123,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				emitVarInitializers(symbolTable, newFn)
+				emitArgumentsHeap(newFn)
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -2360,6 +2378,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				method.Strict = true
 				method.IsMethod = true
 				method.Length = functionLength(function.Params)
+				if symbolTable.needsArguments {
+					method.SetHasArguments()
+					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
+						method.ArgumentsHeapSlot = variable.slot
+					}
+				}
 				markParamsDeclared(function.Params, symbolTable)
 
 				if symbolTable.hasHeapVars {
@@ -2367,6 +2391,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				emitVarInitializers(symbolTable, method)
+				emitArgumentsHeap(method)
 
 				for _, node := range function.BodyNode.Body {
 					generateByteCode(node, symbolTable, method)
@@ -2917,6 +2942,12 @@ func functionLength(params []*parser.Node) int {
 		length++
 	}
 	return length
+}
+
+func emitArgumentsHeap(fn object.Callable) {
+	if objFn, ok := fn.(*object.ObjFunction); ok && objFn.ArgumentsHeapSlot >= 0 {
+		fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_ARGUMENTS_HEAP, uint8(objFn.ArgumentsHeapSlot))
+	}
 }
 
 func emitVarInitializers(symbolTable *FunctionScope, fn object.Callable) {

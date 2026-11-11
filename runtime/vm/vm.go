@@ -54,6 +54,7 @@ type CallFrame struct {
 	heapScope  int
 	ownScope   bool
 	newTarget  value.Value
+	arguments  value.Value
 }
 
 func InitFileRoot(path string) {
@@ -1567,7 +1568,12 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		}
 		arr := native.NewArrayFrom(items)
 		v := value.EncodeHandle(heap.Allocate(arr))
-		vm.push(v)
+		if objFn, ok := fn.(*object.ObjFunction); ok && objFn.ArgumentsHeapSlot >= 0 {
+			f.arguments = v
+			vm.frames[vm.frameCount-1].arguments = v
+		} else {
+			vm.push(v)
+		}
 	}
 
 	if fn.HasRestParameter() {
@@ -2480,6 +2486,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				variable = cloneFunctionValue(variable, f.heapScope)
 				heap.DefineHeapVarAt(f.heapScope, slot, variable)
+			}
+		case chunk.OP_DEFINE_ARGUMENTS_HEAP:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				heap.DefineHeapVarAt(f.heapScope, slot, f.arguments)
 			}
 		case chunk.OP_GET_HEAP_VAR:
 			{

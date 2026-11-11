@@ -27,6 +27,7 @@ type ObjFunction struct {
 	LexicalNewTarget value.Value
 	rest      bool
 	arguments bool
+	ArgumentsHeapSlot int
 }
 
 const NOT_IN_HEAP_SCOPE int = -1
@@ -42,6 +43,7 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 		Length:    arity,
 		HeapScope: NOT_IN_HEAP_SCOPE,
 		Prototype: value.UNDEFINED,
+		ArgumentsHeapSlot: -1,
 	}
 }
 

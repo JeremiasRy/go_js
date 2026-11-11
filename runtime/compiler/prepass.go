@@ -116,6 +116,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
+		symbolTable.isArrow = true
 		FUNCTION_SCOPES[current] = symbolTable
 
 		// hoist function declarations
@@ -276,7 +277,23 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Value.(*parser.Node), symbolTable)
 	case parser.NODE_IDENTIFIER:
 		if current.Name == RESERVED_ARGUMENTS {
-			symbolTable.addArgumentsLocalToFunctionScope()
+			target := symbolTable
+			for target != nil && target.isArrow {
+				target = target.parent
+			}
+			if target == nil {
+				target = symbolTable
+			}
+			target.addArgumentsLocalToFunctionScope()
+			if target != symbolTable {
+				if variable, _ := symbolTable.findVariable(current.Name); variable != nil && variable.scope == LOCAL {
+					oldSlot := variable.slot
+					compactBlockSlots(target, oldSlot)
+					variable.scope = HEAP
+					variable.slot = allocateHeapSlot(target)
+					target.hasHeapVars = true
+				}
+			}
 			return
 		}
 

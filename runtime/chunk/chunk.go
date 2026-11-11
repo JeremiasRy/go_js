@@ -121,6 +121,7 @@ const (
 	OP_DELETE_STRICT
 	OP_SET_GLOBAL_NAMED
 	OP_NEW_TARGET
+	OP_DEFINE_ARGUMENTS_HEAP
 )
 
 var OpNames = map[uint8]string{
@@ -242,4 +243,5 @@ var OpNames = map[uint8]string{
 	OP_DELETE_STRICT:                   "OP_DELETE_STRICT",
 	OP_SET_GLOBAL_NAMED:                "OP_SET_GLOBAL_NAMED",
 	OP_NEW_TARGET:                      "OP_NEW_TARGET",
+	OP_DEFINE_ARGUMENTS_HEAP:           "OP_DEFINE_ARGUMENTS_HEAP",
 }
