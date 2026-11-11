@@ -191,7 +191,14 @@ func emitAbruptFinalizers(symbolTable *FunctionScope, fn object.Callable) {
 		finalizer := finalizerStack[i]
 		saved := finalizerStack
 		finalizerStack = finalizerStack[:i]
-		generateByteCode(finalizer, symbolTable, fn)
+		if block, found := BLOCK_SCOPES[finalizer]; found {
+			oldParent := block.parent
+			block.parent = symbolTable.block
+			generateByteCode(finalizer, symbolTable, fn)
+			block.parent = oldParent
+		} else {
+			generateByteCode(finalizer, symbolTable, fn)
+		}
 		finalizerStack = saved
 	}
 }
