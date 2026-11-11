@@ -1776,6 +1776,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				heap.DefineHeapVar(f.fn.GetHeapScope(), variable)
 			}
+		case chunk.OP_DEFINE_HEAP_VAR_AT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				variable := vm.pop()
+				if variable == value.TAG_METHOD_HANDLE {
+					variable = vm.pop()
+					vm.pop() // pop this context
+				}
+				heap.DefineHeapVarAt(f.fn.GetHeapScope(), slot, variable)
+			}
 		case chunk.OP_GET_HEAP_VAR:
 			{
 				slot := c.Code[ip]
@@ -2822,6 +2833,33 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_CREATE_HEAP_SCOPE:
 			{
 				scope := heap.CreateHeapScope()
+				setHeapScopes(f.fn.ValueChunk(), scope)
+				f.fn.SetHeapScope(scope)
+			}
+		case chunk.OP_CLONE_FUNCTION:
+			{
+				v := vm.peek()
+				if v.IsObject() {
+					if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+						if fn, ok := obj.(*object.ObjFunction); ok && fn.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+							vm.pop()
+							vm.push(value.EncodeHandle(heap.Allocate(fn.Clone())))
+						}
+					}
+				}
+			}
+		case chunk.OP_ENSURE_HEAP_SCOPE:
+			{
+				if f.fn.GetHeapScope() == object.NOT_IN_HEAP_SCOPE {
+					scope := heap.CreateHeapScope()
+					setHeapScopes(f.fn.ValueChunk(), scope)
+					f.fn.SetHeapScope(scope)
+				}
+			}
+		case chunk.OP_COPY_HEAP_SCOPE:
+			{
+				old := f.fn.GetHeapScope()
+				scope := heap.CopyHeapScope(old)
 				setHeapScopes(f.fn.ValueChunk(), scope)
 				f.fn.SetHeapScope(scope)
 			}

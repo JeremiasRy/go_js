@@ -233,14 +233,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		// check that we found anything and if it's from a upper function scope
 		if table != nil && table != symbolTable && variable.scope == LOCAL {
-			heapScopeVarCount := 0
 			current := symbolTable
 
 			for current != nil {
 				for _, v := range current.vars {
-					if v.scope == HEAP {
-						heapScopeVarCount++
-					} else if current == table && v.slot > variable.slot {
+					if current == table && v.scope != HEAP && v.slot > variable.slot {
 						v.slot--
 					}
 				}
@@ -248,7 +245,8 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 
 			variable.scope = HEAP
-			variable.slot = heapScopeVarCount
+			variable.slot = table.heapVarCount
+			table.heapVarCount++
 
 		}
 	case parser.NODE_IF_STATEMENT:

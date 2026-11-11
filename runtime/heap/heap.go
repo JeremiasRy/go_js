@@ -59,8 +59,23 @@ func DefineHeapVar(scope int, v value.Value) {
 	a.defineHeapVar(scope, v)
 }
 
+func DefineHeapVarAt(scope, slot int, v value.Value) {
+	a.defineHeapVarAt(scope, slot, v)
+}
+
 func CreateHeapScope() (scope int) {
 	scope = a.createHeapScope()
+	return scope
+}
+
+func CopyHeapScope(old int) (scope int) {
+	scope = a.createHeapScope()
+	if old > 0 {
+		values := a.heapVars[old]
+		copied := make([]value.Value, len(values))
+		copy(copied, values)
+		a.heapVars[scope] = copied
+	}
 	return scope
 }
 
@@ -78,6 +93,13 @@ func (a *Heap) setHeapVar(scope, slot int, v value.Value) {
 
 func (a *Heap) defineHeapVar(scope int, v value.Value) {
 	a.heapVars[scope] = append(a.heapVars[scope], v)
+}
+
+func (a *Heap) defineHeapVarAt(scope, slot int, v value.Value) {
+	for len(a.heapVars[scope]) <= slot {
+		a.heapVars[scope] = append(a.heapVars[scope], value.UNDEFINED)
+	}
+	a.heapVars[scope][slot] = v
 }
 
 func (a *Heap) createHeapScope() (scope int) {

@@ -101,6 +101,10 @@ const (
 	OP_CATCH_BIND
 	OP_GET_CATCH
 	OP_SET_CATCH
+	OP_COPY_HEAP_SCOPE
+	OP_ENSURE_HEAP_SCOPE
+	OP_CLONE_FUNCTION
+	OP_DEFINE_HEAP_VAR_AT
 )
 
 var OpNames = map[uint8]string{
@@ -202,4 +206,8 @@ var OpNames = map[uint8]string{
 	OP_CATCH_BIND:                      "OP_CATCH_BIND",
 	OP_GET_CATCH:                       "OP_GET_CATCH",
 	OP_SET_CATCH:                       "OP_SET_CATCH",
+	OP_COPY_HEAP_SCOPE:                 "OP_COPY_HEAP_SCOPE",
+	OP_ENSURE_HEAP_SCOPE:               "OP_ENSURE_HEAP_SCOPE",
+	OP_CLONE_FUNCTION:                  "OP_CLONE_FUNCTION",
+	OP_DEFINE_HEAP_VAR_AT:              "OP_DEFINE_HEAP_VAR_AT",
 }
