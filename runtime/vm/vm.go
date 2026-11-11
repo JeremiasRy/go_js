@@ -31,6 +31,18 @@ var ROOT_SCRIPT_LOCATION string
 var globals = make([]value.Value, 30)
 var globalsCount = 0
 var imports = make(map[string]value.Value)
+var scriptMode = true
+
+func SetScriptMode(isScript bool) {
+	scriptMode = isScript
+}
+
+func (vm *VM) ensureGlobalObject() value.Value {
+	if vm.globalObject == 0 {
+		vm.globalObject = value.EncodeHandle(heap.Allocate(native.NewGlobalObject()))
+	}
+	return vm.globalObject
+}
 
 type CallFrame struct {
 	fn         object.Callable
@@ -368,6 +380,18 @@ func truthyValue(v value.Value) bool {
 	return value.TRUE == v
 }
 
+func (vm *VM) normalizeThis(fn object.Callable, this value.Value) value.Value {
+	if this == value.UNDEFINED || this == value.NULL {
+		if fnObj, ok := fn.(*object.ObjFunction); ok && fnObj.Strict {
+			return this
+		}
+		if vm.main && scriptMode {
+			return vm.ensureGlobalObject()
+		}
+	}
+	return this
+}
+
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
 	obj, err := heap.GetObject(fn.GetHandle())
 	if err != nil {
@@ -470,6 +494,26 @@ func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value
 			return value.EncodeHandle(heap.Allocate(native.NewLightString(ch))), nil
 		}
 		return value.UNDEFINED, nil
+	}
+	if fn, ok := obj.(*object.ObjFunction); ok {
+		if keyString, ok := vm.valueAsString(key); ok {
+			switch keyString {
+			case "call":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionCall())), nil
+			case "apply":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionApply())), nil
+			case "bind":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionBind())), nil
+			case "name":
+				return value.EncodeHandle(heap.Allocate(native.NewLightString(fn.Name))), nil
+			case "length":
+				return value.ValueFromFloat64(float64(fn.GetArity())), nil
+			case "prototype":
+				if fn.Prototype.IsObject() {
+					return fn.Prototype, nil
+				}
+			}
+		}
 	}
 	if arr, ok := obj.(*native.ObjArr); ok && key.IsInteger() {
 		i := int(key.AsNumber())
@@ -1090,7 +1134,8 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	}
 
 	if fn.HasArguments() {
-		items := vm.popN(argCount)
+		items := make([]value.Value, argCount)
+		copy(items, vm.stack[vm.stackTop-argCount:vm.stackTop])
 		arr := native.NewArrayFrom(items)
 		v := value.EncodeHandle(heap.Allocate(arr))
 		vm.push(v)
@@ -1129,6 +1174,10 @@ Run:
 			for _, v := range callback.Stack {
 				vm.push(v)
 			}
+		}
+
+		if vm.main && scriptMode && callback.Fn.ValueChunk().FnName == object.MAIN_FN_NAME {
+			callback.ThisCtx = vm.ensureGlobalObject()
 		}
 
 		f, c := vm.Call(callback.Fn, nil, callback.ThisCtx, callback.Fn.GetArity(), false)
@@ -1731,10 +1780,25 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_PUSH_GLOBAL_OBJECT:
 			{
-				if vm.globalObject == 0 {
-					vm.globalObject = value.EncodeHandle(heap.Allocate(native.NewGlobalObject()))
+				vm.push(vm.ensureGlobalObject())
+			}
+		case chunk.OP_GET_GLOBAL_BY_NAME:
+			{
+				name := c.Constants[c.Code[ip]]
+				ip++
+				global := vm.ensureGlobalObject()
+				obj, _ := heap.GetObject(global.GetHandle())
+				hashable := obj.(object.Hashable)
+				if !hashable.HasOwn(name) {
+					nameString, _ := vm.valueAsString(name)
+					errValue := vm.makeError("ReferenceError", nameString+" is not defined")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
-				vm.push(vm.globalObject)
+				v := hashable.GetMember(name)
+				vm.push(v)
 			}
 		case chunk.OP_NEGATE:
 			{
@@ -1867,8 +1931,23 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							v = value.EncodeHandle(heap.Allocate(obj.Flush()))
 						}
 					}
+					if fn, ok := obj.(*object.ObjFunction); ok && vm.main && scriptMode && fn.Name != "ANONYMOYS_FN" && fn.Name != object.MAIN_FN_NAME && fn.Name != object.SETUP_FN_NAME {
+						global := vm.ensureGlobalObject()
+						globalObj, _ := heap.GetObject(global.GetHandle())
+						globalObj.(object.Hashable).SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.Name))), v)
+					}
 				}
 				vm.addGlobal(v)
+			}
+		case chunk.OP_DEFINE_GLOBAL_NAMED:
+			{
+				name := c.Constants[c.Code[ip]]
+				ip++
+				v := vm.pop()
+				vm.addGlobal(v)
+				global := vm.ensureGlobalObject()
+				globalObj, _ := heap.GetObject(global.GetHandle())
+				globalObj.(object.Hashable).SetMember(name, v)
 			}
 		case chunk.OP_GET_GLOBAL:
 			{
@@ -2164,7 +2243,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case object.Callable:
 					{
-						f, c = vm.Call(fn, &ip, thisCtx, argCount, calledWithSpread)
+						callThis := thisCtx
+						if fnObj, ok := fn.(*object.ObjFunction); ok {
+							if vm.main && scriptMode && !fnObj.Strict && callThis == value.UNDEFINED {
+								callThis = vm.ensureGlobalObject()
+							}
+						}
+						if vm.main && scriptMode && fn.ValueChunk().FnName == object.MAIN_FN_NAME {
+							callThis = vm.ensureGlobalObject()
+						}
+						f, c = vm.Call(fn, &ip, callThis, argCount, calledWithSpread)
 					}
 				case *native.Resolve:
 					{
@@ -2594,6 +2682,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						o := native.NewObjectFromObject(arg)
 						vm.push(value.EncodeHandle(heap.Allocate(o)))
 					}
+				case *native.ObjectHasOwn:
+					{
+						prop := vm.pop()
+						target := vm.pop()
+						vm.push(fn.HasOwn(target, prop))
+					}
 				case *native.HasOwnProperty:
 					{
 						arg := vm.pop()
@@ -2657,6 +2751,111 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						arg := vm.pop()
 						vm.push(native.NumberIsSafeIntegerValue(arg))
+					}
+				case *native.FunctionCall:
+					{
+						args := vm.popN(argCount)
+						target := thisCtx
+						thisArg := value.UNDEFINED
+						rest := []value.Value{}
+						if len(args) > 0 {
+							thisArg = args[0]
+							rest = args[1:]
+						}
+						obj, err := heap.GetObject(target.GetHandle())
+						if err != nil {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						callable, ok := obj.(object.Callable)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						thisArg = vm.normalizeThis(callable, thisArg)
+						for _, arg := range rest {
+							vm.push(arg)
+						}
+						f, c = vm.Call(callable, &ip, thisArg, len(rest), false)
+					}
+				case *native.FunctionApply:
+					{
+						args := vm.popN(argCount)
+						target := thisCtx
+						thisArg := value.UNDEFINED
+						argArray := value.UNDEFINED
+						if len(args) > 0 {
+							thisArg = args[0]
+						}
+						if len(args) > 1 {
+							argArray = args[1]
+						}
+						obj, err := heap.GetObject(target.GetHandle())
+						if err != nil {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						callable, ok := obj.(object.Callable)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						rest := []value.Value{}
+						if argArray != value.UNDEFINED && argArray != value.NULL {
+							if !argArray.IsObject() {
+								errValue := vm.makeError("TypeError", "CreateListFromArrayLike called on non-object")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							lengthValue, err := vm.getMemberValue(argArray, value.EncodeHandle(heap.Allocate(native.NewLightString("length"))))
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							n, err := vm.toNumber(lengthValue)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							length := int(n)
+							for i := 0; i < length; i++ {
+								item, err := vm.getMemberValue(argArray, value.ValueFromFloat64(float64(i)))
+								if err != nil {
+									return value.UNDEFINED, err
+								}
+								rest = append(rest, item)
+							}
+						}
+						thisArg = vm.normalizeThis(callable, thisArg)
+						for _, arg := range rest {
+							vm.push(arg)
+						}
+						f, c = vm.Call(callable, &ip, thisArg, len(rest), false)
+					}
+				case *native.FunctionBind:
+					{
+						args := vm.popN(argCount)
+						target := thisCtx
+						thisArg := value.UNDEFINED
+						boundArgs := []value.Value{}
+						if len(args) > 0 {
+							thisArg = args[0]
+							boundArgs = args[1:]
+						}
+						bound := native.NewBoundFunction(target, thisArg, boundArgs)
+						vm.push(value.EncodeHandle(heap.Allocate(bound)))
 					}
 				case *native.ParseInt:
 					{
@@ -2975,6 +3174,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						instance := ctor.NewInstance()
 						ctor := instance.GetMember(native.KEY_CTOR)
+						instanceValue := value.EncodeHandle(heap.Allocate(instance))
+						if !ctor.IsObject() {
+							vm.popN(int(argCount))
+							vm.push(instanceValue)
+							continue
+						}
 
 						obj, err := heap.GetObject(ctor.GetHandle())
 
@@ -2986,7 +3191,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							builder := NewVM(false, vm.output)
 							fn := object.NewFunction("builder", 0, nil)
 							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
-							instance := value.EncodeHandle(heap.Allocate(instance))
+							instance := instanceValue
 
 							for _, v := range vm.popN(constructor.GetArity()) {
 								builder.push(v)

@@ -1787,7 +1787,12 @@ func (p *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStrict b
 
 func (p *Parser) adaptDirectivePrologue(statements []*Node) {
 	for i := 0; i < len(statements) && p.isDirectiveCandidate(statements[i]); {
-		statements[i].Directive = statements[i].Expression.Raw[1 : len(statements[i].Expression.Raw)-2]
+		switch value := statements[i].Expression.Value.(type) {
+		case string:
+			statements[i].Directive = value
+		case []byte:
+			statements[i].Directive = string(value)
+		}
 		i++
 	}
 }

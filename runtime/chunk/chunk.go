@@ -106,6 +106,8 @@ const (
 	OP_CLONE_FUNCTION
 	OP_DEFINE_HEAP_VAR_AT
 	OP_UNWRAP_METHOD
+	OP_GET_GLOBAL_BY_NAME
+	OP_DEFINE_GLOBAL_NAMED
 )
 
 var OpNames = map[uint8]string{
@@ -212,4 +214,6 @@ var OpNames = map[uint8]string{
 	OP_CLONE_FUNCTION:                  "OP_CLONE_FUNCTION",
 	OP_DEFINE_HEAP_VAR_AT:              "OP_DEFINE_HEAP_VAR_AT",
 	OP_UNWRAP_METHOD:                   "OP_UNWRAP_METHOD",
+	OP_GET_GLOBAL_BY_NAME:              "OP_GET_GLOBAL_BY_NAME",
+	OP_DEFINE_GLOBAL_NAMED:             "OP_DEFINE_GLOBAL_NAMED",
 }

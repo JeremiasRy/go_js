@@ -72,6 +72,7 @@ func main() {
 
 	virtualMachine.InitFileRoot(rootFileLocation)
 	compiler.InitRootScriptLocation(rootFileLocation)
+	virtualMachine.SetScriptMode(*sourceType == "script")
 
 	if err != nil {
 		println("Can't read file: ", os.Args[1])

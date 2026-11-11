@@ -19,6 +19,7 @@ type ObjFunction struct {
 	Arity     int
 	HeapScope int
 	Prototype value.Value
+	Strict    bool
 	rest      bool
 	arguments bool
 }

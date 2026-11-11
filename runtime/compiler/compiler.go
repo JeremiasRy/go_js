@@ -230,7 +230,7 @@ func (fs *FunctionScope) addArgumentsLocalToFunctionScope() {
 	if _, found := fs.vars[RESERVED_ARGUMENTS]; found {
 		return
 	}
-	variable := &Variable{scope: LOCAL, type_: CONST, slot: -1, init: false, undeclared: false, fn: nil}
+	variable := &Variable{scope: LOCAL, type_: CONST, slot: -1, init: false, declared: true, undeclared: false, fn: nil}
 	fs.vars[RESERVED_ARGUMENTS] = variable
 	for _, variable := range fs.vars {
 		if variable.slot >= fs.arity {
@@ -657,7 +657,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						popReturnValue.pop()
 						return
 					}
-					if (variable.type_ == LET || variable.type_ == CONST) && !variable.declared && owner == symbolTable {
+					if (variable.type_ == LET || variable.type_ == CONST) && !variable.declared && !variable.undeclared && owner == symbolTable {
 						emitThrow(fn, "ReferenceError", "Cannot access '"+left.Name+"' before initialization")
 						popReturnValue.pop()
 						return
@@ -699,8 +699,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(chunk.OP_DUP)
 						if variable.undeclared {
-							fn.ValueChunk().EmitByte(defineOp)
+							if defineOp == chunk.OP_DEFINE_GLOBAL && !module {
+								nameArg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(left.Name))))
+								fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_GLOBAL_NAMED, nameArg)
+							} else {
+								fn.ValueChunk().EmitByte(defineOp)
+							}
 							variable.undeclared = false
+							variable.declared = true
 						} else {
 							fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
 						}
@@ -748,6 +754,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				nextFn, _ := symbolTable.findVariable(current.Identifier.Name)
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
+				if fnObj, ok := nextFn.fn.(*object.ObjFunction); ok {
+					fnObj.Strict = module || nodeHasUseStrict(current)
+				}
 
 				fn = nextFn.fn
 				isInHeapScopeAlready := symbolTable.isInHeapScope()
@@ -834,6 +843,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
+				newFn.Strict = module || nodeHasUseStrict(current)
 
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
@@ -922,6 +932,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
+				newFn.Strict = module || nodeHasUseStrict(current)
 				if symbolTable.hasRestParameter {
 					newFn.SetHasRestParameter()
 				}
@@ -1403,6 +1414,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				variable, owner := symbolTable.findVariable(current.Name)
 
 				if variable == nil {
+					if !module {
+						arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
+						fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL_BY_NAME, arg)
+						return
+					}
 					msg := value.EncodeHandle(heap.Allocate(native.NewLightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
 
 					err := native.NewError()
@@ -1414,7 +1430,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					return
 				}
 
-				if (variable.type_ == LET || variable.type_ == CONST) && !variable.declared && owner == symbolTable {
+				if (variable.type_ == LET || variable.type_ == CONST) && !variable.declared && !variable.undeclared && owner == symbolTable {
 					err := native.NewError()
 					err.SetMember(native.KEY_MESSAGE, value.EncodeHandle(heap.Allocate(native.NewLightString("Cannot access '"+current.Name+"' before initialization"))))
 					err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString("ReferenceError"))))
@@ -2078,6 +2094,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				case LOCAL:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 				}
+				if variable, _ := symbolTable.findVariable(current.Identifier.Name); variable != nil {
+					variable.declared = true
+				}
 			}
 		case parser.NODE_CLASS_BODY:
 			{
@@ -2093,6 +2112,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				function := current.Value.(*parser.Node)
 				method := object.NewFunction(fmt.Sprintf("Class method %s", name), len(function.Params), nil)
+				method.Strict = true
+				markParamsDeclared(function.Params, symbolTable)
 
 				for _, node := range function.BodyNode.Body {
 					generateByteCode(node, symbolTable, method)
@@ -2437,6 +2458,19 @@ func assignmentOpcode(operator parser.AssignmentOperator) uint8 {
 		return chunk.OP_B_XOR
 	}
 	return chunk.OP_ADD
+}
+
+func nodeHasUseStrict(node *parser.Node) bool {
+	if node == nil || node.BodyNode == nil {
+		return false
+	}
+	for _, statement := range node.BodyNode.Body {
+		if statement.Directive != "" {
+			return statement.Directive == "use strict"
+		}
+		return false
+	}
+	return false
 }
 
 func markParamsDeclared(params []*parser.Node, symbolTable *FunctionScope) {

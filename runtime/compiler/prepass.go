@@ -12,6 +12,7 @@ import (
 var catchScope = false
 var classCompiler = false
 var nextCatchId = 0
+var strictContext = false
 var CATCH_IDS = map[*parser.Node]int{}
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
@@ -37,6 +38,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					fn = native.NewGenerator(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
+					if objFn, ok := fn.(*object.ObjFunction); ok {
+						objFn.Strict = module || nodeHasUseStrict(node)
+					}
 				}
 
 				symbolTable.addVariable(name, FUNCTION, false, fn)
@@ -67,6 +71,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					fn = native.NewGenerator(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
+					if objFn, ok := fn.(*object.ObjFunction); ok {
+						objFn.Strict = module || nodeHasUseStrict(node)
+					}
 				}
 				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
@@ -89,9 +96,12 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 
 		symbolTable.arity = len(current.Params)
 
+		savedStrict := strictContext
+		strictContext = strictContext || nodeHasUseStrict(current) || module
 		for _, node := range current.BodyNode.Body {
 			prePass(node, symbolTable)
 		}
+		strictContext = savedStrict
 
 	case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
@@ -108,6 +118,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					fn = native.NewAsyncFunction(name, arity, nil)
 				} else {
 					fn = object.NewFunction(name, arity, nil)
+					if objFn, ok := fn.(*object.ObjFunction); ok {
+						objFn.Strict = module || nodeHasUseStrict(node)
+					}
 				}
 
 				symbolTable.addVariable(name, FUNCTION, false, fn)
@@ -153,6 +166,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 						fn = native.NewAsyncFunction(name, arity, nil)
 					} else {
 						fn = object.NewFunction(name, arity, nil)
+						if objFn, ok := fn.(*object.ObjFunction); ok {
+							objFn.Strict = module || nodeHasUseStrict(node)
+						}
 					}
 
 					symbolTable.addVariable(name, FUNCTION, false, fn)
@@ -200,6 +216,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 						fn = native.NewGenerator(name, arity, nil)
 					} else {
 						fn = object.NewFunction(name, arity, nil)
+						if objFn, ok := fn.(*object.ObjFunction); ok {
+							objFn.Strict = module || nodeHasUseStrict(node)
+						}
 					}
 					symbolTable.addVariable(name, FUNCTION, false, fn)
 				}
@@ -307,8 +326,14 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_EXPRESSION_STATEMENT:
 		prePass(current.Expression, symbolTable)
 	case parser.NODE_ASSIGNMENT_EXPRESSION:
-		if variable, _ := symbolTable.findVariable(current.Left.Name); current.Left.Type != parser.NODE_MEMBER_EXPRESSION && variable == nil {
-			symbolTable.addVariable(current.Left.Name, LET, true, nil)
+		if current.Left.Type != parser.NODE_MEMBER_EXPRESSION {
+			if variable, _ := symbolTable.findVariable(current.Left.Name); variable == nil {
+				if strictContext {
+					prePass(current.Right, symbolTable)
+					return
+				}
+				global.addVariable(current.Left.Name, LET, true, nil)
+			}
 		}
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
@@ -375,8 +400,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_CLASS_DECLARATION:
 		{
 			classCompiler = true
+			savedStrict := strictContext
+			strictContext = true
 			symbolTable.addVariable(current.Identifier.Name, CONST, false, nil)
 			prePass(current.BodyNode, symbolTable)
+			strictContext = savedStrict
 			classCompiler = false
 		}
 	case parser.NODE_CLASS_BODY:

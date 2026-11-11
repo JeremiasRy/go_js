@@ -217,6 +217,30 @@ func (o *ObjObject) Values() []value.Value {
 	panic("unimplemented")
 }
 
+type ObjectHasOwn struct {
+	ObjNativeFn
+}
+
+func NewObjectHasOwn() *ObjectHasOwn {
+	o := &ObjectHasOwn{}
+	o.name = "hasOwn"
+	return o
+}
+
+func (*ObjectHasOwn) HasOwn(target value.Value, prop value.Value) value.Value {
+	if !target.IsObject() {
+		return value.FALSE
+	}
+	obj, err := heap.GetObject(target.GetHandle())
+	if err != nil {
+		return value.FALSE
+	}
+	if hashable, ok := obj.(object.Hashable); ok && hashable.HasOwn(prop) {
+		return value.TRUE
+	}
+	return value.FALSE
+}
+
 type ToString struct {
 	ObjNativeFn
 }

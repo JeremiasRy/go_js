@@ -65,6 +65,7 @@ func NewObjectConstructor() *ObjectConstructor {
 	oc.SetMember(KEY_VALUES, value.EncodeHandle(heap.Allocate(NewObjectValues())))
 	oc.SetMember(KEY_KEYS, value.EncodeHandle(heap.Allocate(NewObjectKeys())))
 	oc.SetMember(KEY_CREATE, value.EncodeHandle(heap.Allocate(NewCreate())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("hasOwn"))), value.EncodeHandle(heap.Allocate(NewObjectHasOwn())))
 
 	return oc
 }
