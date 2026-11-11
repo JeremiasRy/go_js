@@ -154,6 +154,7 @@ var loopStack = []*Loop{}
 var finalizerStack = []*parser.Node{}
 var chainJumpStack = [][]int{}
 var pendingLoopLabel = ""
+var wantMethodHandle = false
 
 func currentLoop() *Loop {
 	if len(loopStack) == 0 {
@@ -1143,7 +1144,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				popReturnValue.push(false)
 				calleeFirst := current.Optional || containsOptional(current.Callee)
 				if calleeFirst {
+					savedHandle := wantMethodHandle
+					wantMethodHandle = true
 					generateByteCode(current.Callee, symbolTable, fn)
+					wantMethodHandle = savedHandle
 					if referenceIsDiscarded(current.Callee) {
 						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 					}
@@ -1187,7 +1191,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						generateByteCode(node, symbolTable, fn)
 					}
 
+					savedHandle := wantMethodHandle
+					wantMethodHandle = true
 					generateByteCode(current.Callee, symbolTable, fn)
+					wantMethodHandle = savedHandle
 					if referenceIsDiscarded(current.Callee) {
 						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 					}
@@ -1203,7 +1210,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_MEMBER_EXPRESSION:
 			{
+				savedHandle := wantMethodHandle
+				wantMethodHandle = false
 				generateByteCode(current.Object, symbolTable, fn)
+				wantMethodHandle = savedHandle
 				if current.Optional {
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
 					fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NULLISH, 0, 0, 0, 0)
@@ -1223,6 +1233,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					})
 				}
 				fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+				if !savedHandle {
+					fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
+				}
 			}
 		case parser.NODE_THIS_EXPRESSION:
 			{
