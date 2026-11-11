@@ -918,9 +918,18 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
 	}
 	if fn, ok := obj.(*object.ObjFunction); ok {
-		if keyString, ok := vm.valueAsString(key); ok && keyString == "prototype" {
-			fn.Prototype = v
-			return nil
+		if keyString, ok := vm.valueAsString(key); ok {
+			if keyString == "prototype" {
+				fn.Prototype = v
+				return nil
+			}
+			if keyString != "name" && keyString != "length" {
+				if fn.Props == nil {
+					fn.Props = map[string]value.Value{}
+				}
+				fn.Props[keyString] = v
+				return nil
+			}
 		}
 	}
 	if arr, ok := obj.(*native.ObjArr); ok {
@@ -1085,6 +1094,11 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 					fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
 				}
 				return fn.Prototype, nil
+			}
+		}
+		if keyString, ok := vm.valueAsString(key); ok {
+			if v, found := fn.Props[keyString]; found {
+				return v, nil
 			}
 		}
 	}
@@ -3612,7 +3626,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.PromiseAll:
 					{
-						result, err := vm.callPromiseAll(argCount)
+						result, err := vm.callPromiseAll(argCount, thisCtx)
 						if err != nil {
 							errValue := vm.errorValue(err)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {

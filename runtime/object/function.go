@@ -30,6 +30,7 @@ type ObjFunction struct {
 	ArgumentsHeapSlot int
 	Cloned bool
 	DefaultParams []bool
+	Props map[string]value.Value
 }
 
 const NOT_IN_HEAP_SCOPE int = -1
@@ -64,6 +65,11 @@ func (fn *ObjFunction) Clear() {
 func (fn *ObjFunction) GetReferencingValues() []value.Value {
 	arr := []value.Value{}
 	for _, v := range fn.ValueChunk().Constants {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+	for _, v := range fn.Props {
 		if v.IsObject() {
 			arr = append(arr, v)
 		}

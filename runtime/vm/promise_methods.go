@@ -52,7 +52,7 @@ func (vm *VM) collectPromiseInput(source value.Value) ([]value.Value, error) {
 
 var errNotIterable = &JSException{Name: "TypeError", Message: "Value is not iterable"}
 
-func (vm *VM) callPromiseAll(argCount int) (value.Value, error) {
+func (vm *VM) callPromiseAll(argCount int, thisCtx value.Value) (value.Value, error) {
 	args := vm.popN(argCount)
 	result := native.NewPromise()
 	resultValue := value.EncodeHandle(heap.Allocate(result))
@@ -60,10 +60,58 @@ func (vm *VM) callPromiseAll(argCount int) (value.Value, error) {
 	if len(args) > 0 {
 		source = args[0]
 	}
-	items, err := vm.collectPromiseInput(source)
-	if err != nil {
-		vm.rejectPromise(result, vm.errorValue(err))
-		return resultValue, nil
+	var resolveMethod value.Value
+	if thisCtx.IsObject() {
+		if ctorObj, err := heap.GetObject(thisCtx.GetHandle()); err == nil {
+			if _, isDefault := ctorObj.(*native.PromiseConstructor); isDefault {
+				resolveMethod = value.UNDEFINED
+			} else if method, err := vm.getMemberValue(thisCtx, value.EncodeHandle(heap.Allocate(native.NewLightString("resolve")))); err == nil {
+				if method.IsObject() {
+					if methodObj, err := heap.GetObject(method.GetHandle()); err == nil {
+						if _, ok := methodObj.(object.Callable); ok {
+							resolveMethod = method
+						}
+					}
+				}
+			}
+		}
+	}
+	var items []value.Value
+	if resolveMethod != value.UNDEFINED {
+		iterator, err := vm.acquireIterator(source, 0)
+		if err != nil {
+			vm.rejectPromise(result, vm.errorValue(err))
+			return resultValue, nil
+		}
+		for {
+			done, err := vm.iteratorNext(iterator)
+			if err != nil {
+				vm.rejectPromise(result, vm.errorValue(err))
+				return resultValue, nil
+			}
+			if done {
+				break
+			}
+			item, err := vm.iteratorCurrent(iterator)
+			if err != nil {
+				vm.rejectPromise(result, vm.errorValue(err))
+				return resultValue, nil
+			}
+			resolved, err := vm.callValue(resolveMethod, thisCtx, []value.Value{item})
+			if err != nil {
+				vm.closeIterator(iterator)
+				vm.rejectPromise(result, vm.errorValue(err))
+				return resultValue, nil
+			}
+			items = append(items, resolved)
+		}
+	} else {
+		collected, err := vm.collectPromiseInput(source)
+		if err != nil {
+			vm.rejectPromise(result, vm.errorValue(err))
+			return resultValue, nil
+		}
+		items = collected
 	}
 	results := make([]value.Value, len(items))
 	remaining := len(items)
