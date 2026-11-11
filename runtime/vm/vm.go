@@ -625,6 +625,20 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 		}
 		return value.EncodeHandle(heap.Allocate(clone))
 	}
+	if fn, ok := obj.(*native.ObjAsyncFunction); ok {
+		if fn.GetHeapScope() == object.NOT_IN_HEAP_SCOPE {
+			clone := fn.Clone().(*native.ObjAsyncFunction)
+			clone.SetHeapScope(scope)
+			return value.EncodeHandle(heap.Allocate(clone))
+		}
+	}
+	if fn, ok := obj.(*native.ObjGenerator); ok {
+		if fn.GetHeapScope() == object.NOT_IN_HEAP_SCOPE {
+			clone := fn.Clone().(*native.ObjGenerator)
+			clone.SetHeapScope(scope)
+			return value.EncodeHandle(heap.Allocate(clone))
+		}
+	}
 	return v
 }
 
@@ -3262,17 +3276,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				if v.IsObject() {
-					obj, err := heap.GetObject(v.GetHandle())
-
-					if err != nil {
-						return value.UNDEFINED, fmt.Errorf("failed to receive object at OP_DEFINE_LOCAL %s", err)
-					}
-					switch obj.(type) {
-					case *object.ObjFunction:
-						{
-							v = cloneFunctionValue(v, f.heapScope)
-						}
-					}
+					v = cloneFunctionValue(v, f.heapScope)
 				}
 				vm.stack[vm.stackTop] = v
 				vm.stackTop++
