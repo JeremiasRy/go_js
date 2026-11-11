@@ -820,7 +820,7 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 				if fn.IsArrow || fn.IsMethod {
 					return value.UNDEFINED, nil
 				}
-				if !fn.Prototype.IsObject() {
+				if fn.Prototype == value.UNDEFINED {
 					proto := native.NewObject()
 					proto.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("constructor"))), objValue)
 					fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
@@ -1185,10 +1185,33 @@ func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if native.SYMBOL_HAS_INSTANCE != 0 {
+		if hashable, ok := ctorObj.(object.Hashable); ok && hashable.HasOwn(native.SYMBOL_HAS_INSTANCE) {
+			method := hashable.GetMember(native.SYMBOL_HAS_INSTANCE)
+			if method.IsObject() {
+				result, err := vm.callValue(method, ctor, []value.Value{objValue})
+				if err != nil {
+					return false, err
+				}
+				return truthyValue(result), nil
+			}
+		}
+	}
+	if bound, ok := ctorObj.(*native.ObjBoundFunction); ok {
+		return vm.instanceOf(objValue, bound.Target)
+	}
 	var prototype value.Value
 	switch ctorObj := ctorObj.(type) {
+	case *native.ObjectConstructor:
+		return true, nil
 	case *object.ObjFunction:
-		prototype = ctorObj.Prototype
+		if ctorObj.IsArrow || ctorObj.IsMethod {
+			return false, fmt.Errorf("right-hand side of instanceof is not callable")
+		}
+		prototype, err = vm.getMemberValue(ctor, value.EncodeHandle(heap.Allocate(native.NewLightString("prototype"))))
+		if err != nil {
+			return false, err
+		}
 	case *native.ObjClass:
 		prototype = ctorObj.GetMember(native.KEY_PROTO)
 	case *native.ErrorConstructor:
@@ -2248,7 +2271,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				objValue := vm.pop()
 				result, err := vm.instanceOf(objValue, ctor)
 				if err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 				vm.push(boolValue(result))
 			}

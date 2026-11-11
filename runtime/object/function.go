@@ -41,6 +41,7 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 		Arity:     arity,
 		Length:    arity,
 		HeapScope: NOT_IN_HEAP_SCOPE,
+		Prototype: value.UNDEFINED,
 	}
 }
 
