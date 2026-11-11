@@ -688,11 +688,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fnValue := heap.Allocate(variable.fn)
 
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-						if module {
-							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
-						} else {
-							fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
-						}
+						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
 						variable.allocated = true
 					}
 				}
@@ -1423,7 +1419,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					switch variable.scope {
 					case GLOBAL:
-						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
 					case LOCAL:
 						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 					case HEAP:
@@ -2255,7 +2251,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_END)
 				switch symbolTable.tableScope {
 				case GLOBAL:
-					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+					if variable, _ := symbolTable.findVariable(current.Identifier.Name); variable != nil {
+						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+					}
 				case LOCAL:
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 				}

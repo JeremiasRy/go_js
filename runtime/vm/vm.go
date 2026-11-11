@@ -2402,6 +2402,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					continue
 				}
 				v := vm.getGlobal(int(global))
+				if v == value.UNINITIALIZED {
+					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				vm.push(v)
 			}
 		case chunk.OP_SET_GLOBAL:
@@ -2410,7 +2417,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 				if int(global) >= globalsCount {
 					for len(globals) <= int(global) {
-						globals = append(globals, value.UNDEFINED)
+						globals = append(globals, value.UNINITIALIZED)
 					}
 					globalsCount = int(global) + 1
 				}
