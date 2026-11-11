@@ -7,6 +7,92 @@ import (
 	"strings"
 )
 
+func UTF16FromUnits(units []uint16) string {
+	var builder []byte
+	for i := 0; i < len(units); i++ {
+		unit := units[i]
+		if unit >= 0xD800 && unit <= 0xDBFF && i+1 < len(units) && units[i+1] >= 0xDC00 && units[i+1] <= 0xDFFF {
+			code := 0x10000 + (int(unit-0xD800) << 10) + int(units[i+1]-0xDC00)
+			builder = append(builder, []byte(string(rune(code)))...)
+			i++
+			continue
+		}
+		builder = append(builder, []byte(encodeCodeUnit(unit))...)
+	}
+	return string(builder)
+}
+
+func UTF16Slice(s string, start, end int) string {
+	units := UTF16Units(s)
+	if start < 0 {
+		start = 0
+	}
+	if end > len(units) {
+		end = len(units)
+	}
+	if start > end {
+		start = end
+	}
+	return UTF16FromUnits(units[start:end])
+}
+
+func UTF16IndexOf(s, search string, from int) int {
+	haystack := UTF16Units(s)
+	needle := UTF16Units(search)
+	if from < 0 {
+		from = 0
+	}
+	if len(needle) == 0 {
+		if from > len(haystack) {
+			return len(haystack)
+		}
+		return from
+	}
+	for i := from; i+len(needle) <= len(haystack); i++ {
+		match := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
+func UTF16LastIndexOf(s, search string, from int) int {
+	haystack := UTF16Units(s)
+	needle := UTF16Units(search)
+	if len(needle) == 0 {
+		if from < 0 {
+			return 0
+		}
+		if from > len(haystack) {
+			return len(haystack)
+		}
+		return from
+	}
+	if from > len(haystack)-len(needle) {
+		from = len(haystack) - len(needle)
+	}
+	for i := from; i >= 0; i-- {
+		match := true
+		for j := range needle {
+			if haystack[i+j] != needle[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
+}
+
 func UTF16Length(s string) int {
 	return len(UTF16Units(s))
 }

@@ -76,6 +76,11 @@ func ConvertJSON(v interface{}) value.Value {
 }
 
 func JSONStringToValue(text string) (value.Value, error) {
+	if len(text) == 8 && strings.HasPrefix(text, "\"\\u") && text[7] == '"' {
+		if n, err := strconv.ParseUint(text[3:7], 16, 16); err == nil && n >= 0xD800 && n <= 0xDFFF {
+			return value.EncodeHandle(heap.Allocate(NewLightString(encodeCodeUnit(uint16(n))))), nil
+		}
+	}
 	decoder := json.NewDecoder(strings.NewReader(text))
 	decoder.UseNumber()
 	var v interface{}

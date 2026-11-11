@@ -207,6 +207,7 @@ func initStringPrototype() {
 	p.SetMember(KEY_STARTS_WITH, startsWith)
 	p.SetMember(charAtKey, charAt)
 	p.SetMember(charCodeAtKey, charCodeAt)
+	AddStringMethods(p)
 
 	PROTOTYPE_STRING = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(

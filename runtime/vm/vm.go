@@ -129,6 +129,15 @@ func (vm *VM) pop() value.Value {
 	return vm.stack[vm.stackTop]
 }
 
+func (vm *VM) popUnwrapped() value.Value {
+	v := vm.pop()
+	if isMethodHandle(v) {
+		v = vm.pop()
+		vm.pop()
+	}
+	return v
+}
+
 func (vm *VM) addGlobal(v value.Value) {
 	if globalsCount >= len(globals) {
 		globals = append(globals, v)
@@ -698,17 +707,30 @@ func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value
 
 func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, receiver value.Value) (value.Value, error) {
 	if !objValue.IsObject() {
+		if objValue.IsNumber() && native.PROTOTYPE_NUMBER.IsObject() {
+			return vm.getMemberValueWithReceiver(native.PROTOTYPE_NUMBER, key, receiver)
+		}
 		return value.UNDEFINED, nil
 	}
 	obj, err := heap.GetObject(objValue.GetHandle())
 	if err != nil {
 		return value.UNDEFINED, err
 	}
-	if s, isString := vm.valueAsString(objValue); isString && key.IsInteger() {
-		if ch, ok := native.UTF16CharAt(s, int(key.AsNumber())); ok {
-			return value.EncodeHandle(heap.Allocate(native.NewLightString(ch))), nil
+	if boxed, ok := obj.(*native.BoxedPrimitive); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "valueOf" {
+			return value.EncodeHandle(heap.Allocate(native.NewBoxedValueOf())), nil
 		}
-		return value.UNDEFINED, nil
+		if _, ok := vm.valueAsString(boxed.Primitive); ok {
+			return vm.getMemberValueWithReceiver(boxed.Primitive, key, receiver)
+		}
+	}
+	if s, isString := vm.valueAsString(objValue); isString {
+		if index, ok := vm.arrayIndexFromValue(key); ok {
+			if ch, ok := native.UTF16CharAt(s, index); ok {
+				return value.EncodeHandle(heap.Allocate(native.NewLightString(ch))), nil
+			}
+			return value.UNDEFINED, nil
+		}
 	}
 	if fn, ok := obj.(*object.ObjFunction); ok {
 		if keyString, ok := vm.valueAsString(key); ok {
@@ -792,6 +814,9 @@ func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
 	if obj, err := heap.GetObject(v.GetHandle()); err == nil {
 		if _, ok := obj.(*native.ObjSymbol); ok {
 			return value.UNDEFINED, fmt.Errorf("Cannot convert a Symbol value to a string")
+		}
+		if boxed, ok := obj.(*native.BoxedPrimitive); ok {
+			return boxed.Primitive, nil
 		}
 	}
 	if native.SYMBOL_TO_PRIMITIVE != 0 {
@@ -1048,7 +1073,7 @@ func (vm *VM) typeofValue(v value.Value) string {
 		switch obj.(type) {
 		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ObjNativeFn:
 			return "function"
-		case *native.LightString, *native.ObjString, *native.ObjStringBuilder:
+		case *native.LightString, *native.ObjStringBuilder:
 			return "string"
 		case *native.ObjSymbol:
 			return "symbol"
@@ -1910,8 +1935,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_EQUALS:
 			{
-				b := vm.pop()
-				a := vm.pop()
+				b := vm.popUnwrapped()
+				a := vm.popUnwrapped()
 				result, err := vm.looseEquals(a, b)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1920,8 +1945,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_NOT_EQUALS:
 			{
-				b := vm.pop()
-				a := vm.pop()
+				b := vm.popUnwrapped()
+				a := vm.popUnwrapped()
 				result, err := vm.looseEquals(a, b)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1930,15 +1955,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_STRICT_EQUALS:
 			{
-				b := vm.pop()
-				a := vm.pop()
+				b := vm.popUnwrapped()
+				a := vm.popUnwrapped()
 
 				vm.push(boolValue(strictEquals(a, b)))
 			}
 		case chunk.OP_STRICT_NOT_EQUALS:
 			{
-				b := vm.pop()
-				a := vm.pop()
+				b := vm.popUnwrapped()
+				a := vm.popUnwrapped()
 
 				vm.push(boolValue(!strictEquals(a, b)))
 			}
@@ -2977,6 +3002,86 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.Fill(arr.(*native.ObjArr), arg)
 						vm.push(thisCtx)
 					}
+				case *native.BoxedValueOf:
+					{
+						if boxed, err := heap.GetObject(thisCtx.GetHandle()); err == nil {
+							if primitive, ok := boxed.(*native.BoxedPrimitive); ok {
+								vm.push(primitive.Primitive)
+								continue
+							}
+						}
+						vm.push(thisCtx)
+					}
+				case *native.BooleanConstructor:
+					{
+						if argCount == 0 {
+							vm.push(value.FALSE)
+						} else {
+							arg := vm.pop()
+							vm.push(boolValue(truthyValue(arg)))
+						}
+					}
+				case *native.NumberConstructor:
+					{
+						if argCount == 0 {
+							vm.push(value.ValueFromFloat64(0))
+						} else {
+							arg := vm.pop()
+							n, err := vm.toNumber(arg)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							vm.push(value.ValueFromFloat64(n))
+						}
+					}
+				case *native.NumberFormatMethod:
+					{
+						result, err := vm.callNumberFormatMethod(fn, thisCtx, argCount)
+						if err != nil {
+							errValue := vm.makeError("RangeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.MathMethod:
+					{
+						result, err := vm.callMathMethod(fn, argCount)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						vm.push(result)
+					}
+				case *native.StringMethod:
+					{
+						result, err := vm.callStringMethod(fn, thisCtx, argCount)
+						if err != nil {
+							name := "TypeError"
+							if fn.Kind == native.STRING_REPEAT || fn.Kind == native.STRING_NORMALIZE {
+								name = "RangeError"
+							}
+							errValue := vm.makeError(name, err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.StringStaticMethod:
+					{
+						result, err := vm.callStringStaticMethod(fn, argCount)
+						if err != nil {
+							errValue := vm.makeError("RangeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
 				case *native.StringCharAt:
 					{
 						index := 0
@@ -3241,11 +3346,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.JSONParse:
 					{
-						arg := vm.pop()
-						text, _ := vm.valueAsString(arg)
-						result, err := fn.Parse(text)
+						result, err := vm.callJSONParse(argCount)
 						if err != nil {
 							errValue := vm.makeError("SyntaxError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.JSONStringify:
+					{
+						result, err := vm.callJSONStringify(argCount)
+						if err != nil {
+							errValue := vm.makeError("TypeError", err.Error())
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
 							}
@@ -3294,6 +3409,34 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						callable, ok := obj.(object.Callable)
 						if !ok {
 							switch nativeFn := obj.(type) {
+							case *native.StringMethod:
+								for _, arg := range rest {
+									vm.push(arg)
+								}
+								result, err := vm.callStringMethod(nativeFn, thisArg, len(rest))
+								if err != nil {
+									errValue := vm.makeError("TypeError", err.Error())
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+								vm.push(result)
+								continue
+							case *native.StringStaticMethod:
+								for _, arg := range rest {
+									vm.push(arg)
+								}
+								result, err := vm.callStringStaticMethod(nativeFn, len(rest))
+								if err != nil {
+									errValue := vm.makeError("RangeError", err.Error())
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+								vm.push(result)
+								continue
 							case *native.ArrayMethod:
 								for _, arg := range rest {
 									vm.push(arg)
@@ -3410,28 +3553,39 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.ParseInt:
 					{
-						base := 10
-						if argCount == 2 {
-							arg := vm.pop()
-							if arg.IsObject() {
-								str, _ := heap.GetObject(arg.GetHandle())
-								baseArg, err := strconv.Atoi(str.String())
-								if err != nil {
-									return value.UNDEFINED, fmt.Errorf("invalid argument for parseInt %s", native.String(arg))
-								}
-								base = baseArg
-							} else {
-								base = int(arg.AsNumber())
+						args := vm.popN(argCount)
+						text := "undefined"
+						if len(args) > 0 {
+							s, err := vm.toStringValue(args[0])
+							if err != nil {
+								return value.UNDEFINED, err
 							}
-
+							text, _ = vm.valueAsString(s)
 						}
-
-						arg := vm.pop()
-						obj, _ := heap.GetObject(arg.GetHandle())
-
-						v, _ := fn.ParseInteger(obj.String(), base)
-
-						vm.push(v)
+						radix := 0
+						if len(args) > 1 && args[1] != value.UNDEFINED {
+							n, err := vm.toNumber(args[1])
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							if !math.IsNaN(n) {
+								radix = int(int32(uint32(int64(n))))
+							}
+						}
+						vm.push(parseIntString(text, radix))
+					}
+				case *native.ParseFloat:
+					{
+						text := "undefined"
+						if argCount > 0 {
+							arg := vm.pop()
+							s, err := vm.toStringValue(arg)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							text, _ = vm.valueAsString(s)
+						}
+						vm.push(parseFloatString(text))
 					}
 				default:
 					errValue := vm.makeError("TypeError", "Value is not callable")
@@ -3731,6 +3885,42 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				switch ctor := obj.(type) {
+				case *native.BooleanConstructor:
+					{
+						primitive := value.FALSE
+						if argCount > 0 {
+							arg := vm.pop()
+							primitive = boolValue(truthyValue(arg))
+						}
+						vm.push(native.NewBoxedPrimitiveValue(primitive))
+					}
+				case *native.NumberConstructor:
+					{
+						primitive := value.ValueFromFloat64(0)
+						if argCount > 0 {
+							arg := vm.pop()
+							n, err := vm.toNumber(arg)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							primitive = value.ValueFromFloat64(n)
+						}
+						vm.push(native.NewBoxedPrimitiveValue(primitive))
+					}
+				case *native.StringConstructor:
+					{
+						s := ""
+						if argCount > 0 {
+							arg := vm.pop()
+							converted, err := vm.toStringValue(arg)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							s, _ = vm.valueAsString(converted)
+						}
+						primitive := value.EncodeHandle(heap.Allocate(native.NewLightString(s)))
+						vm.push(native.NewBoxedPrimitiveValue(primitive))
+					}
 				case *native.SymbolConstructor:
 					{
 						errValue := vm.makeError("TypeError", "Symbol is not a constructor")

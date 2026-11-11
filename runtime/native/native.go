@@ -72,6 +72,21 @@ func NewQueueMicroTask() *QueueMicroTask {
 	return q
 }
 
+var (
+	PARSE_INT_VALUE   value.Value
+	PARSE_FLOAT_VALUE value.Value
+)
+
+type ParseFloat struct {
+	ObjNativeFn
+}
+
+func NewParseFloat() *ParseFloat {
+	p := &ParseFloat{}
+	p.name = "parseFloat"
+	return p
+}
+
 type ParseInt struct {
 	ObjNativeFn
 }
@@ -99,6 +114,9 @@ func Init() {
 
 	initArrayPrototype()
 	initStringPrototype()
+	numberPrototype := NewNumberPrototype()
+	PROTOTYPE_NUMBER = value.EncodeHandle(heap.Allocate(numberPrototype))
+	heap.PushToRoots(PROTOTYPE_NUMBER)
 	initGeneratorPrototype()
 	initMapPrototype()
 	initSetPrototype()

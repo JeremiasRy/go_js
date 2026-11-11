@@ -18,10 +18,21 @@ func NewNumberConstructor() *NumberConstructor {
 	nc := &NumberConstructor{}
 	nc.Members = map[string]ObjectValueEntry{}
 	nc.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_NUMBER)
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isNaN"))), value.EncodeHandle(heap.Allocate(NewNumberIsNaN())))
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isFinite"))), value.EncodeHandle(heap.Allocate(NewNumberIsFinite())))
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isInteger"))), value.EncodeHandle(heap.Allocate(NewNumberIsInteger())))
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isSafeInteger"))), value.EncodeHandle(heap.Allocate(NewNumberIsSafeInteger())))
+	if PARSE_INT_VALUE != 0 {
+		nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("parseInt"))), PARSE_INT_VALUE)
+	} else {
+		nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("parseInt"))), value.EncodeHandle(heap.Allocate(NewParseInt())))
+	}
+	if PARSE_FLOAT_VALUE != 0 {
+		nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("parseFloat"))), PARSE_FLOAT_VALUE)
+	} else {
+		nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("parseFloat"))), value.EncodeHandle(heap.Allocate(NewParseFloat())))
+	}
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("MAX_SAFE_INTEGER"))), value.ValueFromFloat64(9007199254740991))
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("MIN_SAFE_INTEGER"))), value.ValueFromFloat64(-9007199254740991))
 	nc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("EPSILON"))), value.ValueFromFloat64(2.220446049250313e-16))
@@ -37,6 +48,49 @@ func (*NumberConstructor) String() string {
 func (*NumberConstructor) Type() object.ObjType {
 	return object.OBJ_OBJECT_CONSTRUCTOR
 }
+
+type NumberFormatKind int
+
+const (
+	NUMBER_TO_FIXED NumberFormatKind = iota
+	NUMBER_TO_PRECISION
+	NUMBER_TO_EXPONENTIAL
+	NUMBER_TO_STRING
+)
+
+type NumberFormatMethod struct {
+	ObjNativeFn
+	Kind NumberFormatKind
+}
+
+func NewNumberFormatMethod(name string, kind NumberFormatKind) *NumberFormatMethod {
+	m := &NumberFormatMethod{Kind: kind}
+	m.name = name
+	return m
+}
+
+func NewNumberPrototype() *Prototype {
+	p := &Prototype{name: NUMBER_CONSTRUCTOR_NAME}
+	p.Members = map[string]ObjectValueEntry{}
+	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	for _, item := range []struct {
+		name string
+		kind NumberFormatKind
+	}{
+		{"toFixed", NUMBER_TO_FIXED},
+		{"toPrecision", NUMBER_TO_PRECISION},
+		{"toExponential", NUMBER_TO_EXPONENTIAL},
+		{"toString", NUMBER_TO_STRING},
+		{"valueOf", NUMBER_TO_STRING},
+	} {
+		key := value.EncodeHandle(heap.Allocate(NewLightString(item.name)))
+		p.SetMember(key, value.EncodeHandle(heap.Allocate(NewNumberFormatMethod(item.name, item.kind))))
+		heap.PushToRoots(key)
+	}
+	return p
+}
+
+var PROTOTYPE_NUMBER value.Value
 
 type NumberIsNaN struct {
 	ObjNativeFn

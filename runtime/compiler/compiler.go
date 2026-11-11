@@ -496,6 +496,17 @@ func defineParseInt(main *object.ObjFunction, symbolTable *FunctionScope) {
 	symbolTable.addVariable(native.PARSE_INT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+	native.PARSE_INT_VALUE = value.EncodeHandle(handle)
+}
+
+func defineParseFloat(main *object.ObjFunction, symbolTable *FunctionScope) {
+	parseFloat := native.NewParseFloat()
+	handle := heap.Allocate(parseFloat)
+
+	symbolTable.addVariable("parseFloat", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+	native.PARSE_FLOAT_VALUE = value.EncodeHandle(handle)
 }
 
 func defineNumberConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -526,11 +537,28 @@ func defineSymbolConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 }
 
 func defineStringConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	stringCtor := &native.StringConstructor{}
-	stringCtor.Members = map[string]native.ObjectValueEntry{}
+	stringCtor := native.NewStringConstructorObject()
 	handle := heap.Allocate(stringCtor)
 
 	symbolTable.addVariable(native.STRING_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineMathObject(main *object.ObjFunction, symbolTable *FunctionScope) {
+	mathObject := native.NewMathObject()
+	handle := heap.Allocate(mathObject)
+
+	symbolTable.addVariable(native.MATH_OBJECT_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineBooleanConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	booleanCtor := native.NewBooleanConstructor()
+	handle := heap.Allocate(booleanCtor)
+
+	symbolTable.addVariable(native.BOOLEAN_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
@@ -570,10 +598,13 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineSetConstructor(setup, global)
 	defineQueueMicroTask(setup, global)
 	defineParseInt(setup, global)
+	defineParseFloat(setup, global)
 	defineNumberConstructor(setup, global)
 	defineJSONObject(setup, global)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
+	defineMathObject(setup, global)
+	defineBooleanConstructor(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
 	}
