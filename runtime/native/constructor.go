@@ -1,8 +1,6 @@
 package native
 
 import (
-	"errors"
-	"fmt"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
@@ -16,10 +14,15 @@ type Constructor interface {
 
 type ErrorConstructor struct {
 	ObjObject
+	errorName string
 }
 
 func NewErrorConstructor() *ErrorConstructor {
-	ec := &ErrorConstructor{}
+	return NewNamedErrorConstructor("Error")
+}
+
+func NewNamedErrorConstructor(name string) *ErrorConstructor {
+	ec := &ErrorConstructor{errorName: name}
 	ec.Members = map[string]ObjectValueEntry{}
 	return ec
 }
@@ -28,34 +31,27 @@ func (*ErrorConstructor) String() string {
 	return "Error constructor"
 }
 
+func (ec *ErrorConstructor) ErrorName() string {
+	return ec.errorName
+}
+
 func (*ErrorConstructor) Type() object.ObjType {
 	return object.OBJ_ERROR_CONSTRUCTOR
 }
 
 func (ec *ErrorConstructor) New(params ...any) (object.Object, error) {
-	if len(params) < 1 {
-		return nil, errors.New("not enough params for new Error()")
-	}
-
-	var arg object.Object
-	var handle value.Value
-
-	if argHandle, ok := params[0].(value.Value); ok {
-		a, err := heap.GetObject(argHandle.GetHandle())
-		handle = argHandle
-		if err != nil {
-			return nil, err
+	errorObject := NewNamedError(ec.errorName)
+	if len(params) > 0 {
+		if argHandle, ok := params[0].(value.Value); ok {
+			if argHandle != value.UNDEFINED {
+				arg, err := heap.GetObject(argHandle.GetHandle())
+				if err == nil {
+					errorObject.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(arg.String()))))
+				}
+			}
 		}
-		arg = a
 	}
-
-	if arg.Type() == object.OBJ_STRING {
-		errorObject := NewError()
-		errorObject.SetMember(KEY_MESSAGE, handle)
-		return errorObject, nil
-	}
-
-	return nil, fmt.Errorf("arg is of wrong type")
+	return errorObject, nil
 }
 
 type ObjectConstructor struct {

@@ -116,6 +116,10 @@ var unaryOperatorMap = map[parser.UnaryOperator]uint8{
 	parser.UNARY_NOT:    chunk.OP_NOT,
 }
 
+const (
+	ITERATOR_VAR_NAME = "__gojs_iterator"
+)
+
 var ROOT_SCRIPT_LOCATION string
 var imports = make(map[string]*parser.Node)
 
@@ -370,12 +374,14 @@ func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 }
 
 func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	ctor := &native.ErrorConstructor{}
-	ctorHandle := heap.Allocate(ctor)
+	for _, name := range []string{"Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "AggregateError"} {
+		ctor := native.NewNamedErrorConstructor(name)
+		ctorHandle := heap.Allocate(ctor)
 
-	symbolTable.addVariable(native.ERROR_CONSTRUCTOR_NAME, CONST, false, nil)
-	main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
-	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+		symbolTable.addVariable(name, CONST, false, nil)
+		main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
+		main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+	}
 }
 
 func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -450,6 +456,15 @@ func defineNumberConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
+	jsonObject := native.NewJSONObject()
+	handle := heap.Allocate(jsonObject)
+
+	symbolTable.addVariable(native.JSON_OBJECT_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 var module = false
 
@@ -486,6 +501,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineQueueMicroTask(setup, global)
 	defineParseInt(setup, global)
 	defineNumberConstructor(setup, global)
+	defineJSONObject(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
 	}
@@ -1391,6 +1407,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					err := native.NewError()
 					err.SetMember(native.KEY_MESSAGE, msg)
+					err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString("ReferenceError"))))
 
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
 					fn.ValueChunk().EmitByte(chunk.OP_THROW)
@@ -1638,11 +1655,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				for _, variable := range symbolTable.block.vars {
 					variable.declared = true
 				}
+				bindings := loopBindingNameSet(current.Left)
+				bindings[ITERATOR_VAR_NAME] = true
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_ENSURE_HEAP_SCOPE)
 				}
 				variables := sortedBlockVariables(symbolTable.block)
 				for _, variable := range variables {
+					if !bindings[variableName(symbolTable.block, variable)] {
+						continue
+					}
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 					if variable.scope == HEAP {
 						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
@@ -1655,6 +1677,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				popReturnValue.pop()
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
+				iteratorVariable, _ := symbolTable.findVariable(ITERATOR_VAR_NAME)
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot))
 				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 				if blockHasHeapVars(symbolTable.block) {
@@ -1669,28 +1693,39 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, fn)
 				}
 
+				continuationStart := len(fn.ValueChunk().Code)
+				bodyLocals := bodyLocalVariableCount(symbolTable.block, bindings)
+				for range bodyLocals {
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+				}
 				fn.ValueChunk().EmitByte(chunk.OP_JUMP)
 				fn.ValueChunk().EmitUint32(jumpStart - 2)
 				loopEnd := uint32(len(fn.ValueChunk().Code))
 				fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
 
+				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
+
+				boundLocals := 0
+				for name, variable := range symbolTable.block.vars {
+					if name != ITERATOR_VAR_NAME && bindings[name] && variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+						boundLocals++
+					}
+				}
+				for range boundLocals {
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+				}
+				cleanupEnd := uint32(len(fn.ValueChunk().Code))
 				for _, breakpoint := range currentLoop().points {
 					pos := breakpoint.position
 					switch breakpoint.type_ {
 					case BREAKPOINT_BREAK:
-						fn.ValueChunk().PatchUint32(uint32(pos), loopEnd)
+						fn.ValueChunk().PatchUint32(uint32(pos), cleanupEnd)
 					case BREAKPOINT_CONTINUE:
-						fn.ValueChunk().PatchUint32(uint32(pos), jumpStart-2)
+						fn.ValueChunk().PatchUint32(uint32(pos), uint32(continuationStart))
 					}
 				}
 
 				popLoop()
-				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
-
-				count := blockLocalVarCount(symbolTable.block)
-				for range count {
-					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-				}
 				symbolTable.exitBlockScope()
 			}
 		case parser.NODE_FOR_IN_STATEMENT:
@@ -1699,11 +1734,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				for _, variable := range symbolTable.block.vars {
 					variable.declared = true
 				}
+				bindings := loopBindingNameSet(current.Left)
+				bindings[ITERATOR_VAR_NAME] = true
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_ENSURE_HEAP_SCOPE)
 				}
 				variables := sortedBlockVariables(symbolTable.block)
 				for _, variable := range variables {
+					if !bindings[variableName(symbolTable.block, variable)] {
+						continue
+					}
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 					if variable.scope == HEAP {
 						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
@@ -1714,6 +1754,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(current.Right, symbolTable, fn)
 
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_IN)
+				iteratorVariable, _ := symbolTable.findVariable(ITERATOR_VAR_NAME)
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot))
 				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 				if blockHasHeapVars(symbolTable.block) {
@@ -1728,15 +1770,38 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, fn)
 				}
 
-				fn.ValueChunk().EmitByte(chunk.OP_JUMP)
-				fn.ValueChunk().EmitUint32(jumpStart - 2)
-				fn.ValueChunk().PatchUint32(jumpStart, uint32(len(fn.ValueChunk().Code)))
-				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
-
-				count := blockLocalVarCount(symbolTable.block)
-				for range count {
+				continuationStart := len(fn.ValueChunk().Code)
+				bodyLocals := bodyLocalVariableCount(symbolTable.block, bindings)
+				for range bodyLocals {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 				}
+				fn.ValueChunk().EmitByte(chunk.OP_JUMP)
+				fn.ValueChunk().EmitUint32(jumpStart - 2)
+				loopEnd := uint32(len(fn.ValueChunk().Code))
+				fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
+				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
+
+				boundLocals := 0
+				for name, variable := range symbolTable.block.vars {
+					if name != ITERATOR_VAR_NAME && bindings[name] && variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+						boundLocals++
+					}
+				}
+				for range boundLocals {
+					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+				}
+				cleanupEnd := uint32(len(fn.ValueChunk().Code))
+				for _, breakpoint := range currentLoop().points {
+					pos := breakpoint.position
+					switch breakpoint.type_ {
+					case BREAKPOINT_BREAK:
+						fn.ValueChunk().PatchUint32(uint32(pos), cleanupEnd)
+					case BREAKPOINT_CONTINUE:
+						fn.ValueChunk().PatchUint32(uint32(pos), uint32(continuationStart))
+					}
+				}
+
+				popLoop()
 				symbolTable.exitBlockScope()
 			}
 		case parser.NODE_OBJECT_EXPRESSION:
@@ -2440,6 +2505,67 @@ func sortedBlockVariables(block *BlockScope) []*Variable {
 		return cmp.Compare(a.slot, b.slot)
 	})
 	return variables
+}
+
+func variableName(block *BlockScope, target *Variable) string {
+	for name, variable := range block.vars {
+		if variable == target {
+			return name
+		}
+	}
+	return ""
+}
+
+func loopBindingNameSet(node *parser.Node) map[string]bool {
+	names := map[string]bool{}
+	if node == nil || node.Type != parser.NODE_VARIABLE_DECLARATION {
+		return names
+	}
+	var collect func(*parser.Node)
+	collect = func(n *parser.Node) {
+		if n == nil {
+			return
+		}
+		switch n.Type {
+		case parser.NODE_IDENTIFIER:
+			names[n.Name] = true
+		case parser.NODE_ASSIGNMENT_PATTERN:
+			collect(n.Left)
+		case parser.NODE_REST_ELEMENT:
+			collect(n.Argument)
+		case parser.NODE_ARRAY_PATTERN:
+			for _, element := range n.Elements {
+				collect(element)
+			}
+		case parser.NODE_OBJECT_PATTERN:
+			for _, property := range n.Properties {
+				if property.Type == parser.NODE_PROPERTY {
+					if value, ok := property.Value.(*parser.Node); ok {
+						collect(value)
+					}
+				} else if property.Type == parser.NODE_REST_ELEMENT {
+					collect(property.Argument)
+				}
+			}
+		}
+	}
+	for _, declaration := range node.Declarations {
+		collect(declaration.Identifier)
+	}
+	return names
+}
+
+func bodyLocalVariableCount(block *BlockScope, bindings map[string]bool) int {
+	count := 0
+	for name, variable := range block.vars {
+		if bindings[name] {
+			continue
+		}
+		if variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+			count++
+		}
+	}
+	return count
 }
 
 func variableOperand(variable *Variable) uint8 {

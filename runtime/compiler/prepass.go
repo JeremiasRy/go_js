@@ -288,6 +288,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
+		symbolTable.addVariable(ITERATOR_VAR_NAME, LET, false, nil)
 		prePass(current.Right, symbolTable)
 		for _, node := range current.BodyNode.Body {
 			prePass(node, symbolTable)
@@ -297,6 +298,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
+		symbolTable.addVariable(ITERATOR_VAR_NAME, LET, false, nil)
 		prePass(current.Right, symbolTable)
 		for _, node := range current.BodyNode.Body {
 			prePass(node, symbolTable)

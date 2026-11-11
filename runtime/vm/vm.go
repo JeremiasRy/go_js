@@ -767,6 +767,21 @@ func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
 		prototype = ctorObj.Prototype
 	case *native.ObjClass:
 		prototype = ctorObj.GetMember(native.KEY_PROTO)
+	case *native.ErrorConstructor:
+		obj, err := heap.GetObject(objValue.GetHandle())
+		if err != nil {
+			return false, err
+		}
+		errObj, ok := obj.(*native.ObjError)
+		if !ok {
+			return false, nil
+		}
+		if ctorObj.ErrorName() == "Error" {
+			return true, nil
+		}
+		nameValue := errObj.GetMember(native.KEY_NAME)
+		name, _ := vm.valueAsString(nameValue)
+		return name == ctorObj.ErrorName(), nil
 	}
 	if !prototype.IsObject() {
 		return false, fmt.Errorf("function has non-object prototype in instanceof check")
@@ -1264,7 +1279,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				k := vm.pop()
 				objValue := vm.pop()
 				if err := vm.setMemberValue(objValue, k, v); err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 				vm.push(v)
 			}
@@ -1275,7 +1294,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				k := vm.pop()
 				objValue := vm.pop()
 				if err := vm.setMemberValue(objValue, k, v); err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 				vm.push(keep)
 			}
@@ -2040,7 +2063,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				if err := vm.setMemberValue(hash, k, v); err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 			}
 		case chunk.OP_GET_OBJECT_MEMBER:
@@ -2597,6 +2624,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn, _ := heap.GetObject(v.GetHandle())
 						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
 					}
+				case *native.JSONParse:
+					{
+						arg := vm.pop()
+						text, _ := vm.valueAsString(arg)
+						result, err := fn.Parse(text)
+						if err != nil {
+							errValue := vm.makeError("SyntaxError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
 				case *native.NumberIsNaN:
 					{
 						arg := vm.pop()
@@ -2642,6 +2683,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						vm.push(v)
 					}
+				default:
+					errValue := vm.makeError("TypeError", "Value is not callable")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 
 			}
@@ -2960,6 +3007,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case native.Constructor:
 					{
 						args := vm.popN(int(argCount))
+						if _, ok := ctor.(*native.ArrayConstructor); ok && len(args) == 1 && args[0].IsNumber() {
+							n := args[0].AsNumber()
+							if n < 0 || math.IsNaN(n) || math.Trunc(n) != n || n >= 4294967296 {
+								errValue := vm.makeError("RangeError", "Invalid array length")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+						}
 						params := make([]any, argCount)
 
 						for i, v := range args {
