@@ -1000,6 +1000,20 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 			return nil
 		}
 	}
+	if array, ok := obj.(*native.ObjTypedArray); ok {
+		if index, isIndex := vm.arrayIndexFromValue(key); isIndex {
+			if index < 0 || index >= array.Length {
+				return nil
+			}
+			if array.Kind == native.TYPED_BIGINT64 || array.Kind == native.TYPED_BIGUINT64 {
+				if _, ok := vm.bigIntObject(v); !ok {
+					return &JSException{Name: "TypeError", Message: "Cannot convert to a BigInt"}
+				}
+			}
+			array.Write(index, v)
+			return nil
+		}
+	}
 	if own, ok := obj.(interface {
 		GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
 		PrototypeValue() value.Value
@@ -1136,6 +1150,26 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if class, ok := obj.(*native.ObjClass); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "prototype" {
 			return class.GetMember(native.KEY_PROTO), nil
+		}
+	}
+	if array, ok := obj.(*native.ObjTypedArray); ok {
+		if member, found := vm.getTypedArrayMember(array, key); found {
+			return member, nil
+		}
+	}
+	if view, ok := obj.(*native.ObjDataView); ok {
+		if member, found := vm.getDataViewMember(view, key); found {
+			return member, nil
+		}
+	}
+	if buffer, ok := obj.(*native.ObjArrayBuffer); ok {
+		if keyString, ok := vm.valueAsString(key); ok {
+			switch keyString {
+			case "byteLength":
+				return value.ValueFromFloat64(float64(len(buffer.Data))), nil
+			case "slice":
+				return value.EncodeHandle(heap.Allocate(native.NewArrayBufferSlice())), nil
+			}
 		}
 	}
 	if obj.Type() == object.OBJ_NATIVE_FN {
@@ -1534,6 +1568,24 @@ func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
 	case *native.PromiseConstructor:
 		if obj, err := heap.GetObject(objValue.GetHandle()); err == nil {
 			_, ok := obj.(*native.ObjPromise)
+			return ok, nil
+		}
+		return false, nil
+	case *native.TypedArrayConstructor:
+		if obj, err := heap.GetObject(objValue.GetHandle()); err == nil {
+			array, ok := obj.(*native.ObjTypedArray)
+			return ok && array.Kind == ctorObj.Kind, nil
+		}
+		return false, nil
+	case *native.ArrayBufferConstructor:
+		if obj, err := heap.GetObject(objValue.GetHandle()); err == nil {
+			_, ok := obj.(*native.ObjArrayBuffer)
+			return ok, nil
+		}
+		return false, nil
+	case *native.DataViewConstructor:
+		if obj, err := heap.GetObject(objValue.GetHandle()); err == nil {
+			_, ok := obj.(*native.ObjDataView)
 			return ok, nil
 		}
 		return false, nil
@@ -3693,6 +3745,168 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						vm.push(result)
 					}
+				case *native.ArrayBufferIsView:
+					{
+						args := vm.popN(argCount)
+						result := false
+						if len(args) > 0 && args[0].IsObject() {
+							if obj, err := heap.GetObject(args[0].GetHandle()); err == nil {
+								switch obj.(type) {
+								case *native.ObjTypedArray, *native.ObjDataView:
+									result = true
+								}
+							}
+						}
+						vm.push(boolValue(result))
+					}
+				case *native.ArrayBufferSlice:
+					{
+						args := vm.popN(argCount)
+						buffer, _ := vm.arrayBufferFromValue(thisCtx)
+						length := len(buffer.Data)
+						start := 0
+						end := length
+						if len(args) > 0 {
+							n, _ := vm.toNumber(args[0])
+							start = int(n)
+							if start < 0 {
+								start = max(0, length+start)
+							}
+							start = min(start, length)
+						}
+						if len(args) > 1 && args[1] != value.UNDEFINED {
+							n, _ := vm.toNumber(args[1])
+							end = int(n)
+							if end < 0 {
+								end = max(0, length+end)
+							}
+							end = min(end, length)
+						}
+						if end < start {
+							end = start
+						}
+						result := native.NewArrayBuffer(end - start)
+						copy(result.Data, buffer.Data[start:end])
+						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.TypedArrayJoin:
+					{
+						args := vm.popN(argCount)
+						separator := ","
+						if len(args) > 0 && args[0] != value.UNDEFINED {
+							separator = native.String(args[0])
+						}
+						array, _ := vm.typedArrayFromValue(thisCtx)
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(vm.typedArrayJoin(array, separator)))))
+					}
+				case *native.TypedArraySet:
+					{
+						args := vm.popN(argCount)
+						array, _ := vm.typedArrayFromValue(thisCtx)
+						offset := 0
+						if len(args) > 1 {
+							n, _ := vm.toNumber(args[1])
+							offset = int(n)
+						}
+						source := value.UNDEFINED
+						if len(args) > 0 {
+							source = args[0]
+						}
+						if err := vm.typedArraySet(array, source, offset); err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(value.UNDEFINED)
+					}
+				case *native.TypedArraySubarray:
+					{
+						args := vm.popN(argCount)
+						array, _ := vm.typedArrayFromValue(thisCtx)
+						start := 0
+						end := array.Length
+						if len(args) > 0 {
+							n, _ := vm.toNumber(args[0])
+							start = int(n)
+						}
+						if len(args) > 1 && args[1] != value.UNDEFINED {
+							n, _ := vm.toNumber(args[1])
+							end = int(n)
+						}
+						if start < 0 {
+							start = max(0, array.Length+start)
+						}
+						if end < 0 {
+							end = max(0, array.Length+end)
+						}
+						start = min(start, array.Length)
+						end = min(max(start, end), array.Length)
+						length := end - start
+						result := native.NewTypedArray(array.Buffer, array.BufferValue, array.Offset+start*array.ElementSize(), length, array.Kind)
+						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.TypedArraySlice:
+					{
+						args := vm.popN(argCount)
+						array, _ := vm.typedArrayFromValue(thisCtx)
+						start := 0
+						end := array.Length
+						if len(args) > 0 {
+							n, _ := vm.toNumber(args[0])
+							start = int(n)
+						}
+						if len(args) > 1 && args[1] != value.UNDEFINED {
+							n, _ := vm.toNumber(args[1])
+							end = int(n)
+						}
+						result := vm.typedArraySlice(array, start, end)
+						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.TypedArraySort:
+					{
+						vm.popN(argCount)
+						array, _ := vm.typedArrayFromValue(thisCtx)
+						vm.typedArraySort(array)
+						vm.push(thisCtx)
+					}
+				case *native.TypedArrayMap:
+					{
+						args := vm.popN(argCount)
+						array, _ := vm.typedArrayFromValue(thisCtx)
+						callback := value.UNDEFINED
+						thisArg := value.UNDEFINED
+						if len(args) > 0 {
+							callback = args[0]
+						}
+						if len(args) > 1 {
+							thisArg = args[1]
+						}
+						result, err := vm.typedArrayMap(array, callback, thisArg)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.DataViewMethod:
+					{
+						args := vm.popN(argCount)
+						view, _ := vm.dataViewFromValue(thisCtx)
+						result, err := vm.callDataViewMethod(view, fn, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
 				case *native.ReflectDeleteProperty:
 					{
 						key := vm.pop()
@@ -4640,6 +4854,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						vm.popN(argCount)
 						vm.push(thisCtx)
 					}
+				case *native.ArrayBufferConstructor, *native.TypedArrayConstructor, *native.DataViewConstructor:
+					{
+						errValue := vm.makeError("TypeError", "Constructor requires new")
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
 				case *native.BigIntConstructor:
 					{
 						args := vm.popN(argCount)
@@ -5410,6 +5632,45 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						result, err := vm.construct(callable, allArgs, callee)
 						if err != nil {
 							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ArrayBufferConstructor:
+					{
+						args := vm.popN(int(argCount))
+						result, err := vm.constructArrayBuffer(args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.TypedArrayConstructor:
+					{
+						args := vm.popN(int(argCount))
+						result, err := vm.constructTypedArray(ctor, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.DataViewConstructor:
+					{
+						args := vm.popN(int(argCount))
+						result, err := vm.constructDataView(args)
+						if err != nil {
+							errValue := vm.errorValue(err)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
 							}

@@ -536,6 +536,28 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionScope) {
+	constructors := []struct {
+		name string
+		obj  object.Object
+	}{
+		{"ArrayBuffer", native.NewArrayBufferConstructor()},
+		{"DataView", native.NewDataViewConstructor()},
+		{"Uint8Array", native.NewTypedArrayConstructor("Uint8Array", native.TYPED_UINT8, 1)},
+		{"Int8Array", native.NewTypedArrayConstructor("Int8Array", native.TYPED_INT8, 1)},
+		{"Uint8ClampedArray", native.NewTypedArrayConstructor("Uint8ClampedArray", native.TYPED_UINT8_CLAMPED, 1)},
+		{"Int16Array", native.NewTypedArrayConstructor("Int16Array", native.TYPED_INT16, 2)},
+		{"Float64Array", native.NewTypedArrayConstructor("Float64Array", native.TYPED_FLOAT64, 8)},
+		{"BigInt64Array", native.NewTypedArrayConstructor("BigInt64Array", native.TYPED_BIGINT64, 8)},
+		{"BigUint64Array", native.NewTypedArrayConstructor("BigUint64Array", native.TYPED_BIGUINT64, 8)},
+	}
+	for _, ctor := range constructors {
+		symbolTable.addVariable(ctor.name, CONST, false, nil)
+		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(ctor.obj)))
+		main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+	}
+}
+
 func defineBigIntConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	bigIntCtor := native.NewBigIntConstructor()
 	handle := heap.Allocate(bigIntCtor)
@@ -642,6 +664,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineJSONObject(setup, global)
 	defineReflectObject(setup, global)
 	defineBigIntConstructor(setup, global)
+	defineBinaryConstructors(setup, global)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
