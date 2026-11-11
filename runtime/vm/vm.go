@@ -685,7 +685,7 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 				return err
 			}
 			if math.IsNaN(n) || n < 0 || math.Trunc(n) != n || n >= 4294967296 {
-				return fmt.Errorf("Invalid array length")
+				return &JSException{Name: "RangeError", Message: "Invalid array length"}
 			}
 			arr.SetLength(int(n))
 			return nil
@@ -1810,7 +1810,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				k := vm.pop()
 				objValue := vm.pop()
 				if err := vm.setMemberValue(objValue, k, v); err != nil {
-					errValue := vm.makeError("TypeError", err.Error())
+					name := "TypeError"
+					message := err.Error()
+					if jsErr, ok := err.(*JSException); ok {
+						name = jsErr.Name
+						message = jsErr.Message
+					}
+					errValue := vm.makeError(name, message)
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 						return value.UNDEFINED, err
 					}

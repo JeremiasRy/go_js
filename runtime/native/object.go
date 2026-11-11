@@ -487,7 +487,11 @@ func (*ObjectDefineProperty) Define(target, key, descriptor value.Value) value.V
 	}
 	o, ok := obj.(*ObjObject)
 	if !ok {
-		return value.UNDEFINED
+		if arr, isArr := obj.(*ObjArr); isArr {
+			o = &arr.ObjObject
+		} else {
+			return value.UNDEFINED
+		}
 	}
 	descObj, err := heap.GetObject(descriptor.GetHandle())
 	if err != nil {

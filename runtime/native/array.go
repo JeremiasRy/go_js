@@ -5,6 +5,7 @@ import (
 	"go_js/object"
 	"go_js/value"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -59,6 +60,15 @@ func (oa *ObjArr) SetLength(length int) {
 		length = 0
 	}
 	if length <= len(oa.items) {
+		for i := len(oa.items) - 1; i >= length; i-- {
+			key := strconv.Itoa(i)
+			if entry, found := oa.Members[key]; found && !entry.Configurable() {
+				oa.items = oa.items[:i+1]
+				oa.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(i+1)))
+				return
+			}
+			delete(oa.Members, key)
+		}
 		oa.items = oa.items[:length]
 	} else {
 		for len(oa.items) < length {
