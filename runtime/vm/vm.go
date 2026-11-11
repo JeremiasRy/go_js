@@ -4537,6 +4537,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							dst.SetMember(k, v)
 						}
 					}
+				} else if s, ok := vm.valueAsString(source); ok {
+					if dst, ok := dstObj.(*native.ObjObject); ok {
+						for i, r := range []rune(s) {
+							dst.SetMember(native.IndexValue(i), value.EncodeHandle(heap.Allocate(native.NewLightString(string(r)))))
+						}
+					}
 				}
 			}
 		}
