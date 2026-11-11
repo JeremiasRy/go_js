@@ -31,6 +31,7 @@ type ObjPromise struct {
 	Reactions []PromiseReaction
 	Observers []PromiseObserver
 	Resolving bool
+	ResolutionID int
 }
 
 type PromiseObserver struct {
@@ -235,10 +236,12 @@ type ResolveFunc struct {
 	owner  *ObjPromise
 	marked bool
 	Called *bool
+	AllowDuringResolving bool
+	ID int
 }
 
-func NewResolveFuncTracked(owner *ObjPromise, called *bool) *ResolveFunc {
-	return &ResolveFunc{owner: owner, Called: called}
+func NewResolveFuncTracked(owner *ObjPromise, called *bool, id int) *ResolveFunc {
+	return &ResolveFunc{owner: owner, Called: called, AllowDuringResolving: true, ID: id}
 }
 
 func (*ResolveFunc) GetReferencingValues() []value.Value {
@@ -284,6 +287,11 @@ type RejectFunc struct {
 	object.Ctx
 	owner  *ObjPromise
 	marked bool
+	ID     int
+}
+
+func NewRejectFuncWithID(owner *ObjPromise, id int) *RejectFunc {
+	return &RejectFunc{owner: owner, ID: id}
 }
 
 func (*RejectFunc) GetReferencingValues() []value.Value {

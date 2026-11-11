@@ -860,6 +860,7 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 			vm.rejectPromise(p, vm.makeError("TypeError", "Chaining cycle detected for promise"))
 			return
 		}
+		p.Resolving = true
 		vm.attachPromiseReaction(other, native.PromiseReaction{Derived: value.EncodeHandle(heap.Allocate(p))})
 		return
 	}
@@ -871,10 +872,13 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 	if thenValue.IsObject() {
 		if thenObj, err := heap.GetObject(thenValue.GetHandle()); err == nil {
 			if _, ok := thenObj.(object.Callable); ok {
+				p.Resolving = true
+				p.ResolutionID++
+				resolutionID := p.ResolutionID
 				queue.Enqueue(object.Callback{Native: func() {
 					called := false
-					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFuncTracked(p, &called)))
-					reject := value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p)))
+					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFuncTracked(p, &called, resolutionID)))
+					reject := value.EncodeHandle(heap.Allocate(native.NewRejectFuncWithID(p, resolutionID)))
 					if _, err := vm.callValue(thenValue, v, []value.Value{resolve, reject}); err != nil {
 						if !called && p.Status == native.PENDING {
 							vm.rejectPromise(p, vm.errorValue(err))
@@ -4664,16 +4668,30 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						v := vm.pop()
+						p := fn.Promise()
+						if fn.ID != p.ResolutionID {
+							vm.push(value.UNDEFINED)
+							continue
+						}
+						if p.Resolving && !fn.AllowDuringResolving {
+							vm.push(value.UNDEFINED)
+							continue
+						}
 						if fn.Called != nil {
 							*fn.Called = true
 						}
-						vm.resolvePromise(fn.Promise(), v)
+						vm.resolvePromise(p, v)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.RejectFunc:
 					{
 						v := vm.pop()
-						vm.rejectPromise(fn.Promise(), v)
+						p := fn.Promise()
+						if fn.ID != p.ResolutionID {
+							vm.push(value.UNDEFINED)
+							continue
+						}
+						vm.rejectPromise(p, v)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.SetTimeout:
