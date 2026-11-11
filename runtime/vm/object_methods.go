@@ -94,31 +94,39 @@ func (vm *VM) callObjectMethod(method *native.ObjectMethod, argCount int) (value
 		}
 		entries := args[0]
 		if entries.IsObject() {
-			if arrObj, err := heap.GetObject(entries.GetHandle()); err == nil {
-				if arr, ok := arrObj.(*native.ObjArr); ok {
-					for i := 0; i < arr.Length(); i++ {
-						entry, err := vm.getMemberValue(entries, native.IndexValue(i))
-						if err != nil {
-							return value.UNDEFINED, err
-						}
-						if !entry.IsObject() {
-							return value.UNDEFINED, fmt.Errorf("Iterator value is not an entry object")
-						}
-						key, err := vm.getMemberValue(entry, native.IndexValue(0))
-						if err != nil {
-							return value.UNDEFINED, err
-						}
-						val, err := vm.getMemberValue(entry, native.IndexValue(1))
-						if err != nil {
-							return value.UNDEFINED, err
-						}
-						key, err = vm.toPropertyKey(key)
-						if err != nil {
-							return value.UNDEFINED, err
-						}
-						result.SetMember(key, val)
-					}
+			iterator, err := vm.acquireIterator(entries, 0)
+			if err != nil {
+				return value.UNDEFINED, fmt.Errorf("Iterator value is not an entry object")
+			}
+			for {
+				done, err := vm.iteratorNext(iterator)
+				if err != nil {
+					return value.UNDEFINED, err
 				}
+				if done {
+					break
+				}
+				entry, err := vm.iteratorCurrent(iterator)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				if !entry.IsObject() {
+					vm.closeIterator(iterator)
+					return value.UNDEFINED, fmt.Errorf("Iterator value is not an entry object")
+				}
+				key, err := vm.getMemberValue(entry, native.IndexValue(0))
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				val, err := vm.getMemberValue(entry, native.IndexValue(1))
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				key, err = vm.toPropertyKey(key)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				result.SetMember(key, val)
 			}
 		}
 		return value.EncodeHandle(heap.Allocate(result)), nil
