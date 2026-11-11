@@ -580,7 +580,9 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 	}
 	if fn, ok := obj.(*object.ObjFunction); ok {
 		clone := fn.Clone().(*object.ObjFunction)
-		clone.SetHeapScope(scope)
+		if fn.GetHeapScope() == object.NOT_IN_HEAP_SCOPE {
+			clone.SetHeapScope(scope)
+		}
 		return value.EncodeHandle(heap.Allocate(clone))
 	}
 	return v
@@ -1614,7 +1616,7 @@ func (vm *VM) runGC() {
 		}
 	}
 
-	heap.RequestGC(append(vm.stack[:vm.stackTop], glob...))
+	heap.RequestGC(append(vm.stack, glob...))
 }
 
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
@@ -2425,7 +2427,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				ip++
 				slot := c.Code[ip]
 				ip++
-				heap.SetHeapVar(f.heapScope, depth, int(slot), cloneFunctionValue(vm.pop(), f.heapScope))
+				val := vm.pop()
+				heap.SetHeapVar(f.heapScope, depth, int(slot), cloneFunctionValue(val, f.heapScope))
 			}
 		case chunk.OP_DEFINE_GLOBAL:
 			{

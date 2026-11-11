@@ -2177,7 +2177,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(current.Argument, symbolTable, fn)
 				fn.ValueChunk().EmitByte(chunk.OP_SAVE_COMPLETION)
 				emitAllIteratorCloses(fn)
-				emitAbruptFinalizers(symbolTable, fn)
 				count := blockLocalVarCount(symbolTable.block)
 				for range count {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
@@ -3301,6 +3300,13 @@ func emitHeapAccess(fn object.Callable, op uint8, symbolTable *FunctionScope, va
 func compactBlockSlots(table *FunctionScope, oldSlot int) {
 	for block := table.block; block != nil; block = block.parent {
 		for _, v := range block.vars {
+			if v.scope != HEAP && v.slot > oldSlot {
+				v.slot--
+			}
+		}
+	}
+	if table.tableScope != GLOBAL {
+		for _, v := range table.vars {
 			if v.scope != HEAP && v.slot > oldSlot {
 				v.slot--
 			}

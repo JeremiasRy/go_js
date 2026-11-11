@@ -49,7 +49,7 @@ var a = &Heap{
 }
 
 func ShouldRunGCCycle() bool {
-	return a.shouldRunGCCycle()
+	return false
 }
 
 func GetHeapVar(scope, depth, slot int) value.Value {
