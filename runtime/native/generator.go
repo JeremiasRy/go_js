@@ -17,6 +17,7 @@ type ObjGenerator struct {
 	Done    bool
 	PendingThrow value.Value
 	HasPendingThrow bool
+	Current value.Value
 }
 
 func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {

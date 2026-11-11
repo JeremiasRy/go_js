@@ -55,6 +55,7 @@ type CallFrame struct {
 	ownScope   bool
 	newTarget  value.Value
 	arguments  value.Value
+	startIp    int
 }
 
 func InitFileRoot(path string) {
@@ -69,6 +70,7 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 	cf.heapScope = fn.GetHeapScope()
 	cf.ownScope = false
 	cf.newTarget = value.UNDEFINED
+	cf.startIp = 0
 }
 
 type JSException struct {
@@ -454,6 +456,9 @@ func (vm *VM) acquireIterator(iteratee value.Value, iteratorType uint8) (value.V
 	if _, ok := obj.(*native.JSIterator); ok {
 		return iteratee, nil
 	}
+	if _, ok := obj.(*native.ObjGenerator); ok {
+		return iteratee, nil
+	}
 	if iteratorType == compiler.ITERATOR_FOR_IN {
 		if iterable, ok := obj.(object.Iterable); ok {
 			return value.EncodeHandle(heap.Allocate(object.NewKeyIterator(iterable))), nil
@@ -529,6 +534,29 @@ func (vm *VM) iteratorNext(iteratorValue value.Value) (bool, error) {
 			iterator.Current = value.UNDEFINED
 		}
 		return iterator.Done, nil
+	case *native.ObjGenerator:
+		result, err := vm.generatorNext(iterator, nil)
+		if err != nil {
+			return false, err
+		}
+		if !result.IsObject() {
+			return false, fmt.Errorf("Iterator result is not an object")
+		}
+		doneValue, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("done"))))
+		if err != nil {
+			return false, err
+		}
+		iterator.Done = truthyValue(doneValue)
+		if !iterator.Done {
+			valueResult, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("value"))))
+			if err != nil {
+				return false, err
+			}
+			iterator.Current = valueResult
+		} else {
+			iterator.Current = value.UNDEFINED
+		}
+		return iterator.Done, nil
 	}
 	return false, fmt.Errorf("not an iterator")
 }
@@ -542,6 +570,8 @@ func (vm *VM) iteratorCurrent(iteratorValue value.Value) (value.Value, error) {
 	case *object.Iterator:
 		return iterator.Current(), nil
 	case *native.JSIterator:
+		return iterator.Current, nil
+	case *native.ObjGenerator:
 		return iterator.Current, nil
 	}
 	return value.UNDEFINED, fmt.Errorf("not an iterator")
@@ -593,6 +623,41 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 		return value.EncodeHandle(heap.Allocate(clone))
 	}
 	return v
+}
+
+func (vm *VM) generatorNext(generator *native.ObjGenerator, args []value.Value) (value.Value, error) {
+	if generator.Done {
+		result := native.NewObjectHash()
+		result.SetMember(native.KEY_VALUE, value.UNDEFINED)
+		result.SetMember(native.KEY_DONE, value.TRUE)
+		return value.EncodeHandle(heap.Allocate(result)), nil
+	}
+	runner := NewVM(false, vm.output)
+	dummy := object.NewFunction("generator-caller", 0, nil)
+	dummy.ValueChunk().EmitByte(chunk.OP_RETURN)
+	dummyIp := 0
+	runner.Call(dummy, nil, value.UNDEFINED, 0, false)
+	if !generator.Started {
+		generator.Started = true
+		for _, arg := range generator.Args {
+			runner.push(arg)
+		}
+		f, c := runner.Call(generator, &dummyIp, value.UNDEFINED, len(generator.Args), false)
+		return runner.run(f, c)
+	}
+	f, c := runner.Call(generator, &dummyIp, value.UNDEFINED, 0, false)
+	runner.stackTop = f.localStart
+	for _, local := range generator.Locals {
+		runner.push(local)
+	}
+	input := value.UNDEFINED
+	if len(args) > 0 {
+		input = args[0]
+	}
+	runner.push(input)
+	f.startIp = generator.Ip
+	runner.frames[runner.frameCount-1].startIp = generator.Ip
+	return runner.run(f, c)
 }
 
 func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget value.Value) (value.Value, error) {
@@ -1737,7 +1802,7 @@ func (vm *VM) runGC() {
 }
 
 func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
-	ip := 0
+	ip := f.startIp
 
 	if promise, ok := f.fn.(*native.ObjAsyncFunction); ok {
 
@@ -4528,7 +4593,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_TRY_BLOCK_END:
 			{
-				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+				if len(vm.exceptionStack) > 0 {
+					vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+				}
 			}
 		case chunk.OP_NEW:
 			{
