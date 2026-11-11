@@ -127,8 +127,8 @@ const (
 )
 
 type TemplateNodeValue struct {
-	Raw    string
-	Cooked string
+	Raw     string
+	Cooked  string
 	Invalid bool
 }
 

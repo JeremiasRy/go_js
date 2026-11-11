@@ -27,10 +27,10 @@ type ObjPromise struct {
 	Status PromiseStatus
 	Value  value.Value
 
-	c         chan struct{}
-	Reactions []PromiseReaction
-	Observers []PromiseObserver
-	Resolving bool
+	c            chan struct{}
+	Reactions    []PromiseReaction
+	Observers    []PromiseObserver
+	Resolving    bool
 	ResolutionID int
 }
 
@@ -234,11 +234,11 @@ func (pCtor *PromiseConstructor) String() string {
 
 type ResolveFunc struct {
 	object.Ctx
-	owner  *ObjPromise
-	marked bool
-	Called *bool
+	owner                *ObjPromise
+	marked               bool
+	Called               *bool
 	AllowDuringResolving bool
-	ID int
+	ID                   int
 }
 
 func NewResolveFuncTracked(owner *ObjPromise, called *bool, id int) *ResolveFunc {

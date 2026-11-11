@@ -28,6 +28,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			if node.Type == parser.NODE_EXPORT_NAMED_DECLARATION {
 				node = node.Declaration
 			}
+			if node == nil {
+				continue
+			}
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
 				arity := len(node.Params)
@@ -159,7 +162,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 			addParameterSlots(current.Params, symbolTable)
 			symbolTable.arity = len(current.Params)
-		markParamNames(current.Params, symbolTable)
+			markParamNames(current.Params, symbolTable)
 
 			if current.IsExpression {
 				prePass(current.BodyNode, symbolTable)
@@ -386,31 +389,79 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			savedStrict := strictContext
 			strictContext = true
 			symbolTable.addVariable(current.Identifier.Name, CONST, false, nil)
+			prePass(current.SuperClass, symbolTable)
 			prePass(current.BodyNode, symbolTable)
+			strictContext = savedStrict
+			classCompiler = false
+		}
+	case parser.NODE_CLASS_EXPRESSION:
+		{
+			classCompiler = true
+			savedStrict := strictContext
+			strictContext = true
+			if current.Identifier != nil {
+				syntheticName := "\x00class:" + current.Identifier.Name + ":" + strconv.Itoa(current.Id)
+				global.addVariable(syntheticName, CONST, false, nil)
+				classScope := newFunctionScope(symbolTable, LOCAL)
+				classScope.vars[current.Identifier.Name] = global.vars[syntheticName]
+				FUNCTION_SCOPES[current.BodyNode] = classScope
+				prePass(current.SuperClass, symbolTable)
+				prePass(current.BodyNode, symbolTable)
+			} else {
+				prePass(current.SuperClass, symbolTable)
+				prePass(current.BodyNode, symbolTable)
+			}
 			strictContext = savedStrict
 			classCompiler = false
 		}
 	case parser.NODE_CLASS_BODY:
 		{
-			symbolTable := newFunctionScope(symbolTable, LOCAL)
-			FUNCTION_SCOPES[current] = symbolTable
+			classScope, found := FUNCTION_SCOPES[current]
+			if !found {
+				classScope = newFunctionScope(symbolTable, LOCAL)
+				FUNCTION_SCOPES[current] = classScope
+			}
 
 			for _, node := range current.Body {
-				prePass(node, symbolTable)
+				prePass(node, classScope)
 			}
 		}
 	case parser.NODE_METHOD_DEFINITION:
 		{
+			if current.Computed {
+				prePass(current.Key, symbolTable)
+			}
 			symbolTable := newFunctionScope(symbolTable, LOCAL)
 			FUNCTION_SCOPES[current] = symbolTable
 
 			function := current.Value.(*parser.Node)
+
+			addParameterSlots(function.Params, symbolTable)
+			symbolTable.arity = len(function.Params)
+			markParamNames(function.Params, symbolTable)
 
 			for _, node := range function.Params {
 				prePass(node, symbolTable)
 			}
 
 			for _, node := range function.BodyNode.Body {
+				prePass(node, symbolTable)
+			}
+		}
+	case parser.NODE_PROPERTY_DEFINITION:
+		{
+			if current.Computed {
+				prePass(current.Key, symbolTable)
+			}
+			if initializer, ok := current.Value.(*parser.Node); ok {
+				prePass(initializer, symbolTable)
+			}
+		}
+	case parser.NODE_STATIC_BLOCK:
+		{
+			symbolTable := newFunctionScope(symbolTable, LOCAL)
+			FUNCTION_SCOPES[current] = symbolTable
+			for _, node := range current.Body {
 				prePass(node, symbolTable)
 			}
 		}
@@ -448,6 +499,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		prePass(current.Local, symbolTable)
 	case parser.NODE_EXPORT_NAMED_DECLARATION:
 		prePass(current.Declaration, symbolTable)
+		for _, specifier := range current.Specifiers {
+			prePass(specifier, symbolTable)
+		}
 	case parser.NODE_SWITCH_STATEMENT:
 		prePass(current.Discriminant, symbolTable)
 		for _, node := range current.Cases {

@@ -8,6 +8,20 @@ import (
 	"strconv"
 )
 
+func objectAsObjObject(obj object.Object) (*ObjObject, bool) {
+	switch o := obj.(type) {
+	case *ObjObject:
+		return o, true
+	case *ObjClass:
+		return &o.ObjObject, true
+	case *Instance:
+		return &o.ObjObject, true
+	case *Prototype:
+		return &o.ObjObject, true
+	}
+	return nil, false
+}
+
 type ObjectValueEntry struct {
 	Value           value.Value
 	init            int
@@ -441,7 +455,7 @@ func (*ObjectGetOwnPropertySymbols) Symbols(target value.Value) []value.Value {
 	if err != nil {
 		return result
 	}
-	o, ok := obj.(*ObjObject)
+	o, ok := objectAsObjObject(obj)
 	if !ok {
 		return result
 	}
@@ -464,7 +478,7 @@ func (*ObjectGetOwnPropertyNames) Names(target value.Value) []value.Value {
 	if err != nil {
 		return result
 	}
-	o, ok := obj.(*ObjObject)
+	o, ok := objectAsObjObject(obj)
 	if !ok {
 		return result
 	}
@@ -591,7 +605,7 @@ func (*ObjectGetOwnPropertyDescriptor) Descriptor(target, key value.Value) value
 	if err != nil {
 		return value.UNDEFINED
 	}
-	o, ok := obj.(*ObjObject)
+	o, ok := objectAsObjObject(obj)
 	if !ok {
 		return value.UNDEFINED
 	}
@@ -831,6 +845,20 @@ func (*ObjectValues) Values(o value.Value) []value.Value {
 				}
 				return r
 			}
+		case *ObjClass, *Instance, *Prototype:
+			{
+				o, _ := objectAsObjObject(obj)
+				r := []value.Value{}
+				for _, item := range orderedMemberEntries(o) {
+					if len(item.Key) > 0 && item.Key[0] == 0 {
+						continue
+					}
+					if item.Entry.Enumerable() {
+						r = append(r, item.Entry.Value)
+					}
+				}
+				return r
+			}
 		case *ObjArr:
 			r := []value.Value{}
 			for i := 0; i < obj.Length(); i++ {
@@ -868,6 +896,21 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 			{
 				r := []value.Value{}
 				for _, item := range orderedMemberEntries(obj) {
+					if len(item.Key) > 0 && item.Key[0] == 0 {
+						continue
+					}
+					if item.Entry.Enumerable() {
+						val := value.EncodeHandle(heap.Allocate(NewLightString(item.Key)))
+						r = append(r, val)
+					}
+				}
+				return r
+			}
+		case *ObjClass, *Instance, *Prototype:
+			{
+				o, _ := objectAsObjObject(obj)
+				r := []value.Value{}
+				for _, item := range orderedMemberEntries(o) {
 					if len(item.Key) > 0 && item.Key[0] == 0 {
 						continue
 					}

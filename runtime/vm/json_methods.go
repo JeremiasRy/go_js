@@ -91,11 +91,11 @@ func (vm *VM) callJSONParse(argCount int) (value.Value, error) {
 }
 
 type jsonStringifier struct {
-	vm        *VM
-	replacer  value.Value
+	vm           *VM
+	replacer     value.Value
 	propertyList []string
-	space     string
-	stack     map[uint32]bool
+	space        string
+	stack        map[uint32]bool
 }
 
 func (s *jsonStringifier) quote(str string) string {

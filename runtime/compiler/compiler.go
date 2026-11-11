@@ -91,29 +91,29 @@ var BLOCK_SCOPES = map[*parser.Node]*BlockScope{}
 var FUNCTION_SCOPES = map[*parser.Node]*FunctionScope{}
 
 var operatorMap = map[parser.BinaryOperator]uint8{
-	parser.LESS_THAN:          chunk.OP_LESS_THAN,
-	parser.GREATER_THAN:       chunk.OP_GREATER_THAN,
-	parser.GREATER_THAN_EQUAL: chunk.OP_GREATER_THAN_EQUAL,
-	parser.LESS_THAN_EQUAL:    chunk.OP_LESS_THAN_EQUAL,
-	parser.MINUS:              chunk.OP_SUBTRACT,
-	parser.PLUS:               chunk.OP_ADD,
-	parser.DIVIDE:             chunk.OP_DIVIDE,
-	parser.MULTIPLY:           chunk.OP_MULTIPLY,
-	parser.EXPONENTIATION:     chunk.OP_EXPONENTIATION,
-	parser.MODULUS:            chunk.OP_MODULO,
-	parser.EQUALS:             chunk.OP_EQUALS,
-	parser.NOT_EQUALS:         chunk.OP_NOT_EQUALS,
-	parser.STRICT_EQUALS:      chunk.OP_STRICT_EQUALS,
-	parser.STRICT_NOT_EQUALS:  chunk.OP_STRICT_NOT_EQUALS,
-	"||":                      chunk.OP_LOGICAL_OR,
-	"&&":                      chunk.OP_LOGICAL_AND,
-	parser.IN:                 chunk.OP_IN,
-	"??":                      chunk.OP_NULL_COALESHING,
-	parser.BITWISE_AND:        chunk.OP_B_AND,
-	parser.BITWISE_XOR:        chunk.OP_B_XOR,
-	parser.BITWISE_OR:         chunk.OP_B_OR,
-	parser.LEFT_SHIFT:         chunk.OP_LEFT_SHIFT,
-	parser.RIGHT_SHIFT:        chunk.OP_RIGHT_SHIFT,
+	parser.LESS_THAN:            chunk.OP_LESS_THAN,
+	parser.GREATER_THAN:         chunk.OP_GREATER_THAN,
+	parser.GREATER_THAN_EQUAL:   chunk.OP_GREATER_THAN_EQUAL,
+	parser.LESS_THAN_EQUAL:      chunk.OP_LESS_THAN_EQUAL,
+	parser.MINUS:                chunk.OP_SUBTRACT,
+	parser.PLUS:                 chunk.OP_ADD,
+	parser.DIVIDE:               chunk.OP_DIVIDE,
+	parser.MULTIPLY:             chunk.OP_MULTIPLY,
+	parser.EXPONENTIATION:       chunk.OP_EXPONENTIATION,
+	parser.MODULUS:              chunk.OP_MODULO,
+	parser.EQUALS:               chunk.OP_EQUALS,
+	parser.NOT_EQUALS:           chunk.OP_NOT_EQUALS,
+	parser.STRICT_EQUALS:        chunk.OP_STRICT_EQUALS,
+	parser.STRICT_NOT_EQUALS:    chunk.OP_STRICT_NOT_EQUALS,
+	"||":                        chunk.OP_LOGICAL_OR,
+	"&&":                        chunk.OP_LOGICAL_AND,
+	parser.IN:                   chunk.OP_IN,
+	"??":                        chunk.OP_NULL_COALESHING,
+	parser.BITWISE_AND:          chunk.OP_B_AND,
+	parser.BITWISE_XOR:          chunk.OP_B_XOR,
+	parser.BITWISE_OR:           chunk.OP_B_OR,
+	parser.LEFT_SHIFT:           chunk.OP_LEFT_SHIFT,
+	parser.RIGHT_SHIFT:          chunk.OP_RIGHT_SHIFT,
 	parser.UNSIGNED_RIGHT_SHIFT: chunk.OP_UNSIGNED_RIGHT_SHIFT,
 	parser.INSTANCEOF:           chunk.OP_INSTANCEOF,
 }
@@ -622,6 +622,25 @@ func defineBooleanConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 var module = false
+var currentClassDerived = false
+var inferredClassName = ""
+
+func privateKeyName(name string) string {
+	return "\x00#" + name
+}
+
+func classMemberKind(kind parser.Kind) native.ClassMemberKind {
+	switch kind {
+	case parser.KIND_PROPERTY_GET:
+		return native.CLASS_GETTER
+	case parser.KIND_PROPERTY_SET:
+		return native.CLASS_SETTER
+	case parser.KIND_CONSTRUCTOR:
+		return native.CLASS_CONSTRUCTOR
+	default:
+		return native.CLASS_METHOD
+	}
+}
 
 func allocateHeapSlot(owner *FunctionScope) int {
 	slot := owner.heapVarCount
@@ -803,18 +822,32 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if left.Type == parser.NODE_MEMBER_EXPRESSION {
+					isPrivate := left.Property != nil && left.Property.Type == parser.NODE_PRIVATE_IDENTIFIER
 					generateByteCode(left.Object, symbolTable, fn)
 					if left.Computed {
 						generateByteCode(left.Property, symbolTable, fn)
 						fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
 					} else {
-						key := heap.Allocate(native.NewLightString(left.Property.Name))
+						name := left.Property.Name
+						if isPrivate {
+							name = privateKeyName(name)
+						}
+						key := heap.Allocate(native.NewLightString(name))
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(key))
 					}
 
 					memberSetOp := chunk.OP_SET_MEMBER_RETURN
+					getMemberOp := chunk.OP_GET_OBJECT_MEMBER
+					if isPrivate {
+						memberSetOp = chunk.OP_SET_PRIVATE_MEMBER_RETURN
+						getMemberOp = chunk.OP_GET_PRIVATE_MEMBER
+					}
 					if isStrictFunction(fn) {
-						memberSetOp = chunk.OP_SET_MEMBER_STRICT_RETURN
+						if isPrivate {
+							memberSetOp = chunk.OP_SET_PRIVATE_MEMBER_STRICT_RETURN
+						} else {
+							memberSetOp = chunk.OP_SET_MEMBER_STRICT_RETURN
+						}
 					}
 
 					switch operator {
@@ -822,7 +855,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(memberSetOp)
 					case parser.LOGICAL_AND_ASSIGN, parser.LOGICAL_OR_ASSIGN, parser.NULLISH_ASSIGN:
-						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, chunk.OP_GET_OBJECT_MEMBER, chunk.OP_DUP)
+						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, getMemberOp, chunk.OP_DUP)
 						var jump uint8
 						switch operator {
 						case parser.LOGICAL_AND_ASSIGN:
@@ -843,7 +876,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitByte(chunk.OP_POP_BELOW2)
 						fn.ValueChunk().PatchUint32(uint32(endJump), uint32(len(fn.ValueChunk().Code)))
 					default:
-						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, chunk.OP_GET_OBJECT_MEMBER)
+						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, getMemberOp)
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(assignmentOpcode(operator))
 						fn.ValueChunk().EmitByte(memberSetOp)
@@ -1261,6 +1294,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_CALL_EXPRESSION:
 			{
 				popReturnValue.push(false)
+				if current.Callee.Type == parser.NODE_SUPER {
+					for _, node := range current.Arguments {
+						generateByteCode(node, symbolTable, fn)
+					}
+					fn.ValueChunk().EmitBytes(chunk.OP_SUPER_CALL, uint8(len(current.Arguments)), 0)
+					popReturnValue.pop()
+					if popReturnValue.current() {
+						fn.ValueChunk().EmitByte(chunk.OP_POP)
+					}
+					return
+				}
 				calleeFirst := current.Optional || containsOptional(current.Callee)
 				if calleeFirst {
 					savedHandle := wantMethodHandle
@@ -1326,9 +1370,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_MEMBER_EXPRESSION:
 			{
 				savedHandle := wantMethodHandle
-				wantMethodHandle = false
-				generateByteCode(current.Object, symbolTable, fn)
-				wantMethodHandle = savedHandle
+				isPrivate := current.Property != nil && current.Property.Type == parser.NODE_PRIVATE_IDENTIFIER
+				isSuper := current.Object != nil && current.Object.Type == parser.NODE_SUPER
+				if !isSuper {
+					wantMethodHandle = false
+					generateByteCode(current.Object, symbolTable, fn)
+					wantMethodHandle = savedHandle
+				}
 				if current.Optional {
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
 					fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NULLISH, 0, 0, 0, 0)
@@ -1342,12 +1390,22 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(current.Property, symbolTable, fn)
 					fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
 				} else {
+					name := current.Property.Name
+					if isPrivate {
+						name = privateKeyName(name)
+					}
 					withAstTracking(current.Property, fn, func() {
-						handle := heap.Allocate(native.NewLightString(current.Property.Name))
+						handle := heap.Allocate(native.NewLightString(name))
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 					})
 				}
-				fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+				if isSuper {
+					fn.ValueChunk().EmitByte(chunk.OP_SUPER_GET)
+				} else if isPrivate {
+					fn.ValueChunk().EmitByte(chunk.OP_GET_PRIVATE_MEMBER)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+				}
 				if !savedHandle {
 					fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 				}
@@ -1508,6 +1566,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if variable != nil {
 					if current.Initializer != nil {
+						if current.Initializer.Type == parser.NODE_CLASS_EXPRESSION && current.Initializer.Identifier == nil {
+							inferredClassName = current.Identifier.Name
+						}
 						generateByteCode(current.Initializer, symbolTable, fn)
 
 					} else if current.Initializer == nil && variable.type_ != FOR && variable.type_ != VAR {
@@ -1604,11 +1665,20 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_BINARY_EXPRESSION:
 			{
 				popReturnValue.push(false)
-				generateByteCode(current.Left, symbolTable, fn)
-				generateByteCode(current.Right, symbolTable, fn)
+				if current.BinaryOperator == parser.IN && current.Left.Type == parser.NODE_PRIVATE_IDENTIFIER {
+					generateByteCode(current.Right, symbolTable, fn)
+					withAstTracking(current.Left, fn, func() {
+						handle := heap.Allocate(native.NewLightString(privateKeyName(current.Left.Name)))
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+					})
+					fn.ValueChunk().EmitByte(chunk.OP_HAS_PRIVATE_MEMBER)
+				} else {
+					generateByteCode(current.Left, symbolTable, fn)
+					generateByteCode(current.Right, symbolTable, fn)
+					fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
+				}
 
 				popReturnValue.pop()
-				fn.ValueChunk().EmitByte(operatorMap[current.BinaryOperator])
 			}
 		case parser.NODE_LITERAL:
 			{
@@ -2433,26 +2503,60 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(unaryOperatorMap[current.UnaryOperator])
 				}
 			}
-		case parser.NODE_CLASS_DECLARATION:
+		case parser.NODE_CLASS_DECLARATION, parser.NODE_CLASS_EXPRESSION:
 			{
-				withAstTracking(current.Identifier, fn, func() {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Identifier.Name))))
-				})
-				fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
+				isExpression := current.Type == parser.NODE_CLASS_EXPRESSION
+				name := ""
+				if current.Identifier != nil {
+					name = current.Identifier.Name
+				} else if isExpression {
+					name = inferredClassName
+					inferredClassName = ""
+				}
 
+				if current.SuperClass != nil {
+					if current.Identifier != nil && current.SuperClass.Type == parser.NODE_IDENTIFIER && current.SuperClass.Name == current.Identifier.Name {
+						emitThrow(fn, "ReferenceError", "Cannot access '"+name+"' before initialization")
+					} else {
+						generateByteCode(current.SuperClass, symbolTable, fn)
+					}
+					withAstTracking(current.Identifier, fn, func() {
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+					})
+					fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_EXTENDS)
+				} else {
+					withAstTracking(current.Identifier, fn, func() {
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+					})
+					fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
+				}
+
+				savedDerived := currentClassDerived
+				currentClassDerived = current.SuperClass != nil
 				generateByteCode(current.BodyNode, symbolTable, fn)
+				currentClassDerived = savedDerived
 
 				fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_END)
-				switch symbolTable.tableScope {
-				case GLOBAL:
-					if variable, _ := symbolTable.findVariable(current.Identifier.Name); variable != nil {
-						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+
+				if isExpression {
+					if current.Identifier != nil {
+						syntheticName := "\x00class:" + current.Identifier.Name + ":" + strconv.Itoa(current.Id)
+						if variable, found := global.vars[syntheticName]; found {
+							fn.ValueChunk().EmitByte(chunk.OP_DUP)
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+							variable.declared = true
+						}
 					}
-				case LOCAL:
-					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-				}
-				if variable, _ := symbolTable.findVariable(current.Identifier.Name); variable != nil {
-					variable.declared = true
+				} else {
+					if variable, _ := symbolTable.findVariable(current.Identifier.Name); variable != nil {
+						switch variable.scope {
+						case GLOBAL:
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+						case LOCAL:
+							fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+						}
+						variable.declared = true
+					}
 				}
 			}
 		case parser.NODE_CLASS_BODY:
@@ -2464,11 +2568,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_METHOD_DEFINITION:
 			{
+				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				name := current.Key.Name
+				isPrivate := current.Key.Type == parser.NODE_PRIVATE_IDENTIFIER
+				keyName := name
+				if isPrivate {
+					keyName = privateKeyName(name)
+				}
 
 				function := current.Value.(*parser.Node)
-				method := object.NewFunction(fmt.Sprintf("Class method %s", name), len(function.Params), nil)
+				method := object.NewFunction(keyName, len(function.Params), nil)
 				method.Strict = true
 				method.IsMethod = true
 				method.Length = functionLength(function.Params)
@@ -2489,6 +2599,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitArgumentsHeap(method)
 				emitPatternParameters(function.Params, symbolTable, method)
 
+				if current.Kind == parser.KIND_CONSTRUCTOR {
+					method.IsDerivedConstructor = currentClassDerived
+					if !currentClassDerived {
+						method.ValueChunk().EmitByte(chunk.OP_INIT_INSTANCE_FIELDS)
+					}
+				}
+
 				for _, node := range function.BodyNode.Body {
 					generateByteCode(node, symbolTable, method)
 				}
@@ -2497,21 +2614,87 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
-				withAstTracking(current.Key, fn, func() {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
-				})
+				if current.Computed {
+					popReturnValue.push(false)
+					generateByteCode(current.Key, outerSymbolTable, fn)
+					popReturnValue.pop()
+					fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+				} else {
+					withAstTracking(current.Key, fn, func() {
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(keyName))))
+					})
+				}
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(method)))
-				fn.ValueChunk().EmitByte(chunk.OP_PUSH_METHOD)
+				var flags uint8
+				if current.IsStatic {
+					flags |= 1
+				}
+				if isPrivate {
+					flags |= 2
+				}
+				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_METHOD, flags, uint8(classMemberKind(current.Kind)))
 			}
 		case parser.NODE_PROPERTY_DEFINITION:
 			{
+				outerSymbolTable := symbolTable
 				name := current.Key.Name
-				withAstTracking(current.Key, fn, func() {
-					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
-				})
-				generateByteCode(current.Value.(*parser.Node), symbolTable, fn)
+				isPrivate := current.Key.Type == parser.NODE_PRIVATE_IDENTIFIER
+				keyName := name
+				if isPrivate {
+					keyName = privateKeyName(name)
+				}
 
-				fn.ValueChunk().EmitByte(chunk.OP_PUSH_PROPERTY)
+				initializer := object.NewFunction("field initializer", 0, nil)
+				initializer.Strict = true
+				initializer.IsMethod = true
+				if current.Value != nil {
+					popReturnValue.push(false)
+					generateByteCode(current.Value.(*parser.Node), outerSymbolTable, initializer)
+					popReturnValue.pop()
+				} else {
+					initializer.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+				}
+				initializer.ValueChunk().EmitByte(chunk.OP_RETURN)
+
+				if current.Computed {
+					popReturnValue.push(false)
+					generateByteCode(current.Key, outerSymbolTable, fn)
+					popReturnValue.pop()
+					fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+				} else {
+					withAstTracking(current.Key, fn, func() {
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(keyName))))
+					})
+				}
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(initializer)))
+				var flags uint8
+				if current.IsStatic {
+					flags |= 1
+				}
+				if isPrivate {
+					flags |= 2
+				}
+				fn.ValueChunk().EmitByte(chunk.OP_PUSH_CLASS_FIELD)
+				fn.ValueChunk().EmitByte(flags)
+			}
+		case parser.NODE_STATIC_BLOCK:
+			{
+				symbolTable = FUNCTION_SCOPES[current]
+				block := object.NewFunction("static block", 0, nil)
+				block.Strict = true
+				block.IsMethod = true
+				if symbolTable.hasHeapVars {
+					block.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
+				}
+				emitVarInitializers(symbolTable, block)
+				for _, node := range current.Body {
+					generateByteCode(node, symbolTable, block)
+				}
+				if block.ValueChunk().Code[len(block.ValueChunk().Code)-1] != chunk.OP_RETURN {
+					block.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
+				}
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(block)))
+				fn.ValueChunk().EmitByte(chunk.OP_RUN_STATIC_BLOCK)
 			}
 		case parser.NODE_YIELD_EXPRESSION:
 			{
@@ -2893,7 +3076,6 @@ func emitAssignmentTarget(node *parser.Node, symbolTable *FunctionScope, fn obje
 		fn.ValueChunk().EmitBytes(chunk.OP_RESTORE_COMPLETION, chunk.OP_SET_MEMBER_RETURN, chunk.OP_POP)
 	}
 }
-
 
 func emitPatternTargetFromStack(pattern *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
 	var assign func(*parser.Node)
@@ -3714,7 +3896,8 @@ func containsOptional(node *parser.Node) bool {
 	return false
 }
 
-func argumentsContainSpread(arguments []*parser.Node) bool {	for _, node := range arguments {
+func argumentsContainSpread(arguments []*parser.Node) bool {
+	for _, node := range arguments {
 		switch node.Type {
 		case parser.NODE_SPREAD_ELEMENT:
 			{

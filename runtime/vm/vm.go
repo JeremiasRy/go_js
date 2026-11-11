@@ -962,6 +962,164 @@ func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget 
 	return instanceValue, nil
 }
 
+func (vm *VM) installPrivateMembers(instance *native.Instance, class *native.ObjClass) error {
+	if class.SuperClass.IsObject() {
+		if parent, err := heap.GetObject(class.SuperClass.GetHandle()); err == nil {
+			if parentClass, ok := parent.(*native.ObjClass); ok {
+				if err := vm.installPrivateMembers(instance, parentClass); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	instanceValue := value.EncodeHandle(heap.Allocate(instance))
+	for _, member := range class.PrivateMembers() {
+		memberValue := member.Value
+		if memberValue.IsObject() {
+			if fn, err := heap.GetObject(memberValue.GetHandle()); err == nil {
+				if objFn, ok := fn.(*object.ObjFunction); ok {
+					clone := objFn.Clone().(*object.ObjFunction)
+					clone.HomeObject = value.EncodeHandle(heap.Allocate(class))
+					memberValue = value.EncodeHandle(heap.Allocate(clone))
+				}
+			}
+		}
+		member.Value = memberValue
+		native.InstallPrivateMember(&instance.ObjObject, member)
+	}
+	_ = instanceValue
+	return nil
+}
+
+func (vm *VM) initializeInstanceFields(instance *native.Instance, class *native.ObjClass) error {
+	instanceValue := value.EncodeHandle(heap.Allocate(instance))
+	instance.SetInitialized(true)
+	for _, member := range class.InstanceFields() {
+		result, err := vm.callValue(member.Value, instanceValue, nil)
+		if err != nil {
+			return err
+		}
+		if strings.HasPrefix(member.Key, "\x00#") {
+			native.InstallPrivateMember(&instance.ObjObject, native.ClassMember{Key: member.Key, Value: result, Kind: native.CLASS_FIELD})
+		} else {
+			instance.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString(member.Key))), result)
+		}
+	}
+	return nil
+}
+
+func (vm *VM) initializeClassInstance(instance *native.Instance, class *native.ObjClass) error {
+	if err := vm.installPrivateMembers(instance, class); err != nil {
+		return err
+	}
+	return vm.initializeInstanceFields(instance, class)
+}
+
+func (vm *VM) initializeDefaultInstance(instance *native.Instance, class *native.ObjClass) error {
+	if class.SuperClass.IsObject() {
+		if parent, err := heap.GetObject(class.SuperClass.GetHandle()); err == nil {
+			if parentClass, ok := parent.(*native.ObjClass); ok {
+				if err := vm.initializeDefaultInstance(instance, parentClass); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return vm.initializeClassInstance(instance, class)
+}
+
+func (vm *VM) classConstructor(class *native.ObjClass) (value.Value, bool) {
+	if !class.Prototype.IsObject() {
+		return value.UNDEFINED, false
+	}
+	proto, err := heap.GetObject(class.Prototype.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, false
+	}
+	if hashable, ok := proto.(object.Hashable); ok {
+		constructor := hashable.GetMember(native.KEY_CTOR)
+		return constructor, constructor != value.UNDEFINED
+	}
+	return value.UNDEFINED, false
+}
+
+func (vm *VM) callClassConstructor(constructor value.Value, this value.Value, args []value.Value, newTarget value.Value) (value.Value, error) {
+	obj, err := heap.GetObject(constructor.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	callable, ok := obj.(object.Callable)
+	if !ok {
+		return value.UNDEFINED, fmt.Errorf("Value is not a constructor")
+	}
+	runner := NewVM(false, vm.output)
+	for _, arg := range args {
+		runner.push(arg)
+	}
+	f, c := runner.Call(callable, nil, this, len(args), false)
+	f.newTarget = newTarget
+	runner.frames[runner.frameCount-1].newTarget = newTarget
+	return runner.run(f, c)
+}
+
+func (vm *VM) superBase(home value.Value, this value.Value) value.Value {
+	if !home.IsObject() {
+		return value.UNDEFINED
+	}
+	obj, err := heap.GetObject(home.GetHandle())
+	if err != nil {
+		return value.UNDEFINED
+	}
+	switch homeObj := obj.(type) {
+	case *native.ObjClass:
+		if this.IsObject() {
+			if thisObj, err := heap.GetObject(this.GetHandle()); err == nil {
+				if _, ok := thisObj.(*native.Instance); ok {
+					if homeObj.Prototype.IsObject() {
+						if proto, err := heap.GetObject(homeObj.Prototype.GetHandle()); err == nil {
+							if prototype, ok := proto.(*native.Prototype); ok {
+								return prototype.PrototypeValue()
+							}
+						}
+					}
+					return value.UNDEFINED
+				}
+			}
+		}
+		return homeObj.SuperClass
+	case *native.Prototype:
+		return homeObj.PrototypeValue()
+	}
+	return value.UNDEFINED
+}
+
+func (vm *VM) instanceFromValue(v value.Value) (*native.Instance, bool) {
+	if !v.IsObject() {
+		return nil, false
+	}
+	obj, err := heap.GetObject(v.GetHandle())
+	if err != nil {
+		return nil, false
+	}
+	instance, ok := obj.(*native.Instance)
+	return instance, ok
+}
+
+func (vm *VM) privateTarget(objValue, key value.Value) (object.Hashable, bool) {
+	if !objValue.IsObject() {
+		return nil, false
+	}
+	obj, err := heap.GetObject(objValue.GetHandle())
+	if err != nil {
+		return nil, false
+	}
+	hashable, ok := obj.(object.Hashable)
+	if !ok || !hashable.HasOwn(key) {
+		return nil, false
+	}
+	return hashable, true
+}
+
 func (vm *VM) enqueueNativeCallback(roots []value.Value, fn func()) {
 	key := heap.NewCallbackRoot()
 	heap.StoreCallbackRoot(key, roots...)
@@ -1435,8 +1593,13 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 		}
 	}
 	if class, ok := obj.(*native.ObjClass); ok {
-		if keyString, ok := vm.valueAsString(key); ok && keyString == "prototype" {
-			return class.GetMember(native.KEY_PROTO), nil
+		if keyString, ok := vm.valueAsString(key); ok {
+			if keyString == "prototype" {
+				return class.Prototype, nil
+			}
+			if keyString == "name" {
+				return value.EncodeHandle(heap.Allocate(native.NewLightString(class.Name()))), nil
+			}
 		}
 	}
 	if array, ok := obj.(*native.ObjTypedArray); ok {
@@ -1888,7 +2051,7 @@ func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
 			return false, err
 		}
 	case *native.ObjClass:
-		prototype = ctorObj.GetMember(native.KEY_PROTO)
+		prototype = ctorObj.Prototype
 	case *native.ErrorConstructor:
 		obj, err := heap.GetObject(objValue.GetHandle())
 		if err != nil {
@@ -5979,42 +6142,60 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.ObjClass:
 					{
+						args := vm.popN(int(argCount))
 						instance := ctor.NewInstance()
-						ctor := instance.GetMember(native.KEY_CTOR)
 						instanceValue := value.EncodeHandle(heap.Allocate(instance))
-						if !ctor.IsObject() {
-							vm.popN(int(argCount))
+						constructor, found := vm.classConstructor(ctor)
+						if !found {
+							if err := vm.initializeDefaultInstance(instance, ctor); err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
 							vm.push(instanceValue)
 							continue
 						}
-
-						obj, err := heap.GetObject(ctor.GetHandle())
-
+						result, err := vm.callClassConstructor(constructor, instanceValue, args, callee)
 						if err != nil {
-							return value.UNDEFINED, fmt.Errorf("contructor was not an object %s", native.String(ctor))
-						}
-
-						if constructor, ok := obj.(object.Callable); ok {
-							builder := NewVM(false, vm.output)
-							fn := object.NewFunction("builder", 0, nil)
-							fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(constructor.GetArity()), 0, chunk.OP_RETURN)
-							instance := instanceValue
-
-							for _, v := range vm.popN(constructor.GetArity()) {
-								builder.push(v)
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
 							}
-
-							builder.push(instance)
-							builder.push(ctor)
-							builder.push(value.TAG_METHOD_HANDLE)
-							f, c := builder.Call(fn, nil, value.UNDEFINED, argCount, false)
-							builder.run(f, c)
-
-							vm.push(instance)
-						} else {
-							return value.UNDEFINED, fmt.Errorf("contructor was not an function %s", native.String(ctor))
+							continue
 						}
-
+						constructorClass := ctor
+						if constructorObj, err := heap.GetObject(constructor.GetHandle()); err == nil {
+							if fn, ok := constructorObj.(*object.ObjFunction); ok {
+								if homeObj, err := heap.GetObject(fn.HomeObject.GetHandle()); err == nil {
+									if homeClass, ok := homeObj.(*native.ObjClass); ok {
+										constructorClass = homeClass
+									}
+								}
+								if fn.IsDerivedConstructor && result != value.UNDEFINED && !result.IsObject() {
+									errValue := vm.makeError("TypeError", "Derived constructors may only return object or undefined")
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+							}
+						}
+						if constructorClass != ctor {
+							if err := vm.initializeClassInstance(instance, ctor); err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+						}
+						if result.IsObject() && result != instanceValue {
+							vm.push(result)
+						} else {
+							vm.push(instanceValue)
+						}
 					}
 				case *object.ObjFunction:
 					{
@@ -6388,83 +6569,361 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_CREATE_CLASS_START:
 			{
 				name := vm.pop()
-
 				if n, err := heap.GetObject(name.GetHandle()); err == nil && n.Type() == object.OBJ_STRING {
-					name := n.String()
-
-					class := native.NewObjClass(name)
-					proto := native.NewPrototype(name)
-
-					vm.push(value.EncodeHandle(heap.Allocate(class)))
-					vm.push(value.EncodeHandle(heap.Allocate(proto)))
+					className := n.String()
+					class := native.NewObjClass(className)
+					proto := native.NewPrototype(className)
+					proto.SetMember(native.KEY_PROTO, native.PROTOTYPE_OBJECT)
+					classValue := value.EncodeHandle(heap.Allocate(class))
+					protoValue := value.EncodeHandle(heap.Allocate(proto))
+					class.SetPrototype(protoValue)
+					vm.push(classValue)
+					vm.push(protoValue)
+				} else {
+					return value.UNDEFINED, fmt.Errorf("%s is not a string", native.String(name))
+				}
+			}
+		case chunk.OP_CREATE_CLASS_EXTENDS:
+			{
+				name := vm.pop()
+				super := vm.pop()
+				if n, err := heap.GetObject(name.GetHandle()); err == nil && n.Type() == object.OBJ_STRING {
+					className := n.String()
+					class := native.NewObjClass(className)
+					proto := native.NewPrototype(className)
+					class.SetSuperClass(super)
+					superProto, err := vm.getMemberValue(super, value.EncodeHandle(heap.Allocate(native.NewLightString("prototype"))))
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if superProto.IsObject() {
+						proto.SetMember(native.KEY_PROTO, superProto)
+					} else {
+						proto.SetMember(native.KEY_PROTO, native.PROTOTYPE_OBJECT)
+					}
+					classValue := value.EncodeHandle(heap.Allocate(class))
+					protoValue := value.EncodeHandle(heap.Allocate(proto))
+					class.SetPrototype(protoValue)
+					vm.push(classValue)
+					vm.push(protoValue)
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s is not a string", native.String(name))
 				}
 			}
 		case chunk.OP_CREATE_CLASS_END:
 			{
-				proto := vm.pop()
-				class := vm.peek()
-
-				classObj, _ := heap.GetObject(class.GetHandle())
-				protoObj, _ := heap.GetObject(proto.GetHandle())
-				protoObj.(*native.Prototype).SetMember(native.KEY_PROTO, native.PROTOTYPE_OBJECT)
-				classObj.(*native.ObjClass).SetPrototype(proto)
+				vm.pop()
 			}
 		case chunk.OP_PUSH_METHOD:
 			{
+				flags := c.Code[ip]
+				ip++
+				kind := native.ClassMemberKind(c.Code[ip])
+				ip++
 				method := vm.pop()
 				methodObj, err := heap.GetObject(method.GetHandle())
-
 				if err != nil {
 					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(method))
 				}
-
-				if _, ok := methodObj.(object.Callable); ok {
-					method = cloneFunctionValue(method, f.heapScope)
-				} else {
+				if _, ok := methodObj.(object.Callable); !ok {
 					return value.UNDEFINED, fmt.Errorf("%s was not an function", native.String(method))
 				}
-
+				method = cloneFunctionValue(method, f.heapScope)
 				key := vm.pop()
-				prototype := vm.peek()
-
-				protoObj, err := heap.GetObject(prototype.GetHandle())
-
-				if err != nil {
-					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(prototype))
+				classValue := vm.peekN(1)
+				protoValue := vm.peek()
+				classObj, _ := heap.GetObject(classValue.GetHandle())
+				class := classObj.(*native.ObjClass)
+				target := protoValue
+				isStatic := flags&1 != 0
+				isPrivate := flags&2 != 0
+				if isStatic {
+					target = classValue
 				}
-
-				if p, ok := protoObj.(*native.Prototype); ok {
-					p.SetMember(key, method)
+				if methodObj, err := heap.GetObject(method.GetHandle()); err == nil {
+					if fn, ok := methodObj.(*object.ObjFunction); ok {
+						if kind == native.CLASS_CONSTRUCTOR {
+							fn.HomeObject = classValue
+						} else {
+							fn.HomeObject = target
+						}
+					}
+				}
+				if isPrivate {
+					if isStatic {
+						native.DefineClassMember(class, key, method, kind)
+					} else {
+						class.AddPrivateMember(key, native.ClassMember{Value: method, Kind: kind, Private: true})
+					}
 				} else {
-					return value.UNDEFINED, fmt.Errorf("%s was not an prototype", native.String(prototype))
+					targetObj, _ := heap.GetObject(target.GetHandle())
+					native.DefineClassMember(targetObj, key, method, kind)
 				}
 			}
 		case chunk.OP_PUSH_PROPERTY:
 			{
 				v := vm.pop()
 				k := vm.pop()
-
 				class := vm.peekN(1)
-
 				classObj, err := heap.GetObject(class.GetHandle())
-
 				if err != nil {
 					return value.UNDEFINED, fmt.Errorf("%s was not an object", native.String(class))
 				}
-
 				if c, ok := classObj.(*native.ObjClass); ok {
 					c.PushProperty(k, v)
 				} else {
 					return value.UNDEFINED, fmt.Errorf("%s was not an class object", native.String(class))
 				}
 			}
+		case chunk.OP_PUSH_CLASS_FIELD:
+			{
+				flags := c.Code[ip]
+				ip++
+				initializer := vm.pop()
+				key := vm.pop()
+				classValue := vm.peekN(1)
+				classObj, _ := heap.GetObject(classValue.GetHandle())
+				class := classObj.(*native.ObjClass)
+				initializer = cloneFunctionValue(initializer, f.heapScope)
+				if initializerObj, err := heap.GetObject(initializer.GetHandle()); err == nil {
+					if fn, ok := initializerObj.(*object.ObjFunction); ok {
+						fn.HomeObject = classValue
+					}
+				}
+				if flags&1 != 0 {
+					result, err := vm.callValue(initializer, classValue, nil)
+					if err != nil {
+						errValue := vm.errorValue(err)
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
+					if flags&2 != 0 {
+						native.DefineClassMember(class, key, result, native.CLASS_FIELD)
+					} else {
+						class.SetMember(key, result)
+					}
+				} else {
+					class.AddInstanceField(key, initializer)
+				}
+			}
+		case chunk.OP_RUN_STATIC_BLOCK:
+			{
+				block := vm.pop()
+				classValue := vm.peekN(1)
+				block = cloneFunctionValue(block, f.heapScope)
+				if blockObj, err := heap.GetObject(block.GetHandle()); err == nil {
+					if fn, ok := blockObj.(*object.ObjFunction); ok {
+						fn.HomeObject = classValue
+					}
+				}
+				if _, err := vm.callValue(block, classValue, nil); err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+				}
+			}
+		case chunk.OP_INIT_INSTANCE_FIELDS:
+			{
+				instance, ok := vm.instanceFromValue(f.thisCtx)
+				if !ok {
+					errValue := vm.makeError("ReferenceError", "Must call super constructor before accessing 'this'")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				home, _ := heap.GetObject(f.fn.(*object.ObjFunction).HomeObject.GetHandle())
+				class, ok := home.(*native.ObjClass)
+				if !ok {
+					errValue := vm.makeError("TypeError", "Invalid class home object")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				if err := vm.initializeClassInstance(instance, class); err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+				}
+			}
+		case chunk.OP_SUPER_CALL:
+			{
+				argCount := int(c.Code[ip])
+				ip++
+				ip++
+				args := vm.popN(argCount)
+				instance, ok := vm.instanceFromValue(f.thisCtx)
+				if !ok {
+					errValue := vm.makeError("ReferenceError", "Must call super constructor before accessing 'this'")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				if instance.Initialized() {
+					errValue := vm.makeError("ReferenceError", "Super constructor may only be called once")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				home, _ := heap.GetObject(f.fn.(*object.ObjFunction).HomeObject.GetHandle())
+				class, ok := home.(*native.ObjClass)
+				if !ok {
+					errValue := vm.makeError("TypeError", "Invalid class home object")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				if class.SuperClass.IsObject() {
+					if parentObj, err := heap.GetObject(class.SuperClass.GetHandle()); err == nil {
+						if parentClass, ok := parentObj.(*native.ObjClass); ok {
+							if constructor, found := vm.classConstructor(parentClass); found {
+								if _, err := vm.callClassConstructor(constructor, f.thisCtx, args, f.newTarget); err != nil {
+									errValue := vm.errorValue(err)
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+							} else if err := vm.initializeClassInstance(instance, parentClass); err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+						}
+					}
+				}
+				if err := vm.initializeClassInstance(instance, class); err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				instance.SetInitialized(true)
+				vm.push(value.UNDEFINED)
+			}
+		case chunk.OP_SUPER_GET:
+			{
+				key := vm.pop()
+				base := vm.superBase(f.fn.(*object.ObjFunction).HomeObject, f.thisCtx)
+				if !base.IsObject() {
+					vm.push(value.UNDEFINED)
+					continue
+				}
+				member, err := vm.getMemberValueWithReceiver(base, key, f.thisCtx)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				if member.IsObject() {
+					if memberObj, err := heap.GetObject(member.GetHandle()); err == nil {
+						if _, ok := memberObj.(object.NeedsContext); ok {
+							vm.push(f.thisCtx)
+							vm.push(member)
+							vm.push(value.TAG_METHOD_HANDLE)
+							continue
+						}
+					}
+				}
+				vm.push(member)
+			}
+		case chunk.OP_GET_PRIVATE_MEMBER:
+			{
+				key := vm.pop()
+				objValue := vm.pop()
+				if _, ok := vm.privateTarget(objValue, key); !ok {
+					errValue := vm.makeError("TypeError", "Cannot read private member from an object whose class did not declare it")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				member, err := vm.getMemberValue(objValue, key)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				if member.IsObject() {
+					if memberObj, err := heap.GetObject(member.GetHandle()); err == nil {
+						if _, ok := memberObj.(object.NeedsContext); ok {
+							vm.push(objValue)
+							vm.push(member)
+							vm.push(value.TAG_METHOD_HANDLE)
+							continue
+						}
+					}
+				}
+				vm.push(member)
+			}
+		case chunk.OP_SET_PRIVATE_MEMBER_RETURN, chunk.OP_SET_PRIVATE_MEMBER_STRICT_RETURN:
+			{
+				v := vm.pop()
+				key := vm.pop()
+				objValue := vm.pop()
+				if _, ok := vm.privateTarget(objValue, key); !ok {
+					errValue := vm.makeError("TypeError", "Cannot write private member to an object whose class did not declare it")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				var err error
+				if code == chunk.OP_SET_PRIVATE_MEMBER_STRICT_RETURN {
+					err = vm.setMemberValueStrict(objValue, key, v, true)
+				} else {
+					err = vm.setMemberValue(objValue, key, v)
+				}
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(v)
+			}
+		case chunk.OP_HAS_PRIVATE_MEMBER:
+			{
+				key := vm.pop()
+				objValue := vm.pop()
+				if !objValue.IsObject() {
+					errValue := vm.makeError("TypeError", "Cannot use 'in' operator to search for private name in primitive")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				_, ok := vm.privateTarget(objValue, key)
+				vm.push(boolValue(ok))
+			}
 		case chunk.OP_THIS:
 			{
 				if fn, ok := f.fn.(*object.ObjFunction); ok && fn.IsArrow {
 					vm.push(fn.LexicalThis)
 				} else {
+					if instance, ok := vm.instanceFromValue(f.thisCtx); ok && !instance.Initialized() {
+						errValue := vm.makeError("ReferenceError", "Must call super constructor before accessing 'this'")
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
 					vm.push(f.thisCtx)
 				}
 			}

@@ -746,8 +746,8 @@ func (p *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, erro
 		}
 
 		elem.Value = TemplateNodeValue{
-			Raw:    strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
-			Cooked: "",
+			Raw:     strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
+			Cooked:  "",
 			Invalid: true,
 		}
 	} else {

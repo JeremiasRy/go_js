@@ -61,4 +61,3 @@ func NewBoxedValueOf() *BoxedValueOf {
 	b.name = "valueOf"
 	return b
 }
-

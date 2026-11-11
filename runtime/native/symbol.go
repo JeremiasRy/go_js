@@ -15,18 +15,18 @@ var symbolRegistry = map[string]value.Value{}
 var symbolByKey = map[string]value.Value{}
 
 var (
-	SYMBOL_ITERATOR          value.Value
-	SYMBOL_ASYNC_ITERATOR    value.Value
-	SYMBOL_HAS_INSTANCE      value.Value
-	SYMBOL_SPECIES           value.Value
+	SYMBOL_ITERATOR             value.Value
+	SYMBOL_ASYNC_ITERATOR       value.Value
+	SYMBOL_HAS_INSTANCE         value.Value
+	SYMBOL_SPECIES              value.Value
 	SYMBOL_IS_CONCAT_SPREADABLE value.Value
-	SYMBOL_TO_PRIMITIVE      value.Value
-	SYMBOL_TO_STRING_TAG     value.Value
-	SYMBOL_MATCH             value.Value
-	SYMBOL_REPLACE           value.Value
-	SYMBOL_SEARCH            value.Value
-	SYMBOL_SPLIT             value.Value
-	SYMBOL_MATCH_ALL         value.Value
+	SYMBOL_TO_PRIMITIVE         value.Value
+	SYMBOL_TO_STRING_TAG        value.Value
+	SYMBOL_MATCH                value.Value
+	SYMBOL_REPLACE              value.Value
+	SYMBOL_SEARCH               value.Value
+	SYMBOL_SPLIT                value.Value
+	SYMBOL_MATCH_ALL            value.Value
 )
 
 type ObjSymbol struct {

@@ -2076,20 +2076,17 @@ func (p *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error) {
 	}
 
 	if len(keyName) == 0 && !isAsync && !isGenerator {
-		lastValue := p.Value
-		if p.eatContextual("get") || p.eatContextual("set") {
+		if p.eatContextual("get") {
 			if p.isClassElementNameStart() {
-				if k, ok := lastValue.(Kind); ok {
-					kind = k
-				} else {
-					panic("We were expecting p.Value to be kind, it wasn't")
-				}
+				kind = KIND_PROPERTY_GET
 			} else {
-				if str, ok := lastValue.(string); ok {
-					keyName = str
-				} else {
-					panic("We were expecting p.Value to be string, it wasn't")
-				}
+				keyName = "get"
+			}
+		} else if p.eatContextual("set") {
+			if p.isClassElementNameStart() {
+				kind = KIND_PROPERTY_SET
+			} else {
+				keyName = "set"
 			}
 		}
 	}
@@ -2283,12 +2280,6 @@ func (p *Parser) parseClassId(node *Node, isStatement bool) error {
 			if err != nil {
 				return err
 			}
-		} else {
-			if isStatement {
-				return p.unexpected("cant be in a statement", nil)
-			}
-
-			node.Identifier = nil
 		}
 		return nil
 	}
