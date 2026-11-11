@@ -1461,7 +1461,19 @@ func (vm *VM) looseEquals(a, b value.Value) (bool, error) {
 
 func (vm *VM) throwValue(v value.Value, f *CallFrame, c *value.ValueChunk, ip *int) error {
 	if len(vm.exceptionStack) == 0 {
-		return &JSException{Name: "Error", Message: native.String(v)}
+		name := "Error"
+		if v.IsObject() {
+			if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+				if e, ok := obj.(*native.ObjError); ok {
+					if n := e.GetMember(native.KEY_NAME); n != value.UNDEFINED {
+						if ns, ok := vm.valueAsString(n); ok {
+							name = ns
+						}
+					}
+				}
+			}
+		}
+		return &JSException{Name: name, Message: native.String(v)}
 	}
 	state := vm.exceptionStack[len(vm.exceptionStack)-1]
 	vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
