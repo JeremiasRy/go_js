@@ -2216,6 +2216,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(current.Argument, symbolTable, fn)
 					fn.ValueChunk().EmitByte(chunk.OP_BITWISE_NOT)
 				case parser.UNARY_DELETE:
+					if current.Argument != nil && current.Argument.Type == parser.NODE_CHAIN_EXPRESSION {
+						generateByteCode(current.Argument, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_POP)
+						fn.ValueChunk().WriteConstant(value.TRUE)
+						return
+					}
 					argument := current.Argument
 					for argument != nil && (argument.Type == parser.NODE_CHAIN_EXPRESSION || argument.Type == parser.NODE_PARENTHESIZED_EXPRESSION) {
 						argument = argument.Expression
@@ -2228,7 +2234,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							handle := heap.Allocate(native.NewLightString(argument.Property.Name))
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 						}
-						fn.ValueChunk().EmitByte(chunk.OP_DELETE)
+						if isStrictFunction(fn) {
+							fn.ValueChunk().EmitByte(chunk.OP_DELETE_STRICT)
+						} else {
+							fn.ValueChunk().EmitByte(chunk.OP_DELETE)
+						}
 					} else {
 						generateByteCode(current.Argument, symbolTable, fn)
 						fn.ValueChunk().EmitByte(chunk.OP_POP)

@@ -2138,6 +2138,26 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.push(boolValue(result))
 			}
+		case chunk.OP_DELETE_STRICT:
+			{
+				k := vm.pop()
+				objValue := vm.pop()
+				result := true
+				if objValue.IsObject() {
+					obj, _ := heap.GetObject(objValue.GetHandle())
+					if d, ok := obj.(object.Deletable); ok {
+						result = d.Delete(k)
+					}
+				}
+				if !result {
+					errValue := vm.makeError("TypeError", "Cannot delete property")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(value.TRUE)
+			}
 		case chunk.OP_INSTANCEOF:
 			{
 				ctor := vm.pop()
