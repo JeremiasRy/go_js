@@ -536,6 +536,13 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineProxyConstructor(main *object.ObjFunction) {
+	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("Proxy"))))
+	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewProxyConstructor())))
+	main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+}
+
 func defineRegExpConstructor(main *object.ObjFunction) {
 	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("RegExp"))))
@@ -693,6 +700,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineBigIntConstructor(setup, global)
 	defineBinaryConstructors(setup, global)
 	defineRegExpConstructor(setup)
+	defineProxyConstructor(setup)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
@@ -1076,7 +1084,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if len(fn.ValueChunk().Code) == 0 {
 					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
-				} else if fn.ValueChunk().Code[len(fn.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				} else {
 					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
@@ -1171,8 +1179,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if len(newFn.ValueChunk().Code) == 0 {
 					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
-				} else if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
-					newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
+				} else {
+					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
 				symbolTable = outerSymbolTable
@@ -1222,8 +1230,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if len(newFn.ValueChunk().Code) == 0 {
 					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
-				} else if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
-					newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
+				} else {
+					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 				symbolTable = outerSymbolTable
 				fn.ValueChunk().WriteConstant(v)
@@ -2610,7 +2618,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, method)
 				}
 
-				if method.ValueChunk().Code[len(method.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				{
 					method.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 
@@ -2690,7 +2698,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				for _, node := range current.Body {
 					generateByteCode(node, symbolTable, block)
 				}
-				if block.ValueChunk().Code[len(block.ValueChunk().Code)-1] != chunk.OP_RETURN {
+				{
 					block.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(block)))

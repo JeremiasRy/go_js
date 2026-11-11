@@ -797,6 +797,15 @@ func (vm *VM) callArrayStaticMethod(method *native.ArrayStaticMethod, argCount i
 			if args[0].IsObject() {
 				obj, err := heap.GetObject(args[0].GetHandle())
 				if err == nil {
+					if proxy, ok := obj.(*native.ObjProxy); ok {
+						if proxy.Revoked {
+							return value.UNDEFINED, &JSException{Name: "TypeError", Message: "Cannot perform operation on a revoked Proxy"}
+						}
+						obj, err = heap.GetObject(proxy.Target.GetHandle())
+						if err != nil {
+							return value.FALSE, nil
+						}
+					}
 					if _, ok := obj.(*native.ObjArr); ok {
 						return value.TRUE, nil
 					}

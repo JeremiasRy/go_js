@@ -162,6 +162,16 @@ func (vm *VM) callObjectMethod(method *native.ObjectMethod, argCount int) (value
 		return args[0], nil
 	case native.OBJECT_PREVENT_EXTENSIONS:
 		if len(args) > 0 {
+			if proxy, ok := vm.asProxy(args[0]); ok {
+				prevented, err := vm.proxyPreventExtensions(proxy)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				if !prevented {
+					return value.UNDEFINED, fmt.Errorf("Cannot prevent extensions")
+				}
+				return args[0], nil
+			}
 			if obj, ok := native.ObjectAsObj(args[0]); ok {
 				obj.SetExtensible(false)
 			}
@@ -170,6 +180,13 @@ func (vm *VM) callObjectMethod(method *native.ObjectMethod, argCount int) (value
 		return value.UNDEFINED, nil
 	case native.OBJECT_IS_EXTENSIBLE:
 		if len(args) > 0 {
+			if proxy, ok := vm.asProxy(args[0]); ok {
+				extensible, err := vm.proxyIsExtensible(proxy)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				return boolValue(extensible), nil
+			}
 			if obj, ok := native.ObjectAsObj(args[0]); ok && obj.Extensible() {
 				return value.TRUE, nil
 			}

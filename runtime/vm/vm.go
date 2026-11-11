@@ -940,9 +940,20 @@ func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget 
 			proto.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("constructor"))), value.EncodeHandle(heap.Allocate(fn)))
 			fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
 		}
-		if fn.Prototype.IsObject() {
-			instance.SetPrototypeValue(fn.Prototype)
+	}
+	prototype := value.UNDEFINED
+	if newTarget.IsObject() {
+		if proto, err := vm.getMemberValue(newTarget, value.EncodeHandle(heap.Allocate(native.NewLightString("prototype")))); err == nil && proto.IsObject() {
+			prototype = proto
 		}
+	}
+	if !prototype.IsObject() {
+		if fn, ok := callable.(*object.ObjFunction); ok && fn.Prototype.IsObject() {
+			prototype = fn.Prototype
+		}
+	}
+	if prototype.IsObject() {
+		instance.SetPrototypeValue(prototype)
 	}
 	instanceValue := value.EncodeHandle(heap.Allocate(instance))
 	runner := NewVM(false, vm.output)
@@ -1377,12 +1388,19 @@ func (vm *VM) syncGlobalVar(objValue, key, v value.Value) {
 }
 
 func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, strict bool) error {
+	return vm.setMemberValueWithReceiver(objValue, key, v, objValue, strict)
+}
+
+func (vm *VM) setMemberValueWithReceiver(objValue value.Value, key, v, receiver value.Value, strict bool) error {
 	if !objValue.IsObject() {
 		return fmt.Errorf("cannot set property on non-object")
 	}
 	obj, err := heap.GetObject(objValue.GetHandle())
 	if err != nil {
 		return err
+	}
+	if proxy, ok := obj.(*native.ObjProxy); ok {
+		return vm.proxySet(proxy, key, v, receiver, strict)
 	}
 	if k, ok := vm.valueAsString(key); ok {
 		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
@@ -1466,7 +1484,7 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 		if entry, found := own.GetOwnEntry(key); found {
 			if entry.IsAccessor() {
 				if entry.Set != value.UNDEFINED {
-					_, err := vm.callValue(entry.Set, objValue, []value.Value{v})
+					_, err := vm.callValue(entry.Set, receiver, []value.Value{v})
 					return err
 				}
 				if strict {
@@ -1479,6 +1497,26 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 					return fmt.Errorf("Cannot assign to read only property")
 				}
 				return nil
+			}
+			if !native.ObjectIsSame(receiver, objValue) {
+				if proxy, ok := vm.asProxy(receiver); ok {
+					if _, err := vm.proxyGetOwnPropertyDescriptor(proxy, key); err != nil {
+						return err
+					}
+					descriptor := native.NewObjectHash()
+					descriptor.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("value"))), v)
+					descriptor.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("writable"))), value.TRUE)
+					descriptor.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("enumerable"))), value.TRUE)
+					descriptor.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("configurable"))), value.TRUE)
+					defined, err := vm.proxyDefineProperty(proxy, key, value.EncodeHandle(heap.Allocate(descriptor)))
+					if err != nil {
+						return err
+					}
+					if !defined && strict {
+						return fmt.Errorf("Cannot define property on receiver")
+					}
+					return nil
+				}
 			}
 		} else {
 			if o, ok := obj.(interface{ Extensible() bool }); ok && !o.Extensible() {
@@ -1503,7 +1541,7 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 				if entry, found := po.GetOwnEntry(key); found {
 					if entry.IsAccessor() {
 						if entry.Set != value.UNDEFINED {
-							_, err := vm.callValue(entry.Set, objValue, []value.Value{v})
+							_, err := vm.callValue(entry.Set, receiver, []value.Value{v})
 							return err
 						}
 						if strict {
@@ -1544,6 +1582,9 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	obj, err := heap.GetObject(objValue.GetHandle())
 	if err != nil {
 		return value.UNDEFINED, err
+	}
+	if proxy, ok := obj.(*native.ObjProxy); ok {
+		return vm.proxyGet(proxy, objValue, key, receiver)
 	}
 	if boxed, ok := obj.(*native.BoxedPrimitive); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "valueOf" {
@@ -1964,9 +2005,16 @@ func (vm *VM) toUint32(v value.Value) (uint32, error) {
 func (vm *VM) typeofValue(v value.Value) string {
 	if v.IsObject() {
 		obj, _ := heap.GetObject(v.GetHandle())
-		switch obj.(type) {
-		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ObjNativeFn:
+		if obj.Type() == object.OBJ_NATIVE_FN {
 			return "function"
+		}
+		switch obj := obj.(type) {
+		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass:
+			return "function"
+		case *native.ObjProxy:
+			if obj.Callable {
+				return "function"
+			}
 		case *native.ObjBigInt:
 			return "bigint"
 		case *native.LightString, *native.ObjStringBuilder:
@@ -3237,20 +3285,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				obj := vm.pop()
 				prop := vm.pop()
 
-				has := value.FALSE
-
-				if obj.IsObject() {
-					objValue, err := heap.GetObject(obj.GetHandle())
-					if err == nil {
-						if hashable, ok := objValue.(object.Hashable); ok && hashable.HasOwn(prop) {
-							has = value.TRUE
-						} else if v, err := vm.getMemberValue(obj, prop); err == nil && v != value.UNDEFINED {
-							has = value.TRUE
-						}
+				has, err := vm.hasProperty(obj, prop)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
 					}
+					continue
 				}
-
-				vm.push(has)
+				vm.push(boolValue(has))
 			}
 		case chunk.OP_NULL_COALESHING:
 			{
@@ -3440,12 +3483,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				k := vm.pop()
 				objValue := vm.pop()
-				result := true
-				if objValue.IsObject() {
-					obj, _ := heap.GetObject(objValue.GetHandle())
-					if d, ok := obj.(object.Deletable); ok {
-						result = d.Delete(k)
+				result, err := vm.deletePropertyValue(objValue, k)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
 					}
+					continue
 				}
 				vm.push(boolValue(result))
 			}
@@ -3453,12 +3497,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				k := vm.pop()
 				objValue := vm.pop()
-				result := true
-				if objValue.IsObject() {
-					obj, _ := heap.GetObject(objValue.GetHandle())
-					if d, ok := obj.(object.Deletable); ok {
-						result = d.Delete(k)
+				result, err := vm.deletePropertyValue(objValue, k)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
 					}
+					continue
 				}
 				if !result {
 					errValue := vm.makeError("TypeError", "Cannot delete property")
@@ -4095,6 +4140,49 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				switch fn := fn.(type) {
+				case *native.ObjProxy:
+					{
+						args := vm.popN(argCount)
+						result, err := vm.proxyApply(fn, thisCtx, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.ProxyConstructor:
+					{
+						errValue := vm.makeError("TypeError", "Constructor Proxy requires 'new'")
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
+				case *native.ProxyRevocable:
+					{
+						args := vm.popN(argCount)
+						if len(args) < 2 || !args[0].IsObject() || !args[1].IsObject() {
+							errValue := vm.makeError("TypeError", "Cannot create proxy with a non-object as target or handler")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						proxy := native.NewObjProxy(args[0], args[1])
+						proxyValue := value.EncodeHandle(heap.Allocate(proxy))
+						result := native.NewObjectHash()
+						result.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("proxy"))), proxyValue)
+						result.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("revoke"))), value.EncodeHandle(heap.Allocate(native.NewProxyRevoke(proxy))))
+						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.ProxyRevoke:
+					{
+						fn.Proxy.Revoked = true
+						vm.push(value.UNDEFINED)
+					}
 				case *native.ObjBoundFunction:
 					{
 						args := vm.popN(argCount)
@@ -4491,20 +4579,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						vm.push(result)
 					}
-				case *native.ReflectDeleteProperty:
-					{
-						key := vm.pop()
-						target := vm.pop()
-						result := false
-						if target.IsObject() {
-							if obj, err := heap.GetObject(target.GetHandle()); err == nil {
-								if d, ok := obj.(object.Deletable); ok {
-									result = d.Delete(key)
-								}
-							}
-						}
-						vm.push(boolValue(result))
-					}
+
 				case *native.MapGet:
 					{
 						arg := vm.pop()
@@ -5198,9 +5273,53 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						vm.push(result)
 					}
+				case *native.ReflectMethod:
+					{
+						args := vm.popN(argCount)
+						result, err := vm.callReflectMethod(fn, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
 				case *native.ObjectKeys:
 					{
 						arg := vm.pop()
+						if proxy, ok := vm.asProxy(arg); ok {
+							keys, err := vm.proxyOwnKeys(proxy)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							filtered := []value.Value{}
+							for _, key := range keys {
+								desc, err := vm.proxyGetOwnPropertyDescriptor(proxy, key)
+								if err != nil {
+									errValue := vm.errorValue(err)
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									filtered = nil
+									break
+								}
+								if desc == value.UNDEFINED {
+									continue
+								}
+								enumerable, err := vm.getMemberValue(desc, value.EncodeHandle(heap.Allocate(native.NewLightString("enumerable"))))
+								if err == nil && truthyValue(enumerable) {
+									filtered = append(filtered, key)
+								}
+							}
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(filtered))))
+							continue
+						}
 						arr := fn.Keys(arg)
 
 						objArr := native.NewArrayFrom(arr)
@@ -5292,23 +5411,78 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						vm.push(result)
 					}
-				case *native.ObjectGetOwnPropertySymbols:
-					{
-						target := vm.pop()
-						symbols := fn.Symbols(target)
-						vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(symbols))))
-					}
 				case *native.ObjectGetOwnPropertyNames:
 					{
 						target := vm.pop()
+						if proxy, ok := vm.asProxy(target); ok {
+							keys, err := vm.proxyOwnKeys(proxy)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							names := []value.Value{}
+							for _, key := range keys {
+								if _, ok := vm.valueAsString(key); ok {
+									names = append(names, key)
+								}
+							}
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(names))))
+							continue
+						}
 						names := fn.Names(target)
 						vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(names))))
+					}
+				case *native.ObjectGetOwnPropertySymbols:
+					{
+						target := vm.pop()
+						if proxy, ok := vm.asProxy(target); ok {
+							keys, err := vm.proxyOwnKeys(proxy)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							symbols := []value.Value{}
+							for _, key := range keys {
+								if _, ok := vm.valueAsString(key); !ok {
+									symbols = append(symbols, key)
+								}
+							}
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(symbols))))
+							continue
+						}
+						symbols := fn.Symbols(target)
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewArrayFrom(symbols))))
 					}
 				case *native.ObjectDefineProperty:
 					{
 						descriptor := vm.pop()
 						key := vm.pop()
 						target := vm.pop()
+						if proxy, ok := vm.asProxy(target); ok {
+							result, err := vm.proxyDefineProperty(proxy, key, descriptor)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							if !result {
+								errValue := vm.makeError("TypeError", "Cannot redefine property")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(target)
+							continue
+						}
 						result := fn.Define(target, key, descriptor)
 						if result == value.UNDEFINED {
 							errValue := vm.makeError("TypeError", "Cannot redefine property")
@@ -5323,17 +5497,60 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						key := vm.pop()
 						target := vm.pop()
+						if proxy, ok := vm.asProxy(target); ok {
+							result, err := vm.proxyGetOwnPropertyDescriptor(proxy, key)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(result)
+							continue
+						}
 						vm.push(fn.Descriptor(target, key))
 					}
 				case *native.ObjectGetPrototypeOf:
 					{
 						target := vm.pop()
+						if proxy, ok := vm.asProxy(target); ok {
+							result, err := vm.proxyGetPrototypeOf(proxy)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(result)
+							continue
+						}
 						vm.push(fn.GetPrototypeOf(target))
 					}
 				case *native.ObjectSetPrototypeOf:
 					{
 						proto := vm.pop()
 						target := vm.pop()
+						if proxy, ok := vm.asProxy(target); ok {
+							result, err := vm.proxySetPrototypeOf(proxy, proto)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							if !result {
+								errValue := vm.makeError("TypeError", "Cyclic __proto__ value or non-extensible object")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(target)
+							continue
+						}
 						result := fn.SetPrototypeOf(target, proto)
 						if result == value.UNDEFINED {
 							errValue := vm.makeError("TypeError", "Cyclic __proto__ value or non-extensible object")
@@ -6139,6 +6356,32 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 						continue
+					}
+				case *native.ProxyConstructor:
+					{
+						args := vm.popN(int(argCount))
+						if len(args) < 2 || !args[0].IsObject() || !args[1].IsObject() {
+							errValue := vm.makeError("TypeError", "Cannot create proxy with a non-object as target or handler")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						proxy := native.NewObjProxy(args[0], args[1])
+						vm.push(value.EncodeHandle(heap.Allocate(proxy)))
+					}
+				case *native.ObjProxy:
+					{
+						args := vm.popN(int(argCount))
+						result, err := vm.proxyConstruct(ctor, args, callee)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case *native.ObjClass:
 					{

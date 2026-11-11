@@ -932,3 +932,28 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 	}
 	return r
 }
+
+func OwnPropertyKeys(target value.Value) []value.Value {
+	result := []value.Value{}
+	if !target.IsObject() {
+		return result
+	}
+	obj, err := heap.GetObject(target.GetHandle())
+	if err != nil {
+		return result
+	}
+	o, ok := objectAsObjObject(obj)
+	if !ok {
+		return result
+	}
+	for _, item := range orderedMemberEntries(o) {
+		if len(item.Key) > 0 && item.Key[0] == 0 {
+			if symbol, found := SymbolByKey(item.Key); found {
+				result = append(result, symbol)
+			}
+			continue
+		}
+		result = append(result, value.EncodeHandle(heap.Allocate(NewLightString(item.Key))))
+	}
+	return result
+}
