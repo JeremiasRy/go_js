@@ -258,7 +258,32 @@ func (*MapConstructor) Type() object.ObjType {
 }
 
 func (*MapConstructor) New(params ...any) (object.Object, error) {
-	return NewMap(), nil
+	m := NewMap()
+	if len(params) > 0 {
+		if v, ok := params[0].(value.Value); ok && v.IsObject() {
+			if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+				if arr, ok := obj.(*ObjArr); ok {
+					setter := &MapSet{}
+					for i := 0; i < arr.Length(); i++ {
+						entryValue := arr.GetElementAt(i)
+						if !entryValue.IsObject() {
+							return nil, fmt.Errorf("Iterator value is not an entry object")
+						}
+						entryObj, err := heap.GetObject(entryValue.GetHandle())
+						if err != nil {
+							return nil, err
+						}
+						entry, ok := entryObj.(*ObjArr)
+						if !ok || entry.Length() < 2 {
+							return nil, fmt.Errorf("Iterator value is not an entry object")
+						}
+						setter.Set(m, entry.GetElementAt(0), entry.GetElementAt(1))
+					}
+				}
+			}
+		}
+	}
+	return m, nil
 }
 
 type SetConstructor struct {
@@ -278,5 +303,29 @@ func (*SetConstructor) Type() object.ObjType {
 }
 
 func (*SetConstructor) New(params ...any) (object.Object, error) {
-	return NewSet(), nil
+	s := NewSet()
+	adder := &SetAdd{}
+	if len(params) > 0 {
+		if v, ok := params[0].(value.Value); ok {
+			if str, ok := ObjectStringValue(v); ok {
+				for _, r := range []rune(str) {
+					adder.Add(s, value.EncodeHandle(heap.Allocate(NewLightString(string(r)))))
+				}
+			} else if v.IsObject() {
+				if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+					switch source := obj.(type) {
+					case *ObjArr:
+						for i := 0; i < source.Length(); i++ {
+							adder.Add(s, source.GetElementAt(i))
+						}
+					case *Set:
+						for _, item := range source.order {
+							adder.Add(s, item)
+						}
+					}
+				}
+			}
+		}
+	}
+	return s, nil
 }

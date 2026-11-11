@@ -267,11 +267,21 @@ func initMapPrototype() {
 	mapGet := value.EncodeHandle(heap.Allocate(NewMapGet()))
 	mapSet := value.EncodeHandle(heap.Allocate(NewMapSet()))
 	mapKeys := value.EncodeHandle(heap.Allocate(NewMapKeys()))
+	mapValues := value.EncodeHandle(heap.Allocate(NewMapValues()))
+	mapEntries := value.EncodeHandle(heap.Allocate(NewMapEntries()))
+	mapDelete := value.EncodeHandle(heap.Allocate(NewMapDelete()))
+	mapClear := value.EncodeHandle(heap.Allocate(NewMapClear()))
+	mapForEach := value.EncodeHandle(heap.Allocate(NewMapForEach()))
 
 	p.SetMember(KEY_HAS, mapHas)
 	p.SetMember(KEY_SET, mapSet)
 	p.SetMember(KEY_GET, mapGet)
 	p.SetMember(KEY_KEYS, mapKeys)
+	p.SetMember(KEY_VALUES, mapValues)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("entries"))), mapEntries)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("delete"))), mapDelete)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("clear"))), mapClear)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("forEach"))), mapForEach)
 
 	PROTOTYPE_MAP = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -280,6 +290,11 @@ func initMapPrototype() {
 		KEY_SET,
 		KEY_GET,
 		KEY_KEYS,
+		KEY_VALUES,
+		mapEntries,
+		mapDelete,
+		mapClear,
+		mapForEach,
 		KEY_SIZE,
 	)
 }
@@ -296,15 +311,34 @@ func initSetPrototype() {
 
 	setHas := value.EncodeHandle(heap.Allocate(NewSetHas()))
 	setAdd := value.EncodeHandle(heap.Allocate(NewSetAdd()))
+	setDelete := value.EncodeHandle(heap.Allocate(NewSetDelete()))
+	setClear := value.EncodeHandle(heap.Allocate(NewSetClear()))
+	setKeys := value.EncodeHandle(heap.Allocate(NewSetKeys()))
+	setValues := value.EncodeHandle(heap.Allocate(NewSetValues()))
+	setEntries := value.EncodeHandle(heap.Allocate(NewSetEntries()))
+	setForEach := value.EncodeHandle(heap.Allocate(NewSetForEach()))
 
 	p.SetMember(KEY_HAS, setHas)
 	p.SetMember(KEY_ADD, setAdd)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("delete"))), setDelete)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("clear"))), setClear)
+	p.SetMember(KEY_KEYS, setKeys)
+	p.SetMember(KEY_VALUES, setValues)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("entries"))), setEntries)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("forEach"))), setForEach)
 
 	PROTOTYPE_SET = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
 		PROTOTYPE_SET,
 		KEY_HAS,
 		KEY_ADD,
+		setDelete,
+		setClear,
+		setKeys,
+		setValues,
+		setEntries,
+		setForEach,
+		KEY_SIZE,
 	)
 }
 

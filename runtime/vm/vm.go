@@ -769,6 +769,11 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 			}
 		}
 	}
+	if _, ok := obj.(*object.Iterator); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "next" {
+			return value.EncodeHandle(heap.Allocate(native.NewIteratorNext())), nil
+		}
+	}
 	if arr, ok := obj.(*native.ObjArr); ok {
 		if i, isIndex := vm.arrayIndexFromValue(key); isIndex {
 			if arr.HasIndex(i) {
@@ -2757,15 +2762,163 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						owner, _ := heap.GetObject(thisCtx.GetHandle())
 
 						fn.Set(owner.(*native.Map), k, v)
-						vm.push(value.UNDEFINED)
+						vm.push(thisCtx)
 					}
 				case *native.MapKeys:
 					{
 						owner, _ := heap.GetObject(thisCtx.GetHandle())
 						keys := fn.Keys(owner.(*native.Map))
-
-						handle := heap.Allocate(keys)
-						vm.push(value.EncodeHandle(handle))
+						vm.push(value.EncodeHandle(heap.Allocate(keys)))
+					}
+				case *native.MapValues:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						iterator := fn.Values(owner.(*native.Map))
+						vm.push(value.EncodeHandle(heap.Allocate(iterator)))
+					}
+				case *native.MapEntries:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						iterator := fn.Entries(owner.(*native.Map))
+						vm.push(value.EncodeHandle(heap.Allocate(iterator)))
+					}
+				case *native.MapDelete:
+					{
+						arg := vm.pop()
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.Delete(owner.(*native.Map), arg))
+					}
+				case *native.MapClear:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.ClearMap(owner.(*native.Map)))
+					}
+				case *native.MapForEach:
+					{
+						args := vm.popN(argCount)
+						callback := value.UNDEFINED
+						thisArg := value.UNDEFINED
+						if len(args) > 0 {
+							callback = args[0]
+						}
+						if len(args) > 1 {
+							thisArg = args[1]
+						}
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						m := owner.(*native.Map)
+						keys := m.Keys()
+						values := m.ValuesList()
+						for i, key := range keys {
+							if _, err := vm.invokeCallback(callback, thisArg, []value.Value{values[i], key, thisCtx}); err != nil {
+								errValue := vm.makeError("TypeError", err.Error())
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+						}
+						vm.push(value.UNDEFINED)
+					}
+				case *native.DateMethod:
+					{
+						result, err := vm.callDateMethod(fn, thisCtx, argCount)
+						if err != nil {
+							errValue := vm.makeError("RangeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.DateStaticMethod:
+					{
+						result, err := vm.callDateStaticMethod(fn, argCount)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						vm.push(result)
+					}
+				case *native.IteratorNext:
+					{
+						done, err := vm.iteratorNext(thisCtx)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						result := native.NewObjectHash()
+						if done {
+							result.SetMember(native.KEY_DONE, value.TRUE)
+							result.SetMember(native.KEY_VALUE, value.UNDEFINED)
+						} else {
+							current, err := vm.iteratorCurrent(thisCtx)
+							if err != nil {
+								return value.UNDEFINED, err
+							}
+							result.SetMember(native.KEY_DONE, value.FALSE)
+							result.SetMember(native.KEY_VALUE, current)
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.SetAdd:
+					{
+						arg := vm.pop()
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						fn.Add(owner.(*native.Set), arg)
+						vm.push(thisCtx)
+					}
+				case *native.SetDelete:
+					{
+						arg := vm.pop()
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.Delete(owner.(*native.Set), arg))
+					}
+				case *native.SetClear:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.ClearSet(owner.(*native.Set)))
+					}
+				case *native.SetKeys:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						iterator := fn.Keys(owner.(*native.Set))
+						vm.push(value.EncodeHandle(heap.Allocate(iterator)))
+					}
+				case *native.SetValues:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						iterator := fn.Values(owner.(*native.Set))
+						vm.push(value.EncodeHandle(heap.Allocate(iterator)))
+					}
+				case *native.SetEntries:
+					{
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						iterator := fn.Entries(owner.(*native.Set))
+						vm.push(value.EncodeHandle(heap.Allocate(iterator)))
+					}
+				case *native.SetForEach:
+					{
+						args := vm.popN(argCount)
+						callback := value.UNDEFINED
+						thisArg := value.UNDEFINED
+						if len(args) > 0 {
+							callback = args[0]
+						}
+						if len(args) > 1 {
+							thisArg = args[1]
+						}
+						owner, _ := heap.GetObject(thisCtx.GetHandle())
+						s := owner.(*native.Set)
+						for i := 0; i < len(s.Order()); i++ {
+							item := s.Order()[i]
+							if _, err := vm.invokeCallback(callback, thisArg, []value.Value{item, item, thisCtx}); err != nil {
+								errValue := vm.makeError("TypeError", err.Error())
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+						}
+						vm.push(value.UNDEFINED)
 					}
 				case *native.ArrayPush:
 					{
@@ -3323,13 +3476,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						} else {
 							vm.push(value.FALSE)
 						}
-					}
-				case *native.SetAdd:
-					{
-						arg := vm.pop()
-						owner, _ := heap.GetObject(thisCtx.GetHandle())
-						fn.Add(owner.(*native.Set), arg)
-						vm.push(value.UNDEFINED)
 					}
 				case *native.SetHas:
 					{
@@ -3990,7 +4136,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						newObj, err := ctor.New(params...)
 
 						if err != nil {
-							return value.UNDEFINED, err
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
 						}
 
 						objHandle := heap.Allocate(newObj)

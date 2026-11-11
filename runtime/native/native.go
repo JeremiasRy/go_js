@@ -120,6 +120,7 @@ func Init() {
 	initGeneratorPrototype()
 	initMapPrototype()
 	initSetPrototype()
+	InitDatePrototype()
 	initPromiseConstructorPrototype()
 	initPromisePrototype()
 }

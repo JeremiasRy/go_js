@@ -5,6 +5,8 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"math"
+	"sort"
 )
 
 type Map struct {
@@ -42,34 +44,86 @@ func (o *Map) GetReferencingValues() []value.Value {
 	return arr
 }
 
+func normalizeCollectionKey(v value.Value) value.Value {
+	if v.IsNumber() {
+		n := v.AsNumber()
+		if math.IsNaN(n) {
+			return value.STANDARD_NAN
+		}
+		if n == 0 {
+			return value.ValueFromFloat64(0)
+		}
+	}
+	return v
+}
+
 func NewMap() *Map {
 	m := &Map{}
 	m.Members = map[string]ObjectValueEntry{}
 	m.values = map[value.Value]ObjectValueEntry{}
 
 	m.SetMember(KEY_PROTO, PROTOTYPE_MAP)
-	m.SetMember(KEY_SIZE, value.ValueFromFloat64(0))
+	entry := m.NewValueEntry(value.ValueFromFloat64(0))
+	entry.nonWritable = true
+	entry.nonEnumerable = true
+	m.Members[objectKeyStringMust(KEY_SIZE)] = entry
 	return m
 }
 
-func (m *Map) Keys() []value.Value {
-	r := make([]value.Value, len(m.values))
+func objectKeyStringMust(k value.Value) string {
+	key, _ := objectKeyString(k)
+	return key
+}
 
+func (m *Map) orderedEntries() []struct {
+	Key   value.Value
+	Value value.Value
+} {
+	entries := make([]struct {
+		Key   value.Value
+		Value value.Value
+	}, 0, len(m.values))
 	for k, item := range m.values {
-		r[item.init] = k
+		entries = append(entries, struct {
+			Key   value.Value
+			Value value.Value
+		}{k, item.Value})
 	}
+	sort.SliceStable(entries, func(i, j int) bool {
+		return m.values[entries[i].Key].init < m.values[entries[j].Key].init
+	})
+	return entries
+}
 
+func (m *Map) Keys() []value.Value {
+	entries := m.orderedEntries()
+	r := make([]value.Value, len(entries))
+	for i, entry := range entries {
+		r[i] = entry.Key
+	}
 	return r
 }
 
 func (m *Map) Values() []value.Value {
-	r := make([]value.Value, len(m.values))
-
-	for _, item := range m.values {
-		r[item.init] = item.Value
+	entries := m.orderedEntries()
+	r := make([]value.Value, len(entries))
+	for i, entry := range entries {
+		r[i] = value.EncodeHandle(heap.Allocate(NewArrayFrom([]value.Value{entry.Key, entry.Value})))
 	}
-
 	return r
+}
+
+func (m *Map) ValuesList() []value.Value {
+	entries := m.orderedEntries()
+	r := make([]value.Value, len(entries))
+	for i, entry := range entries {
+		r[i] = entry.Value
+	}
+	return r
+}
+
+func (m *Map) Entries() []value.Value {
+	return m.Values()
 }
 
 type MapKeys struct {
@@ -84,7 +138,92 @@ func NewMapKeys() *MapKeys {
 }
 
 func (*MapKeys) Keys(owner *Map) *object.Iterator {
-	return object.NewKeyIterator(owner)
+	return object.NewLiveIterator(owner.Keys)
+}
+
+type MapValues struct {
+	ObjNativeFn
+}
+
+func NewMapValues() *MapValues {
+	v := &MapValues{}
+	v.name = "values"
+	return v
+}
+
+func (*MapValues) Values(owner *Map) *object.Iterator {
+	return object.NewLiveIterator(owner.ValuesList)
+}
+
+type MapEntries struct {
+	ObjNativeFn
+}
+
+func NewMapEntries() *MapEntries {
+	e := &MapEntries{}
+	e.name = "entries"
+	return e
+}
+
+func (*MapEntries) Entries(owner *Map) *object.Iterator {
+	return object.NewLiveIterator(owner.Entries)
+}
+
+type MapDelete struct {
+	ObjNativeFn
+}
+
+func NewMapDelete() *MapDelete {
+	d := &MapDelete{}
+	d.name = "delete"
+	return d
+}
+
+func (*MapDelete) Delete(owner *Map, k value.Value) value.Value {
+	k = normalizeCollectionKey(k)
+	if k.IsObject() {
+		kPtr := heap.GetPointer(k.GetHandle())
+		for key := range owner.values {
+			if key.IsObject() && heap.GetPointer(key.GetHandle()) == kPtr {
+				delete(owner.values, key)
+				owner.SetMember(KEY_SIZE, value.ValueFromFloat64(float64(len(owner.values))))
+				return value.TRUE
+			}
+		}
+	}
+	if _, found := owner.values[k]; found {
+		delete(owner.values, k)
+		owner.SetMember(KEY_SIZE, value.ValueFromFloat64(float64(len(owner.values))))
+		return value.TRUE
+	}
+	return value.FALSE
+}
+
+type MapClear struct {
+	ObjNativeFn
+}
+
+func NewMapClear() *MapClear {
+	c := &MapClear{}
+	c.name = "clear"
+	return c
+}
+
+func (*MapClear) ClearMap(owner *Map) value.Value {
+	owner.values = map[value.Value]ObjectValueEntry{}
+	owner.init = 0
+	owner.SetMember(KEY_SIZE, value.ValueFromFloat64(0))
+	return value.UNDEFINED
+}
+
+type MapForEach struct {
+	ObjNativeFn
+}
+
+func NewMapForEach() *MapForEach {
+	f := &MapForEach{}
+	f.name = "forEach"
+	return f
 }
 
 type MapSet struct {
@@ -98,6 +237,7 @@ func NewMapSet() *MapSet {
 }
 
 func (*MapSet) Set(owner *Map, k value.Value, v value.Value) {
+	k = normalizeCollectionKey(k)
 	if k.IsObject() {
 		keyPtr := heap.GetPointer(k.GetHandle())
 
@@ -143,6 +283,7 @@ func NewMapGet() *MapGet {
 }
 
 func (*MapGet) Get(owner *Map, k value.Value) value.Value {
+	k = normalizeCollectionKey(k)
 	if k.IsObject() {
 		kPtr := heap.GetPointer(k.GetHandle())
 
@@ -172,6 +313,7 @@ func NewMapHas() *MapHas {
 }
 
 func (*MapHas) Has(owner *Map, k value.Value) value.Value {
+	k = normalizeCollectionKey(k)
 
 	if k.IsObject() {
 		kPtr := heap.GetPointer(k.GetHandle())

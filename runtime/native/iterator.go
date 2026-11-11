@@ -26,6 +26,16 @@ func (i *JSIterator) String() string {
 	return "Iterator object"
 }
 
+type IteratorNext struct {
+	ObjNativeFn
+}
+
+func NewIteratorNext() *IteratorNext {
+	i := &IteratorNext{}
+	i.name = "next"
+	return i
+}
+
 func (i *JSIterator) GetReferencingValues() []value.Value {
 	return []value.Value{i.Iterator, i.NextMethod, i.Current}
 }
