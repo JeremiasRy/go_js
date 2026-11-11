@@ -142,7 +142,11 @@ func (vm *VM) callStringMethod(method *native.StringMethod, this value.Value, ar
 	case native.STRING_TRIM_END:
 		return newString(strings.TrimRightFunc(owner, func(r rune) bool { return unicode.IsSpace(r) || r == '\uFEFF' })), nil
 	case native.STRING_TO_LOWER_CASE:
-		return newString(strings.ToLower(owner)), nil
+		lower := strings.ToLower(owner)
+		if strings.HasSuffix(owner, "Σ") && strings.HasSuffix(lower, "σ") {
+			lower = strings.TrimSuffix(lower, "σ") + "ς"
+		}
+		return newString(lower), nil
 	case native.STRING_PAD_START, native.STRING_PAD_END:
 		target := length
 		if len(args) > 0 {

@@ -1565,6 +1565,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_LITERAL:
 			{
+				if current.Regex != nil {
+					regexpObject := native.NewRegExpObject(current.Regex.Pattern, current.Regex.Flags)
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(regexpObject)))
+					return
+				}
 				switch v := current.Value.(type) {
 				case float64:
 					{

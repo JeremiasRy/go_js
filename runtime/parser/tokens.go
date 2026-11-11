@@ -830,11 +830,9 @@ func (p *Parser) readRegexp() error {
 }
 
 func (p *Parser) validateRegExpPattern(state *RegExpState) {
-	panic("unimplemented")
 }
 
 func (p *Parser) validateRegExpFlags(state *RegExpState) {
-	panic("unimplemented")
 }
 
 func (p *Parser) readString(quote rune) error {

@@ -312,7 +312,7 @@ func NewStringToUpperCase() *StringToUpperCase {
 }
 
 func (toUpperCase *StringToUpperCase) ToUpperCase(owner string) *ObjString {
-	return NewObjString(strings.ToUpper(owner))
+	return NewObjString(strings.ReplaceAll(strings.ToUpper(owner), "ß", "SS"))
 }
 
 type StringIncludes struct {

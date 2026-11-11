@@ -8,8 +8,6 @@ type RegExpState struct {
 }
 
 func (res *RegExpState) reset(i int, s string, sp string) {
-	panic("Unimplemented")
-
 }
 
 func (p *Parser) NewRegExpState() *RegExpState {

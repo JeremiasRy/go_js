@@ -3559,11 +3559,31 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.StringStartsWith:
 					{
-						arg := vm.pop()
-						pattern, _ := heap.GetObject(arg.GetHandle())
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-
-						vm.push(fn.StartsWith(this, pattern.String()))
+						args := vm.popN(argCount)
+						pattern := ""
+						if len(args) > 0 {
+							pattern = native.String(args[0])
+						}
+						units := native.UTF16Units(native.String(thisCtx))
+						needle := native.UTF16Units(pattern)
+						from := 0
+						if len(args) > 1 && args[1] != value.UNDEFINED {
+							n, _ := vm.toNumber(args[1])
+							from = int(math.Trunc(n))
+						}
+						from = max(0, min(from, len(units)))
+						if len(needle) > len(units)-from {
+							vm.push(value.FALSE)
+						} else {
+							match := true
+							for i := range needle {
+								if units[from+i] != needle[i] {
+									match = false
+									break
+								}
+							}
+							vm.push(boolValue(match))
+						}
 					}
 				case *native.StringToUpperCase:
 					{
@@ -3572,9 +3592,31 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.StringIncludes:
 					{
-						arg := vm.pop()
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-						vm.push(fn.Includes(this.String(), native.String(arg)))
+						args := vm.popN(argCount)
+						if len(args) > 0 && args[0].IsObject() {
+							if argObj, err := heap.GetObject(args[0].GetHandle()); err == nil {
+								if _, isRegExp := argObj.(*native.ObjRegExp); isRegExp {
+									errValue := vm.makeError("TypeError", "First argument must not be a regular expression")
+									if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+										return value.UNDEFINED, err
+									}
+									continue
+								}
+							}
+						}
+						owner := native.String(thisCtx)
+						search := ""
+						if len(args) > 0 {
+							search = native.String(args[0])
+						}
+						units := native.UTF16Units(owner)
+						from := 0
+						if len(args) > 1 && args[1] != value.UNDEFINED {
+							n, _ := vm.toNumber(args[1])
+							from = int(math.Trunc(n))
+						}
+						from = max(0, min(from, len(units)))
+						vm.push(boolValue(native.UTF16IndexOf(owner, search, from) >= 0))
 					}
 				case *native.StringSplit:
 					{

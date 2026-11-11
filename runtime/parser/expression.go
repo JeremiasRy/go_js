@@ -847,13 +847,19 @@ func (p *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, forI
 		return id, nil
 
 	case TOKEN_REGEXP:
-		panic("TOKEN_REGEXP not implemented")
-		/*
-			value := p.Value
-			node = p.parseLiteral(value.value)
-			node.regex = RegExpState{Pattern: value.pattern, flags: value.flags}
-			return node
-		*/
+		{
+			value := p.Value.(struct {
+				pattern string
+				flags   string
+				value   *regexp.Regexp
+			})
+			literal, err := p.parseLiteral(value.value)
+			if err != nil {
+				return nil, err
+			}
+			literal.Regex = &Regex{Pattern: value.pattern, Flags: value.flags}
+			return literal, nil
+		}
 
 	case TOKEN_NUM, TOKEN_STRING:
 		{
