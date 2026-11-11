@@ -858,10 +858,11 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 		if thenObj, err := heap.GetObject(thenValue.GetHandle()); err == nil {
 			if _, ok := thenObj.(object.Callable); ok {
 				queue.Enqueue(object.Callback{Native: func() {
-					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFunc(p)))
+					called := false
+					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFuncTracked(p, &called)))
 					reject := value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p)))
 					if _, err := vm.callValue(thenValue, v, []value.Value{resolve, reject}); err != nil {
-						if p.Status == native.PENDING {
+						if !called && p.Status == native.PENDING {
 							vm.rejectPromise(p, vm.errorValue(err))
 						}
 					}
@@ -4445,6 +4446,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						v := vm.pop()
+						if fn.Called != nil {
+							*fn.Called = true
+						}
 						vm.resolvePromise(fn.Promise(), v)
 						vm.push(value.UNDEFINED)
 					}

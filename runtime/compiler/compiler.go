@@ -1270,10 +1270,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 					}
 
-					if len(current.Arguments) == 0 && calleeIsPromiseFunction(current.Callee) {
-						fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
-					}
-
 					for _, node := range current.Arguments {
 						generateByteCode(node, symbolTable, fn)
 					}

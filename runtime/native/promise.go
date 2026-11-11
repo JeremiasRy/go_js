@@ -234,6 +234,11 @@ type ResolveFunc struct {
 	object.Ctx
 	owner  *ObjPromise
 	marked bool
+	Called *bool
+}
+
+func NewResolveFuncTracked(owner *ObjPromise, called *bool) *ResolveFunc {
+	return &ResolveFunc{owner: owner, Called: called}
 }
 
 func (*ResolveFunc) GetReferencingValues() []value.Value {
@@ -265,6 +270,9 @@ func (o *ResolveFunc) Clear() {
 }
 
 func (resolve *ResolveFunc) Resolve(v value.Value) {
+	if resolve.Called != nil {
+		*resolve.Called = true
+	}
 	resolve.owner.Resolve(v)
 }
 
