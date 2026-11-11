@@ -918,7 +918,6 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							top := len(chainJumpStack) - 1
 							chainJumpStack[top] = append(chainJumpStack[top], optionalJumpStart)
 						}
-						fn.ValueChunk().EmitByte(chunk.OP_POP)
 					}
 
 					for _, node := range current.Arguments {
@@ -971,27 +970,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						top := len(chainJumpStack) - 1
 						chainJumpStack[top] = append(chainJumpStack[top], jumpStart)
 					}
-					fn.ValueChunk().EmitByte(chunk.OP_POP)
 				}
-				switch current.Property.Type {
-				case parser.NODE_LITERAL:
+				if current.Computed {
 					generateByteCode(current.Property, symbolTable, fn)
-
-				case parser.NODE_IDENTIFIER:
-					if current.Computed {
-						generateByteCode(current.Property, symbolTable, fn)
-
-					} else {
-						withAstTracking(current.Property, fn, func() {
-							handle := heap.Allocate(native.NewLightString(current.Property.Name))
-							fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
-						})
-					}
-				case parser.NODE_UNARY_EXPRESSION:
-					{
-						generateByteCode(current.Property, symbolTable, fn)
-
-					}
+				} else {
+					withAstTracking(current.Property, fn, func() {
+						handle := heap.Allocate(native.NewLightString(current.Property.Name))
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+					})
 				}
 				fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
 			}
