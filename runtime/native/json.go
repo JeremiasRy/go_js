@@ -83,15 +83,73 @@ func JSONStringToValue(text string) (value.Value, error) {
 	}
 	decoder := json.NewDecoder(strings.NewReader(text))
 	decoder.UseNumber()
-	var v interface{}
-	if err := decoder.Decode(&v); err != nil {
+	parsed, err := parseJSONToken(decoder)
+	if err != nil {
 		return value.UNDEFINED, err
 	}
-	var extra interface{}
-	if err := decoder.Decode(&extra); err == nil {
+	if _, err := decoder.Token(); err == nil {
 		return value.UNDEFINED, fmt.Errorf("unexpected token")
 	}
-	return ConvertJSON(v), nil
+	return parsed, nil
+}
+
+func parseJSONToken(decoder *json.Decoder) (value.Value, error) {
+	token, err := decoder.Token()
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	switch token := token.(type) {
+	case json.Delim:
+		switch token {
+		case '{':
+			obj := NewObjectHash()
+			for decoder.More() {
+				keyToken, err := decoder.Token()
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				key, ok := keyToken.(string)
+				if !ok {
+					return value.UNDEFINED, fmt.Errorf("invalid object key")
+				}
+				child, err := parseJSONToken(decoder)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString(key))), child)
+			}
+			if _, err := decoder.Token(); err != nil {
+				return value.UNDEFINED, err
+			}
+			return value.EncodeHandle(heap.Allocate(obj)), nil
+		case '[':
+			items := []value.Value{}
+			for decoder.More() {
+				child, err := parseJSONToken(decoder)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				items = append(items, child)
+			}
+			if _, err := decoder.Token(); err != nil {
+				return value.UNDEFINED, err
+			}
+			return value.EncodeHandle(heap.Allocate(NewArrayFrom(items))), nil
+		}
+	case string:
+		return value.EncodeHandle(heap.Allocate(NewLightString(token))), nil
+	case json.Number:
+		n, _ := strconv.ParseFloat(string(token), 64)
+		return value.ValueFromFloat64(n), nil
+	case bool:
+		if token {
+			return value.TRUE, nil
+		}
+		return value.FALSE, nil
+	case nil:
+		return value.NULL, nil
+	}
+	return value.UNDEFINED, fmt.Errorf("unexpected token")
 }
 
 func (*JSONParse) Parse(text string) (value.Value, error) {

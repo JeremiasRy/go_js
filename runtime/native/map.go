@@ -54,6 +54,13 @@ func normalizeCollectionKey(v value.Value) value.Value {
 			return value.ValueFromFloat64(0)
 		}
 	}
+	if v.IsObject() {
+		if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+			if builder, ok := obj.(*ObjStringBuilder); ok {
+				return value.EncodeHandle(heap.Allocate(NewLightString(builder.String())))
+			}
+		}
+	}
 	return v
 }
 
