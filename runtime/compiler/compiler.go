@@ -708,8 +708,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				operator := current.AssignmentOperator
 
 				if left.Type == parser.NODE_OBJECT_PATTERN || left.Type == parser.NODE_ARRAY_PATTERN {
-					generateByteCode(current.Right, symbolTable, fn)
+					generatePatternAssignment(left, current.Right, symbolTable, fn)
 					popReturnValue.pop()
+					if popReturnValue.current() {
+						fn.ValueChunk().EmitByte(chunk.OP_POP)
+					}
 					return
 				}
 
@@ -2632,6 +2635,138 @@ func assignmentOpcode(operator parser.AssignmentOperator) uint8 {
 	return chunk.OP_ADD
 }
 
+func emitAssignmentTarget(node *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	if node == nil {
+		return
+	}
+	switch node.Type {
+	case parser.NODE_IDENTIFIER:
+		variable, _ := symbolTable.findVariable(node.Name)
+		if variable != nil {
+			emitSetVariable(fn, variable)
+		}
+	case parser.NODE_MEMBER_EXPRESSION:
+		fn.ValueChunk().EmitByte(chunk.OP_SAVE_COMPLETION)
+		generateByteCode(node.Object, symbolTable, fn)
+		if node.Computed {
+			generateByteCode(node.Property, symbolTable, fn)
+			fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+		} else {
+			key := heap.Allocate(native.NewLightString(node.Property.Name))
+			fn.ValueChunk().WriteConstant(value.EncodeHandle(key))
+		}
+		fn.ValueChunk().EmitBytes(chunk.OP_RESTORE_COMPLETION, chunk.OP_SET_MEMBER_RETURN, chunk.OP_POP)
+	}
+}
+
+func generatePatternAssignment(pattern, right *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	if right == nil {
+		fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+	} else {
+		popReturnValue.push(false)
+		generateByteCode(right, symbolTable, fn)
+		popReturnValue.pop()
+	}
+	fn.ValueChunk().EmitByte(chunk.OP_DUP)
+
+	var assign func(*parser.Node)
+	assign = func(node *parser.Node) {
+		if node == nil {
+			return
+		}
+		switch node.Type {
+		case parser.NODE_IDENTIFIER, parser.NODE_MEMBER_EXPRESSION:
+			emitAssignmentTarget(node, symbolTable, fn)
+		case parser.NODE_ASSIGNMENT_PATTERN:
+			fn.ValueChunk().EmitByte(chunk.OP_DUP)
+			fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_NOT_UNDEFINED, 0, 0, 0, 0)
+			skipJump := len(fn.ValueChunk().Code) - 4
+			fn.ValueChunk().EmitByte(chunk.OP_POP)
+			popReturnValue.push(false)
+			generateByteCode(node.Right, symbolTable, fn)
+			popReturnValue.pop()
+			fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
+			assign(node.Left)
+		case parser.NODE_REST_ELEMENT:
+			assign(node.Argument)
+		case parser.NODE_ARRAY_PATTERN:
+			fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
+			for _, element := range node.Elements {
+				if element == nil {
+					fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_POP)
+					continue
+				}
+				if element.Type == parser.NODE_REST_ELEMENT {
+					fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_REST)
+					assign(element.Argument)
+					continue
+				}
+				fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_NEXT)
+				fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_VALUE_OR_UNDEFINED)
+				assign(element)
+			}
+			fn.ValueChunk().EmitByte(chunk.OP_ITERATOR_CLOSE_POP)
+		case parser.NODE_OBJECT_PATTERN:
+			hasRest := false
+			for _, property := range node.Properties {
+				if property.Type == parser.NODE_REST_ELEMENT {
+					hasRest = true
+				}
+			}
+			excludedCount := 0
+			for _, property := range node.Properties {
+				switch property.Type {
+				case parser.NODE_PROPERTY:
+					if hasRest {
+						excludedCount++
+						if property.Computed {
+							popReturnValue.push(false)
+							generateByteCode(property.Key, symbolTable, fn)
+							popReturnValue.pop()
+							fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+						} else {
+							key := value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key))))
+							fn.ValueChunk().WriteConstant(key)
+						}
+						fn.ValueChunk().EmitBytes(chunk.OP_DUP2, chunk.OP_GET_OBJECT_MEMBER)
+						if valueNode, ok := property.Value.(*parser.Node); ok {
+							assign(valueNode)
+						}
+					} else {
+						fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
+						if property.Computed {
+							popReturnValue.push(false)
+							generateByteCode(property.Key, symbolTable, fn)
+							popReturnValue.pop()
+							fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
+						} else {
+							key := value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key))))
+							fn.ValueChunk().WriteConstant(key)
+						}
+						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						if valueNode, ok := property.Value.(*parser.Node); ok {
+							assign(valueNode)
+						}
+					}
+				case parser.NODE_REST_ELEMENT:
+					if hasRest {
+						fn.ValueChunk().EmitBytes(chunk.OP_CREATE_REST_OBJECT_DYNAMIC, uint8(excludedCount))
+					} else {
+						fn.ValueChunk().EmitBytes(chunk.OP_PUSH_CURRENT, chunk.OP_CREATE_REST_OBJECT, 0)
+					}
+					if property.Argument != nil {
+						assign(property.Argument)
+					}
+				}
+			}
+			if !hasRest {
+				fn.ValueChunk().EmitByte(chunk.OP_POP)
+			}
+		}
+	}
+	assign(pattern)
+}
+
 func collectPatternTargets(node *parser.Node, targets *[]*parser.Node) {
 	if node == nil {
 		return
@@ -2809,7 +2944,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 						fn.ValueChunk().EmitByte(chunk.OP_DUP2)
 						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
 						if valueNode, ok := property.Value.(*parser.Node); ok {
-							assign(patternValueNode(valueNode))
+							assign(valueNode)
 						}
 					} else {
 						fn.ValueChunk().EmitByte(chunk.OP_PUSH_CURRENT)
@@ -2824,7 +2959,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
 						if valueNode, ok := property.Value.(*parser.Node); ok {
-							assign(patternValueNode(valueNode))
+							assign(valueNode)
 						}
 						if !property.Computed {
 							key := value.EncodeHandle(heap.Allocate(native.NewLightString(objectPropertyKeyName(property.Key))))
