@@ -465,6 +465,12 @@ func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value
 	if err != nil {
 		return value.UNDEFINED, err
 	}
+	if s, isString := vm.valueAsString(objValue); isString && key.IsInteger() {
+		if ch, ok := native.UTF16CharAt(s, int(key.AsNumber())); ok {
+			return value.EncodeHandle(heap.Allocate(native.NewLightString(ch))), nil
+		}
+		return value.UNDEFINED, nil
+	}
 	if arr, ok := obj.(*native.ObjArr); ok && key.IsInteger() {
 		i := int(key.AsNumber())
 		if i >= 0 && i < len(arr.Values()) {
@@ -2395,6 +2401,42 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.Fill(arr.(*native.ObjArr), arg)
 						vm.push(thisCtx)
 					}
+				case *native.StringCharAt:
+					{
+						index := 0
+						if argCount >= 1 {
+							v := vm.pop()
+							if v != value.UNDEFINED {
+								n, err := vm.toNumber(v)
+								if err != nil {
+									return value.UNDEFINED, err
+								}
+								if !math.IsNaN(n) {
+									index = int(math.Trunc(n))
+								}
+							}
+						}
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.CharAt(this.String(), index))
+					}
+				case *native.StringCharCodeAt:
+					{
+						index := 0
+						if argCount >= 1 {
+							v := vm.pop()
+							if v != value.UNDEFINED {
+								n, err := vm.toNumber(v)
+								if err != nil {
+									return value.UNDEFINED, err
+								}
+								if !math.IsNaN(n) {
+									index = int(math.Trunc(n))
+								}
+							}
+						}
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.CharCodeAt(this.String(), index))
+					}
 				case *native.StringStartsWith:
 					{
 						arg := vm.pop()
@@ -2554,6 +2596,26 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						fn, _ := heap.GetObject(v.GetHandle())
 						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
+					}
+				case *native.NumberIsNaN:
+					{
+						arg := vm.pop()
+						vm.push(native.NumberIsNaNValue(arg))
+					}
+				case *native.NumberIsFinite:
+					{
+						arg := vm.pop()
+						vm.push(native.NumberIsFiniteValue(arg))
+					}
+				case *native.NumberIsInteger:
+					{
+						arg := vm.pop()
+						vm.push(native.NumberIsIntegerValue(arg))
+					}
+				case *native.NumberIsSafeInteger:
+					{
+						arg := vm.pop()
+						vm.push(native.NumberIsSafeIntegerValue(arg))
 					}
 				case *native.ParseInt:
 					{

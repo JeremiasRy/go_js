@@ -1278,6 +1278,9 @@ func (p *Parser) invalidStringToken(pos int, message string) error {
 }
 
 func (p *Parser) readCodePoint() (rune, error) {
+	if p.pos >= len(p.input) {
+		return 0, p.invalidStringToken(p.pos, "Unexpected end of input in Unicode escape")
+	}
 	ch := p.input[p.pos]
 	code := rune(0)
 
@@ -1286,19 +1289,31 @@ func (p *Parser) readCodePoint() (rune, error) {
 			return 0, p.unexpected("ecma version < 6 and a brace left was present '{'", nil)
 		}
 		codePos := p.pos + 1
-		p.pos = p.pos + 1
-		hexCh, _ := p.readHexChar(len(p.input[p.pos:]) + strings.Index(string(p.input[p.pos:]), "}") - p.pos)
-		code = hexCh
-		p.pos = p.pos + 1
+		end := strings.IndexByte(string(p.input[codePos:]), '}')
+		if end < 0 {
+			return 0, p.invalidStringToken(codePos, "Invalid Unicode escape")
+		}
+		digits := string(p.input[codePos : codePos+end])
+		if digits == "" {
+			return 0, p.invalidStringToken(codePos, "Invalid Unicode escape")
+		}
+		n, err := strconv.ParseInt(digits, 16, 64)
+		if err != nil {
+			return 0, p.invalidStringToken(codePos, "Invalid Unicode escape")
+		}
+		code = rune(n)
+		p.pos = codePos + end + 1
 		if code > 0x10FFFF {
 			return 0, p.invalidStringToken(codePos, "Code point out of bounds")
 		}
 	} else {
-		hexCh, _ := p.readHexChar(4)
+		hexCh, err := p.readHexChar(4)
+		if err != nil {
+			return 0, err
+		}
 		code = hexCh
 	}
 	return code, nil
-
 }
 
 func (p *Parser) readHexChar(len int) (rune, error) {

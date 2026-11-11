@@ -441,6 +441,15 @@ func defineParseInt(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineNumberConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	numberCtor := native.NewNumberConstructor()
+	handle := heap.Allocate(numberCtor)
+
+	symbolTable.addVariable(native.NUMBER_CONSTRUCTOR_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 var module = false
 
@@ -476,6 +485,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineSetConstructor(setup, global)
 	defineQueueMicroTask(setup, global)
 	defineParseInt(setup, global)
+	defineNumberConstructor(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
 	}
@@ -1765,7 +1775,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			{
 				var start *native.LightString
 				withAstTracking(current.Quasis[0], fn, func() {
-					start = native.NewLightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Raw)
+					start = native.NewLightString(current.Quasis[0].Value.(parser.TemplateNodeValue).Cooked)
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(start)))
 				})
 
@@ -1785,7 +1795,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					quasi := current.Quasis[i].Value.(parser.TemplateNodeValue)
 					withAstTracking(current.Quasis[i], fn, func() {
-						fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(quasi.Raw))))
+						fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(quasi.Cooked))))
 					})
 					fn.ValueChunk().EmitByte(chunk.OP_ADD)
 

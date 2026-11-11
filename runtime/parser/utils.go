@@ -152,6 +152,9 @@ func WordsRegexp(words string) *regexp.Regexp {
 
 // kinda iffy with this one also :/ ...
 func CodePointToString(code rune) string {
+	if code >= 0xD800 && code <= 0xDFFF {
+		return string([]byte{byte(0xE0 | (code >> 12)), byte(0x80 | ((code >> 6) & 0x3F)), byte(0x80 | (code & 0x3F))})
+	}
 	if code <= 0xFFFF {
 		return string(code)
 	}

@@ -148,6 +148,10 @@ func initStringPrototype() {
 	replace := value.EncodeHandle(heap.Allocate(NewStringReplace()))
 	split := value.EncodeHandle(heap.Allocate(NewStringSplit()))
 	startsWith := value.EncodeHandle(heap.Allocate(NewStringStartsWith()))
+	charAt := value.EncodeHandle(heap.Allocate(NewStringCharAt()))
+	charCodeAt := value.EncodeHandle(heap.Allocate(NewStringCharCodeAt()))
+	charAtKey := value.EncodeHandle(heap.Allocate(NewLightString("charAt")))
+	charCodeAtKey := value.EncodeHandle(heap.Allocate(NewLightString("charCodeAt")))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -156,6 +160,8 @@ func initStringPrototype() {
 	p.SetMember(KEY_REPLACE, replace)
 	p.SetMember(KEY_SPLIT, split)
 	p.SetMember(KEY_STARTS_WITH, startsWith)
+	p.SetMember(charAtKey, charAt)
+	p.SetMember(charCodeAtKey, charCodeAt)
 
 	PROTOTYPE_STRING = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -165,6 +171,8 @@ func initStringPrototype() {
 		KEY_REPLACE,
 		KEY_SPLIT,
 		KEY_STARTS_WITH,
+		charAtKey,
+		charCodeAtKey,
 	)
 }
 
