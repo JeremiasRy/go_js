@@ -794,62 +794,61 @@ func valueAsStringStatic(v value.Value) (string, bool) {
 	return "", false
 }
 
-func (vm *VM) lessThan(a, b value.Value) (bool, error) {
+func (vm *VM) compare(a, b value.Value) (int, error) {
 	pa, err := vm.toPrimitive(a, "number")
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	pb, err := vm.toPrimitive(b, "number")
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	as, aString := vm.valueAsString(pa)
 	bs, bString := vm.valueAsString(pb)
 	if aString && bString {
-		return as < bs, nil
+		if as < bs {
+			return -1, nil
+		}
+		if as > bs {
+			return 1, nil
+		}
+		return 0, nil
 	}
 	an, err := vm.toNumber(pa)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	bn, err := vm.toNumber(pb)
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	if math.IsNaN(an) || math.IsNaN(bn) {
-		return false, nil
+		return 2, nil
 	}
-	return an < bn, nil
+	if an < bn {
+		return -1, nil
+	}
+	if an > bn {
+		return 1, nil
+	}
+	return 0, nil
+}
+
+func (vm *VM) lessThan(a, b value.Value) (bool, error) {
+	result, err := vm.compare(a, b)
+	return result == -1, err
 }
 
 func (vm *VM) looseEquals(a, b value.Value) (bool, error) {
 	if strictEquals(a, b) {
 		return true, nil
 	}
-	if (a.IsType(value.NULL) && b.IsType(value.UNDEFINED)) || (a.IsType(value.UNDEFINED) && b.IsType(value.NULL)) {
-		return true, nil
+	as, aString := vm.valueAsString(a)
+	bs, bString := vm.valueAsString(b)
+	if aString && bString {
+		return as == bs, nil
 	}
-	if a.IsType(value.NULL) || a.IsType(value.UNDEFINED) || b.IsType(value.NULL) || b.IsType(value.UNDEFINED) {
-		return false, nil
-	}
-	if a.IsObject() && b.IsObject() {
-		return false, nil
-	}
-	if a.IsObject() {
-		primitive, err := vm.toPrimitive(a, "number")
-		if err != nil {
-			return false, err
-		}
-		return vm.looseEquals(primitive, b)
-	}
-	if b.IsObject() {
-		primitive, err := vm.toPrimitive(b, "number")
-		if err != nil {
-			return false, err
-		}
-		return vm.looseEquals(a, primitive)
-	}
-	if a.IsBoolean() || b.IsBoolean() {
+	if (aString && !b.IsObject()) || (bString && !a.IsObject()) {
 		an, err := vm.toNumber(a)
 		if err != nil {
 			return false, err
@@ -860,9 +859,33 @@ func (vm *VM) looseEquals(a, b value.Value) (bool, error) {
 		}
 		return an == bn, nil
 	}
-	_, aString := vm.valueAsString(a)
-	_, bString := vm.valueAsString(b)
-	if aString != bString {
+	if (a.IsType(value.NULL) && b.IsType(value.UNDEFINED)) || (a.IsType(value.UNDEFINED) && b.IsType(value.NULL)) {
+		return true, nil
+	}
+	if a.IsType(value.NULL) || a.IsType(value.UNDEFINED) || b.IsType(value.NULL) || b.IsType(value.UNDEFINED) {
+		return false, nil
+	}
+	if a.IsObject() && !aString && b.IsObject() && !bString {
+		return false, nil
+	}
+	if a.IsObject() && !aString {
+		primitive, err := vm.toPrimitive(a, "number")
+		if err != nil {
+			return false, err
+		}
+		return vm.looseEquals(primitive, b)
+	}
+	if b.IsObject() && !bString {
+		primitive, err := vm.toPrimitive(b, "number")
+		if err != nil {
+			return false, err
+		}
+		return vm.looseEquals(a, primitive)
+	}
+	if a.IsObject() && b.IsObject() {
+		return false, nil
+	}
+	if a.IsBoolean() || b.IsBoolean() {
 		an, err := vm.toNumber(a)
 		if err != nil {
 			return false, err
@@ -1366,41 +1389,41 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result, err := vm.lessThan(a, b)
+				cmp, err := vm.compare(a, b)
 				if err != nil {
 					return value.UNDEFINED, err
 				}
-				vm.push(boolValue(result))
+				vm.push(boolValue(cmp == -1))
 			}
 		case chunk.OP_LESS_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result, err := vm.lessThan(b, a)
+				cmp, err := vm.compare(a, b)
 				if err != nil {
 					return value.UNDEFINED, err
 				}
-				vm.push(boolValue(!result))
+				vm.push(boolValue(cmp == -1 || cmp == 0))
 			}
 		case chunk.OP_GREATER_THAN:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result, err := vm.lessThan(b, a)
+				cmp, err := vm.compare(a, b)
 				if err != nil {
 					return value.UNDEFINED, err
 				}
-				vm.push(boolValue(result))
+				vm.push(boolValue(cmp == 1))
 			}
 		case chunk.OP_GREATER_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result, err := vm.lessThan(a, b)
+				cmp, err := vm.compare(a, b)
 				if err != nil {
 					return value.UNDEFINED, err
 				}
-				vm.push(boolValue(!result))
+				vm.push(boolValue(cmp == 1 || cmp == 0))
 			}
 		case chunk.OP_EQUALS:
 			{
