@@ -2469,7 +2469,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_YIELD_EXPRESSION:
 			{
-				generateByteCode(current.Argument, symbolTable, fn)
+				if current.Argument != nil {
+					generateByteCode(current.Argument, symbolTable, fn)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+				}
 
 				fn.ValueChunk().EmitByte(chunk.OP_YIELD)
 			}

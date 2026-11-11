@@ -870,6 +870,9 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 			}
 		}
 	}
+	if _, ok := obj.(*native.ObjGenerator); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewGeneratorIterator())), nil
+	}
 	if _, ok := obj.(*object.Iterator); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "next" {
 			return value.EncodeHandle(heap.Allocate(native.NewIteratorNext())), nil
@@ -3000,7 +3003,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.ObjGenerator:
 					{
-						gen := fn.Clone()
+						args := vm.popN(argCount)
+						gen := fn.Clone().(*native.ObjGenerator)
+						gen.Args = args
 						vm.push(value.EncodeHandle(heap.Allocate(gen)))
 					}
 				case object.Callable:
@@ -3684,27 +3689,85 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.Next:
 					{
+						args := vm.popN(argCount)
 						this, _ := heap.GetObject(thisCtx.GetHandle())
 						generator := this.(*native.ObjGenerator)
-						// need to fix the -2, it's because OP_PUSH_UNDEFINED and OP_RETURN are currently added automatically to functions (if they are missing)
-						if generator.Ip == len(generator.ValueChunk().Code)-2 {
-							d := native.NewObjectHash()
-							d.SetMember(native.KEY_DONE, value.TRUE)
-							vm.push(value.EncodeHandle(heap.Allocate(d)))
+						if generator.Done {
+							result := native.NewObjectHash()
+							result.SetMember(native.KEY_VALUE, value.UNDEFINED)
+							result.SetMember(native.KEY_DONE, value.TRUE)
+							vm.push(value.EncodeHandle(heap.Allocate(result)))
 							continue
 						}
-
-						f, c = vm.Call(generator, &ip, value.UNDEFINED, argCount, calledWithSpread)
-
-						ip = generator.Ip
-
-						if len(generator.Locals) > 0 {
-							for _, v := range generator.Locals {
-								vm.push(v)
-								vm.pop()
-								vm.stackTop++
+						if !generator.Started {
+							generator.Started = true
+							for _, arg := range generator.Args {
+								vm.push(arg)
 							}
+							f, c = vm.Call(generator, &ip, value.UNDEFINED, len(generator.Args), false)
+							ip = 0
+						} else {
+							f, c = vm.Call(generator, &ip, value.UNDEFINED, 0, false)
+							vm.stackTop = f.localStart
+							for _, local := range generator.Locals {
+								vm.push(local)
+							}
+							input := value.UNDEFINED
+							if len(args) > 0 {
+								input = args[0]
+							}
+							vm.push(input)
+							ip = generator.Ip
 						}
+					}
+				case *native.GeneratorIterator:
+					{
+						vm.push(thisCtx)
+					}
+				case *native.Return:
+					{
+						args := vm.popN(argCount)
+						returned := value.UNDEFINED
+						if len(args) > 0 {
+							returned = args[0]
+						}
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						generator := this.(*native.ObjGenerator)
+						generator.Done = true
+						result := native.NewObjectHash()
+						result.SetMember(native.KEY_VALUE, returned)
+						result.SetMember(native.KEY_DONE, value.TRUE)
+						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.Throw:
+					{
+						args := vm.popN(argCount)
+						thrown := value.UNDEFINED
+						if len(args) > 0 {
+							thrown = args[0]
+						}
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						generator := this.(*native.ObjGenerator)
+						if !generator.Started || generator.Done {
+							errValue := thrown
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						generator.PendingThrow = thrown
+						generator.HasPendingThrow = true
+						generator.Started = true
+						f, c = vm.Call(generator, &ip, value.UNDEFINED, 0, false)
+						vm.stackTop = f.localStart
+						for _, local := range generator.Locals {
+							vm.push(local)
+						}
+						ip = generator.Ip
+						if err := vm.throwValue(generator.PendingThrow, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						generator.HasPendingThrow = false
 					}
 				case *native.ObjectKeys:
 					{
@@ -4204,6 +4267,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_RETURN:
 			{
+				if generator, ok := f.fn.(*native.ObjGenerator); ok {
+					generator.Done = true
+					returned := vm.pop()
+					result := native.NewObjectHash()
+					result.SetMember(native.KEY_VALUE, returned)
+					result.SetMember(native.KEY_DONE, value.TRUE)
+					vm.push(value.EncodeHandle(heap.Allocate(result)))
+				}
 				for len(vm.exceptionStack) > 0 && vm.exceptionStack[len(vm.exceptionStack)-1].frame >= vm.frameCount {
 					vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
 				}
@@ -4835,10 +4906,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				v := native.NewObjectHash()
 				v.SetMember(native.KEY_VALUE, vm.pop())
 				d := value.FALSE
-
-				if ip >= len(f.fn.ValueChunk().Code) {
-					d = value.TRUE
-				}
 
 				locals := make([]value.Value, vm.stackTop-f.localStart)
 				for i, v := range vm.stack[f.localStart:vm.stackTop] {

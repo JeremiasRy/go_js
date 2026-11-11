@@ -10,8 +10,13 @@ type ObjGenerator struct {
 	object.ObjFunction
 	ObjObject
 
-	Ip     int
-	Locals []value.Value
+	Ip      int
+	Locals  []value.Value
+	Args    []value.Value
+	Started bool
+	Done    bool
+	PendingThrow value.Value
+	HasPendingThrow bool
 }
 
 func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
@@ -120,4 +125,14 @@ func NewThrow() *Throw {
 	t := &Throw{}
 	t.name = "throw"
 	return t
+}
+
+type GeneratorIterator struct {
+	ObjNativeFn
+}
+
+func NewGeneratorIterator() *GeneratorIterator {
+	g := &GeneratorIterator{}
+	g.name = "iterator"
+	return g
 }
