@@ -51,6 +51,7 @@ type Variable struct {
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
 	fn         object.Callable
 	allocated  bool // for imported functions
+	catchId    int
 }
 
 var ThisVariable *Variable = &Variable{scope: THIS}
@@ -629,6 +630,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					case THIS:
 						getOp = chunk.OP_THIS
 					}
+					if variable.type_ == CATCH_PARAM {
+						setOp = chunk.OP_SET_CATCH
+						getOp = chunk.OP_GET_CATCH
+					}
 
 					switch operator {
 					case parser.ASSIGN:
@@ -638,10 +643,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							fn.ValueChunk().EmitByte(defineOp)
 							variable.undeclared = false
 						} else {
-							fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+							fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
 						}
 					case parser.LOGICAL_AND_ASSIGN, parser.LOGICAL_OR_ASSIGN, parser.NULLISH_ASSIGN:
-						fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot), chunk.OP_DUP)
+						fn.ValueChunk().EmitBytes(getOp, variableOperand(variable), chunk.OP_DUP)
 						var jump uint8
 						switch operator {
 						case parser.LOGICAL_AND_ASSIGN:
@@ -656,17 +661,17 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitByte(chunk.OP_POP)
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(chunk.OP_DUP)
-						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+						fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
 						fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 						endJump := len(fn.ValueChunk().Code) - 4
 						fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
 						fn.ValueChunk().PatchUint32(uint32(endJump), uint32(len(fn.ValueChunk().Code)))
 					default:
-						fn.ValueChunk().EmitBytes(getOp, uint8(variable.slot))
+						fn.ValueChunk().EmitBytes(getOp, variableOperand(variable))
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(assignmentOpcode(operator))
 						fn.ValueChunk().EmitByte(chunk.OP_DUP)
-						fn.ValueChunk().EmitBytes(setOp, uint8(variable.slot))
+						fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
 					}
 				}
 
@@ -759,6 +764,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_ARROW_FUNCTION_EXPRESSION:
 			{
+				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 
@@ -837,10 +843,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 				}
 
+				symbolTable = outerSymbolTable
 				fn.ValueChunk().WriteConstant(v)
 			}
 		case parser.NODE_FUNCTION_EXPRESSION:
 			{
+				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
 				if symbolTable.hasRestParameter {
@@ -863,6 +871,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if newFn.ValueChunk().Code[len(newFn.ValueChunk().Code)-1] != chunk.OP_RETURN {
 					newFn.ValueChunk().EmitBytes(chunk.OP_RETURN)
 				}
+				symbolTable = outerSymbolTable
 				fn.ValueChunk().WriteConstant(v)
 			}
 		case parser.NODE_BLOCK_STATEMENT:
@@ -873,8 +882,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				if symbolTable.block != nil {
-					for range len(symbolTable.block.vars) {
-						fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+					for _, variable := range symbolTable.block.vars {
+						if variable.type_ != CATCH_PARAM {
+							fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
+						}
 					}
 				}
 				symbolTable.exitBlockScope()
@@ -1291,16 +1302,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					return
 				}
 
-				if variable.type_ == CATCH_PARAM && !variable.init {
-					variable.init = true
-					switch variable.scope {
-					case GLOBAL:
-						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
-					case LOCAL:
-						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-					case HEAP:
-						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_HEAP_VAR)
-					}
+				if variable.type_ == CATCH_PARAM {
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_CATCH, uint8(variable.catchId))
 					return
 				}
 
@@ -1432,16 +1435,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				var setOp uint8
-				switch variable.scope {
-				case GLOBAL:
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(variable.slot))
-					setOp = chunk.OP_SET_GLOBAL
-				case LOCAL:
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
-					setOp = chunk.OP_SET_LOCAL
-				case HEAP:
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
-					setOp = chunk.OP_SET_HEAP_VAR
+				if variable.type_ == CATCH_PARAM {
+					fn.ValueChunk().EmitBytes(chunk.OP_GET_CATCH, uint8(variable.catchId))
+					setOp = chunk.OP_SET_CATCH
+				} else {
+					switch variable.scope {
+					case GLOBAL:
+						fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(variable.slot))
+						setOp = chunk.OP_SET_GLOBAL
+					case LOCAL:
+						fn.ValueChunk().EmitBytes(chunk.OP_GET_LOCAL, uint8(variable.slot))
+						setOp = chunk.OP_SET_LOCAL
+					case HEAP:
+						fn.ValueChunk().EmitBytes(chunk.OP_GET_HEAP_VAR, uint8(variable.slot))
+						setOp = chunk.OP_SET_HEAP_VAR
+					}
 				}
 
 				fn.ValueChunk().EmitByte(chunk.OP_TO_NUMBER)
@@ -1459,7 +1467,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				fn.ValueChunk().EmitByte(setOp)
 				if variable.scope != THIS {
-					fn.ValueChunk().EmitByte(uint8(variable.slot))
+					fn.ValueChunk().EmitByte(variableOperand(variable))
 				}
 				if popReturnValue.current() {
 					fn.ValueChunk().EmitByte(chunk.OP_POP)
@@ -1675,7 +1683,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 						handler := current.Handler
 						if handler.Param != nil {
-							fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+							emitCatchParam(handler.Param, symbolTable, fn)
 						} else {
 							fn.ValueChunk().EmitByte(chunk.OP_POP)
 						}
@@ -1715,7 +1723,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					handler := current.Handler
 					if handler.Param != nil {
-						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+						emitCatchParam(handler.Param, symbolTable, fn)
 					} else {
 						fn.ValueChunk().EmitByte(chunk.OP_POP)
 					}
@@ -2212,6 +2220,23 @@ func assignmentOpcode(operator parser.AssignmentOperator) uint8 {
 		return chunk.OP_B_XOR
 	}
 	return chunk.OP_ADD
+}
+
+func variableOperand(variable *Variable) uint8 {
+	if variable.type_ == CATCH_PARAM {
+		return uint8(variable.catchId)
+	}
+	return uint8(variable.slot)
+}
+
+func emitCatchParam(param *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	if param.Type == parser.NODE_IDENTIFIER {
+		if id, found := CATCH_IDS[param]; found {
+			fn.ValueChunk().EmitBytes(chunk.OP_CATCH_BIND, uint8(id))
+			return
+		}
+	}
+	fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 }
 
 func emitThrow(fn object.Callable, name, message string) {

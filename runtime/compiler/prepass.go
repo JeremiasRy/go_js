@@ -11,6 +11,8 @@ import (
 
 var catchScope = false
 var classCompiler = false
+var nextCatchId = 0
+var CATCH_IDS = map[*parser.Node]int{}
 
 func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	if current == nil {
@@ -271,16 +273,21 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_OF_STATEMENT:
 		BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
-		prePass(current.BodyNode, symbolTable)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
+		for _, node := range current.BodyNode.Body {
+			prePass(node, symbolTable)
+		}
 		symbolTable.exitBlockScope()
 	case parser.NODE_FOR_IN_STATEMENT:
-		prePass(current.BodyNode, symbolTable)
+		BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
 		symbolTable.enterBlockScope(current.BodyNode)
 		prePass(current.Left, symbolTable)
 		prePass(current.Right, symbolTable)
+		for _, node := range current.BodyNode.Body {
+			prePass(node, symbolTable)
+		}
 		symbolTable.exitBlockScope()
 	case parser.NODE_EXPRESSION_STATEMENT:
 		prePass(current.Expression, symbolTable)
@@ -314,10 +321,24 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 	case parser.NODE_CATCH_CLAUSE:
 		{
-			prePass(current.BodyNode, symbolTable)
+			if _, found := BLOCK_SCOPES[current.BodyNode]; !found {
+				BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
+			}
 			symbolTable.enterBlockScope(current.BodyNode)
 			catchScope = true
-			prePass(current.Param, symbolTable)
+			if current.Param != nil && current.Param.Type == parser.NODE_IDENTIFIER {
+				symbolTable.addVariable(current.Param.Name, CATCH_PARAM, false, nil)
+				if variable, _ := symbolTable.findVariable(current.Param.Name); variable != nil {
+					variable.catchId = nextCatchId
+					CATCH_IDS[current.Param] = nextCatchId
+					nextCatchId++
+				}
+			} else {
+				prePass(current.Param, symbolTable)
+			}
+			for _, node := range current.BodyNode.Body {
+				prePass(node, symbolTable)
+			}
 			catchScope = false
 			symbolTable.exitBlockScope()
 		}
@@ -423,6 +444,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 	case parser.NODE_LABELED_STATEMENT:
 		prePass(current.BodyNode, symbolTable)
+	case parser.NODE_ARRAY_EXPRESSION:
+		for _, element := range current.Elements {
+			prePass(element, symbolTable)
+		}
 	case parser.NODE_SEQUENCE_EXPRESSION:
 		for _, expression := range current.Expressions {
 			prePass(expression, symbolTable)

@@ -77,6 +77,7 @@ type VM struct {	frames         []CallFrame
 
 	completionValue value.Value
 	globalObject    value.Value
+	catchValues     map[int]value.Value
 
 	main bool
 }
@@ -94,6 +95,7 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		exceptionStack: []ExceptionState{},
 		main:           main,
 		callCounts:     map[object.Callable]int{},
+		catchValues:    map[int]value.Value{},
 	}
 }
 
@@ -1876,6 +1878,28 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_POP_LOCAL:
 			{
 				vm.stackTop--
+			}
+		case chunk.OP_CATCH_BIND:
+			{
+				id := int(c.Code[ip])
+				ip++
+				vm.catchValues[id] = vm.pop()
+			}
+		case chunk.OP_GET_CATCH:
+			{
+				id := int(c.Code[ip])
+				ip++
+				v, found := vm.catchValues[id]
+				if !found {
+					v = value.UNDEFINED
+				}
+				vm.push(v)
+			}
+		case chunk.OP_SET_CATCH:
+			{
+				id := int(c.Code[ip])
+				ip++
+				vm.catchValues[id] = vm.pop()
 			}
 		case chunk.OP_DEFINE_LOCAL:
 			{

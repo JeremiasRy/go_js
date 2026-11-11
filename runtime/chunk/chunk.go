@@ -98,6 +98,9 @@ const (
 	OP_JUMP_IF_NOT_NULLISH
 	OP_SET_OBJECT_GETTER
 	OP_SET_OBJECT_SETTER
+	OP_CATCH_BIND
+	OP_GET_CATCH
+	OP_SET_CATCH
 )
 
 var OpNames = map[uint8]string{
@@ -196,4 +199,7 @@ var OpNames = map[uint8]string{
 	OP_JUMP_IF_NOT_NULLISH:             "OP_JUMP_IF_NOT_NULLISH",
 	OP_SET_OBJECT_GETTER:               "OP_SET_OBJECT_GETTER",
 	OP_SET_OBJECT_SETTER:               "OP_SET_OBJECT_SETTER",
+	OP_CATCH_BIND:                      "OP_CATCH_BIND",
+	OP_GET_CATCH:                       "OP_GET_CATCH",
+	OP_SET_CATCH:                       "OP_SET_CATCH",
 }
