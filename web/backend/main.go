@@ -1,13 +1,16 @@
 package main
 
 import (
+	"bufio"
 	"context"
-	"go_js_demo/controller"
 	"go_js_demo/db"
+	"go_js_demo/mcpserver"
 	"go_js_demo/microvm"
 	"go_js_demo/worker"
 	"log"
+	"net"
 	"net/http"
+	"regexp"
 	"time"
 )
 
@@ -26,6 +29,24 @@ func (lsw *loggerStatusWriter) WriteHeader(code int) {
 	lsw.ResponseWriter.WriteHeader(code)
 }
 
+func (lsw *loggerStatusWriter) Unwrap() http.ResponseWriter {
+	return lsw.ResponseWriter
+}
+
+func (lsw *loggerStatusWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	return http.NewResponseController(lsw.ResponseWriter).Hijack()
+}
+
+func (lsw *loggerStatusWriter) Flush() {
+	_ = http.NewResponseController(lsw.ResponseWriter).Flush()
+}
+
+var sessionPathPattern = regexp.MustCompile(`/(session|ws)/[0-9a-fA-F-]{32,36}`)
+
+func redactSessionPath(path string) string {
+	return sessionPathPattern.ReplaceAllString(path, "/$1/{session}")
+}
+
 func Logger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -34,7 +55,7 @@ func Logger(next http.Handler) http.Handler {
 			statusCode:     http.StatusOK,
 		}
 		log.Printf("Incoming request: Method=%s, Path=%s, RemoteAddr=%s, User-Agent=%s",
-			r.Method, r.URL.Path, r.RemoteAddr, r.Header.Get("User-Agent"))
+			r.Method, redactSessionPath(r.URL.Path), r.RemoteAddr, r.Header.Get("User-Agent"))
 		next.ServeHTTP(lrs, r)
 		log.Printf("%d Done in %.2fms", lrs.statusCode, float64(time.Since(start).Microseconds())/1000)
 	})
@@ -50,7 +71,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Mcp-Session-Id, MCP-Protocol-Version, Last-Event-ID")
+		w.Header().Set("Access-Control-Expose-Headers", "Mcp-Session-Id")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -60,19 +82,29 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
-	db := db.NewDatabase()
+	database := db.NewDatabase()
 	mvm := microvm.NewMicroVMHandler()
 	sig := make(chan worker.HeartbeatSignal, QUEUE_MAX)
-	ctr := controller.NewUserSriptsController(db, sig)
+	results := make(chan worker.JobResult, QUEUE_MAX)
+	mgr := mcpserver.NewManager(database, sig, mcpserver.DefaultSessionTTL)
+	defer mgr.Close()
+
 	ctx := context.Background()
-	go worker.SpinUpWorkers(db, mvm, sig, WORKER_COUNT, ctx)
+	go func() {
+		for result := range results {
+			mgr.DeliverJobResult(result.JobID, result.Status, result.Result)
+		}
+	}()
+	go worker.SpinUpWorkers(database, mvm, sig, results, WORKER_COUNT, ctx)
 
 	mux := http.NewServeMux()
 	dir := http.Dir("./static")
+	static := http.FileServer(dir)
 
-	mux.Handle("/", http.FileServer(dir))
-	mux.HandleFunc("/api/interpret", ctr.HandlePostInterpret)
-	mux.HandleFunc("/api/jobs/{job_id}", ctr.HandleGetJobById)
+	mux.Handle("/", newFrontendHandler(mgr, static, "./static/index.html"))
+	mux.HandleFunc("POST /session", mgr.HandleCreateSession)
+	mux.HandleFunc("GET /ws/{session_id}", mgr.HandleWS)
+	mux.HandleFunc("/session/{session_id}/mcp", mgr.HandleMCP)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte("Ok!"))
