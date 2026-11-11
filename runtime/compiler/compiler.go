@@ -138,9 +138,10 @@ type LoopBreakPoint struct {
 }
 
 type Loop struct {
-	points []*LoopBreakPoint
-	block  *BlockScope
-	label  string
+	points   []*LoopBreakPoint
+	block    *BlockScope
+	label    string
+	isSwitch bool
 }
 
 var loopStack = []*Loop{}
@@ -152,15 +153,17 @@ func currentLoop() *Loop {
 	if len(loopStack) == 0 {
 		return nil
 	}
-	return loopStack[0]
+	return loopStack[len(loopStack)-1]
 }
 
-func findLoop(label string) *Loop {
+func findLoop(label string, breakAllowed bool) *Loop {
 	if label == "" {
-		if len(loopStack) == 0 {
-			return nil
+		for i := len(loopStack) - 1; i >= 0; i-- {
+			if breakAllowed || !loopStack[i].isSwitch {
+				return loopStack[i]
+			}
 		}
-		return loopStack[len(loopStack)-1]
+		return nil
 	}
 	for i := len(loopStack) - 1; i >= 0; i-- {
 		if loopStack[i].label == label {
@@ -177,6 +180,11 @@ func pushLoop(block *BlockScope) {
 
 func pushLabeledLoop(block *BlockScope, label string) {
 	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: label})
+}
+
+func pushSwitchLoop(block *BlockScope) {
+	loopStack = append(loopStack, &Loop{points: []*LoopBreakPoint{}, block: block, label: pendingLoopLabel, isSwitch: true})
+	pendingLoopLabel = ""
 }
 
 func popLoop() {
@@ -1438,18 +1446,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Label != nil {
 					label = current.Label.Name
 				}
-				l := findLoop(label)
+				l := findLoop(label, false)
 
 				emitAbruptFinalizers(symbolTable, fn)
 
 				currentBlock := symbolTable.block
 
 				for l != nil && l.block != nil && currentBlock != nil {
-					for range currentBlock.vars {
-						fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-					}
 					if currentBlock == l.block {
 						break
+					}
+					for range currentBlock.vars {
+						fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 					}
 					currentBlock = currentBlock.parent
 				}
@@ -1465,7 +1473,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Label != nil {
 					label = current.Label.Name
 				}
-				l := findLoop(label)
+				l := findLoop(label, true)
 
 				emitAbruptFinalizers(symbolTable, fn)
 
@@ -1572,7 +1580,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
-				pushLoop(nil)
+				pushLoop(BLOCK_SCOPES[current.BodyNode])
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
@@ -1601,11 +1609,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				for range initializerLocals {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
 				}
+				cleanupEnd := uint32(len(fn.ValueChunk().Code))
 				for _, breakpoint := range currentLoop().points {
 					pos := breakpoint.position
 					switch breakpoint.type_ {
 					case BREAKPOINT_BREAK:
-						fn.ValueChunk().PatchUint32(uint32(pos), loopEnd)
+						fn.ValueChunk().PatchUint32(uint32(pos), cleanupEnd)
 					case BREAKPOINT_CONTINUE:
 						fn.ValueChunk().PatchUint32(uint32(pos), updateStart)
 					}
@@ -1645,7 +1654,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				parseForDotDotLoopVariable(current, symbolTable, fn)
 
-				pushLoop(nil)
+				pushLoop(BLOCK_SCOPES[current.BodyNode])
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
@@ -1704,7 +1713,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				parseForDotDotLoopVariable(current, symbolTable, fn)
 
-				pushLoop(nil)
+				pushLoop(BLOCK_SCOPES[current.BodyNode])
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
 				}
@@ -2167,7 +2176,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_SWITCH_STATEMENT:
 			{
-				pushLoop(nil)
+				pushSwitchLoop(nil)
 				popReturnValue.push(false)
 				generateByteCode(current.Discriminant, symbolTable, fn)
 				popReturnValue.pop()
@@ -2185,7 +2194,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						continue
 					}
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
+					popReturnValue.push(false)
 					generateByteCode(c.Test, symbolTable, fn)
+					popReturnValue.pop()
 					fn.ValueChunk().EmitByte(chunk.OP_STRICT_EQUALS)
 					fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 					matchJumps[i] = len(fn.ValueChunk().Code) - 4

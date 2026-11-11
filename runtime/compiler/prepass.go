@@ -450,6 +450,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 	case parser.NODE_DO_WHILE_STATEMENT:
 		{
+			BLOCK_SCOPES[current.BodyNode] = newBlockScope(symbolTable.block)
 			prePass(current.BodyNode, symbolTable)
 			symbolTable.enterBlockScope(current.BodyNode)
 			prePass(current.Test, symbolTable)
