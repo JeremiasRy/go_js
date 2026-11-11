@@ -622,9 +622,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						return
 					}
 					if variable.type_ == CONST {
-						emitThrow(fn, "TypeError", "Assignment to constant variable.")
-						popReturnValue.pop()
-						return
+						switch operator {
+						case parser.LOGICAL_AND_ASSIGN, parser.LOGICAL_OR_ASSIGN, parser.NULLISH_ASSIGN:
+						default:
+							emitThrow(fn, "TypeError", "Assignment to constant variable.")
+							popReturnValue.pop()
+							return
+						}
 					}
 
 					var defineOp, setOp, getOp uint8
@@ -673,9 +677,13 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitBytes(jump, 0, 0, 0, 0)
 						skipJump := len(fn.ValueChunk().Code) - 4
 						fn.ValueChunk().EmitByte(chunk.OP_POP)
-						generateByteCode(current.Right, symbolTable, fn)
-						fn.ValueChunk().EmitByte(chunk.OP_DUP)
-						fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+						if variable.type_ == CONST {
+							emitThrow(fn, "TypeError", "Assignment to constant variable.")
+						} else {
+							generateByteCode(current.Right, symbolTable, fn)
+							fn.ValueChunk().EmitByte(chunk.OP_DUP)
+							fn.ValueChunk().EmitBytes(setOp, variableOperand(variable))
+						}
 						fn.ValueChunk().EmitBytes(chunk.OP_JUMP, 0, 0, 0, 0)
 						endJump := len(fn.ValueChunk().Code) - 4
 						fn.ValueChunk().PatchUint32(uint32(skipJump), uint32(len(fn.ValueChunk().Code)))
@@ -1485,7 +1493,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						prefix = 1
 					}
 					delta := byte(0)
-					if current.UpdateOperator == parser.DECREMENT {
+					if isDecrement(current) {
 						delta = 1
 					}
 					fn.ValueChunk().EmitBytes(chunk.OP_MEMBER_UPDATE, prefix, delta)
@@ -1528,7 +1536,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
 				}
 				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(1))
-				if current.UpdateOperator == parser.DECREMENT {
+				if isDecrement(current) {
 					fn.ValueChunk().EmitByte(chunk.OP_SUBTRACT)
 				} else {
 					fn.ValueChunk().EmitByte(chunk.OP_ADD)
@@ -2429,6 +2437,10 @@ func emitThrow(fn object.Callable, name, message string) {
 	err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
 	fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
 	fn.ValueChunk().EmitByte(chunk.OP_THROW)
+}
+
+func isDecrement(node *parser.Node) bool {
+	return node.UpdateOperator == parser.DECREMENT || node.UnaryOperator == parser.UnaryOperator("--")
 }
 
 func referenceIsDiscarded(node *parser.Node) bool {
