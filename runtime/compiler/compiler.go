@@ -2098,6 +2098,37 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				popReturnValue.pop()
 			}
+		case parser.NODE_TAGGED_TEMPLATE_EXPRESSION:
+			{
+				quasi := current.Quasi
+				cooked := make([]value.Value, len(quasi.Quasis))
+				raw := make([]value.Value, len(quasi.Quasis))
+				for i, element := range quasi.Quasis {
+					text := element.Value.(parser.TemplateNodeValue)
+					if text.Invalid {
+						cooked[i] = value.UNDEFINED
+					} else {
+						cooked[i] = value.EncodeHandle(heap.Allocate(native.NewLightString(text.Cooked)))
+					}
+					raw[i] = value.EncodeHandle(heap.Allocate(native.NewLightString(text.Raw)))
+				}
+				rawArray := native.NewArrayFrom(raw)
+				rawArray.Freeze()
+				stringsArray := native.NewArrayFrom(cooked)
+				stringsArray.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("raw"))), value.EncodeHandle(heap.Allocate(rawArray)))
+				stringsArray.Freeze()
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(stringsArray)))
+
+				for _, expression := range quasi.Expressions {
+					generateByteCode(expression, symbolTable, fn)
+				}
+
+				savedHandle := wantMethodHandle
+				wantMethodHandle = true
+				generateByteCode(current.Tag, symbolTable, fn)
+				wantMethodHandle = savedHandle
+				fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(quasi.Expressions)+1), 0)
+			}
 		case parser.NODE_TEMPLATE_LITERAL:
 			{
 				var start *native.LightString

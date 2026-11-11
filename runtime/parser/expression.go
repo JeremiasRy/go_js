@@ -748,11 +748,14 @@ func (p *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, erro
 		elem.Value = TemplateNodeValue{
 			Raw:    strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
 			Cooked: "",
+			Invalid: true,
 		}
 	} else {
+		cooked := string(p.Value.([]byte))
 		elem.Value = TemplateNodeValue{
-			Raw:    strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
-			Cooked: string(p.Value.([]byte)),
+			Raw:     strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
+			Cooked:  cooked,
+			Invalid: strings.IndexByte(cooked, 0) >= 0,
 		}
 	}
 	p.next(false)
