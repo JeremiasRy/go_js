@@ -764,8 +764,21 @@ func (vm *VM) promiseReaction(reaction native.PromiseReaction, fulfilled bool, a
 	derived := derivedObj.(*native.ObjPromise)
 	if reaction.IsFinally {
 		if reaction.Finalizer.IsObject() {
-			if _, err := vm.callValue(reaction.Finalizer, value.UNDEFINED, nil); err != nil {
+			result, err := vm.callValue(reaction.Finalizer, value.UNDEFINED, nil)
+			if err != nil {
 				vm.rejectPromise(derived, vm.errorValue(err))
+				return
+			}
+			if p, ok := vm.promiseFromValue(result); ok {
+				vm.addPromiseObserver(p, func(value.Value) {
+					if fulfilled {
+						vm.resolvePromise(derived, argument)
+					} else {
+						vm.rejectPromise(derived, argument)
+					}
+				}, func(reason value.Value) {
+					vm.rejectPromise(derived, reason)
+				})
 				return
 			}
 		}
@@ -818,29 +831,40 @@ func (vm *VM) rejectPromise(p *native.ObjPromise, reason value.Value) {
 }
 
 func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
-	if obj, err := heap.GetObject(v.GetHandle()); err == nil {
-		if other, ok := obj.(*native.ObjPromise); ok {
-			if other == p {
-				vm.rejectPromise(p, vm.makeError("TypeError", "Chaining cycle detected for promise"))
-				return
-			}
-			vm.attachPromiseReaction(other, native.PromiseReaction{Derived: value.EncodeHandle(heap.Allocate(p))})
+	if !v.IsObject() {
+		p.Resolve(v)
+		vm.settlePromise(p)
+		return
+	}
+	obj, err := heap.GetObject(v.GetHandle())
+	if err != nil {
+		vm.rejectPromise(p, vm.errorValue(err))
+		return
+	}
+	if other, ok := obj.(*native.ObjPromise); ok {
+		if other == p {
+			vm.rejectPromise(p, vm.makeError("TypeError", "Chaining cycle detected for promise"))
 			return
 		}
-		if v.IsObject() {
-			if thenValue, err := vm.getMemberValue(v, value.EncodeHandle(heap.Allocate(native.NewLightString("then")))); err == nil && thenValue.IsObject() {
-				if thenObj, err := heap.GetObject(thenValue.GetHandle()); err == nil {
-					if _, ok := thenObj.(object.Callable); ok {
-						queue.Enqueue(object.Callback{Native: func() {
-							resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFunc(p)))
-							reject := value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p)))
-							if _, err := vm.callValue(thenValue, v, []value.Value{resolve, reject}); err != nil {
-								vm.rejectPromise(p, vm.errorValue(err))
-							}
-						}}, queue.MICRO_TASK, false)
-						return
+		vm.attachPromiseReaction(other, native.PromiseReaction{Derived: value.EncodeHandle(heap.Allocate(p))})
+		return
+	}
+	thenValue, err := vm.getMemberValue(v, value.EncodeHandle(heap.Allocate(native.NewLightString("then"))))
+	if err != nil {
+		vm.rejectPromise(p, vm.errorValue(err))
+		return
+	}
+	if thenValue.IsObject() {
+		if thenObj, err := heap.GetObject(thenValue.GetHandle()); err == nil {
+			if _, ok := thenObj.(object.Callable); ok {
+				queue.Enqueue(object.Callback{Native: func() {
+					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFunc(p)))
+					reject := value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p)))
+					if _, err := vm.callValue(thenValue, v, []value.Value{resolve, reject}); err != nil {
+						vm.rejectPromise(p, vm.errorValue(err))
 					}
-				}
+				}}, queue.MICRO_TASK, false)
+				return
 			}
 		}
 	}
@@ -4391,15 +4415,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 
 						v := vm.pop()
-						fn.Resolve(v)
-						vm.settlePromise(fn.Promise())
+						vm.resolvePromise(fn.Promise(), v)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.RejectFunc:
 					{
 						v := vm.pop()
-						fn.Reject(v)
-						vm.settlePromise(fn.Promise())
+						vm.rejectPromise(fn.Promise(), v)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.SetTimeout:
