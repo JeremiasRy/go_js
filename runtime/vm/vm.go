@@ -861,7 +861,9 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFunc(p)))
 					reject := value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p)))
 					if _, err := vm.callValue(thenValue, v, []value.Value{resolve, reject}); err != nil {
-						vm.rejectPromise(p, vm.errorValue(err))
+						if p.Status == native.PENDING {
+							vm.rejectPromise(p, vm.errorValue(err))
+						}
 					}
 				}}, queue.MICRO_TASK, false)
 				return
@@ -870,6 +872,20 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 	}
 	p.Resolve(v)
 	vm.settlePromise(p)
+}
+
+func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Value) (value.Value, error) {
+	runner := NewVM(false, vm.output)
+	fn := object.NewFunction("native-call", 0, nil)
+	for _, arg := range args {
+		fn.ValueChunk().WriteConstant(arg)
+	}
+	fn.ValueChunk().WriteConstant(this)
+	fn.ValueChunk().WriteConstant(target)
+	fn.ValueChunk().WriteConstant(value.TAG_METHOD_HANDLE)
+	fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(args)), 0, chunk.OP_RETURN)
+	frame, code := runner.Call(fn, nil, value.UNDEFINED, 0, false)
+	return runner.run(frame, code)
 }
 
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
@@ -4724,6 +4740,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 							f, c = vm.Call(boundCallable, &ip, vm.normalizeThis(boundCallable, bound.This), len(allArgs), false)
 							break
+						}
+						if _, ok := obj.(object.Callable); !ok {
+							result, err := vm.invokeCallableWithThis(target, thisArg, rest)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(result)
+							continue
 						}
 						callable, ok := obj.(object.Callable)
 						if !ok {

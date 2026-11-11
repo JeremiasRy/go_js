@@ -30,6 +30,7 @@ type ObjPromise struct {
 	c         chan struct{}
 	Reactions []PromiseReaction
 	Observers []PromiseObserver
+	Resolving bool
 }
 
 type PromiseObserver struct {
@@ -91,6 +92,7 @@ func (op *ObjPromise) Resolve(v value.Value) {
 	}
 	op.Status = RESOLVED
 	op.Value = v
+	op.Resolving = false
 
 	op.c <- struct{}{}
 }
@@ -101,6 +103,7 @@ func (op *ObjPromise) Reject(v value.Value) {
 	}
 	op.Status = REJECTED
 	op.Value = v
+	op.Resolving = false
 
 	op.c <- struct{}{}
 }
