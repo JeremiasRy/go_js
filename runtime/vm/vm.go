@@ -473,12 +473,25 @@ func (vm *VM) acquireIterator(iteratee value.Value, iteratorType uint8) (value.V
 	if native.SYMBOL_ITERATOR != 0 {
 		method, err := vm.getMemberValue(iteratee, native.SYMBOL_ITERATOR)
 		if err == nil && method != value.UNDEFINED {
+			if methodObj, err := heap.GetObject(method.GetHandle()); err == nil {
+				if _, ok := methodObj.(*native.ArrayIterator); ok {
+					if arr, ok := obj.(*native.ObjArr); ok {
+						return value.EncodeHandle(heap.Allocate(object.NewValueIterator(arr))), nil
+					}
+				}
+			}
 			iterator, err := vm.callValue(method, iteratee, nil)
 			if err != nil {
 				return value.UNDEFINED, err
 			}
 			if !iterator.IsObject() {
 				return value.UNDEFINED, fmt.Errorf("Result of the Symbol.iterator method is not an object")
+			}
+			if iteratorObj, err := heap.GetObject(iterator.GetHandle()); err == nil {
+				switch iteratorObj.(type) {
+				case *object.Iterator, *native.ObjGenerator:
+					return iterator, nil
+				}
 			}
 			next, err := vm.getMemberValue(iterator, value.EncodeHandle(heap.Allocate(native.NewLightString("next"))))
 			if err != nil {
@@ -1586,6 +1599,11 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if proxy, ok := obj.(*native.ObjProxy); ok {
 		return vm.proxyGet(proxy, objValue, key, receiver)
 	}
+	if re, ok := obj.(*native.ObjRegExp); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "lastIndex" {
+			return value.ValueFromFloat64(float64(re.LastIndex)), nil
+		}
+	}
 	if boxed, ok := obj.(*native.BoxedPrimitive); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "valueOf" {
 			return value.EncodeHandle(heap.Allocate(native.NewBoxedValueOf())), nil
@@ -1689,6 +1707,9 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	}
 	if _, ok := obj.(*native.ObjGenerator); ok && key == native.SYMBOL_ITERATOR {
 		return value.EncodeHandle(heap.Allocate(native.NewGeneratorIterator())), nil
+	}
+	if _, ok := obj.(*native.ObjArr); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewArrayIterator())), nil
 	}
 	if _, ok := obj.(*object.Iterator); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "next" {
@@ -5236,6 +5257,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.GeneratorIterator:
 					{
 						vm.push(thisCtx)
+					}
+				case *native.ArrayIterator:
+					{
+						this, _ := heap.GetObject(thisCtx.GetHandle())
+						arr, ok := this.(*native.ObjArr)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Array iterator called on non-array")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(object.NewValueIterator(arr))))
 					}
 				case *native.Return:
 					{

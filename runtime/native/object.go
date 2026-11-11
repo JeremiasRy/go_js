@@ -227,6 +227,10 @@ func (o *ObjObject) Clear() {
 	o.marked = false
 }
 
+func NewNullPrototypeObject() *ObjObject {
+	return &ObjObject{Members: map[string]ObjectValueEntry{}}
+}
+
 func NewObjectHash() *ObjObject {
 	o := &ObjObject{
 		init:    0,

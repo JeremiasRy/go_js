@@ -1,8 +1,10 @@
 package vm
 
 import (
-	"regexp"
 	"strings"
+	"unicode/utf16"
+
+	"github.com/dlclark/regexp2"
 
 	"go_js/heap"
 	"go_js/native"
@@ -13,7 +15,71 @@ import (
 func translateRegExpPattern(pattern string) string {
 	pattern = strings.ReplaceAll(pattern, `\/`, "/")
 	pattern = strings.ReplaceAll(pattern, `\u{`, `\x{`)
+	aliases := map[string]string{
+		`\p{Letter}`: `\p{L}`,
+		`\p{Number}`: `\p{N}`,
+		`\P{Letter}`: `\P{L}`,
+		`\P{Number}`: `\P{N}`,
+	}
+	for from, to := range aliases {
+		pattern = strings.ReplaceAll(pattern, from, to)
+	}
 	return pattern
+}
+
+type regexpCapture struct {
+	name string
+}
+
+func parseRegExpCaptures(pattern string) []regexpCapture {
+	captures := []regexpCapture{}
+	inClass := false
+	escaped := false
+	for i := 0; i < len(pattern); i++ {
+		ch := pattern[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if ch == '\\' {
+			escaped = true
+			continue
+		}
+		if inClass {
+			if ch == ']' {
+				inClass = false
+			}
+			continue
+		}
+		if ch == '[' {
+			inClass = true
+			continue
+		}
+		if ch != '(' {
+			continue
+		}
+		if i+1 >= len(pattern) || pattern[i+1] != '?' {
+			captures = append(captures, regexpCapture{})
+			continue
+		}
+		if i+2 >= len(pattern) {
+			continue
+		}
+		switch pattern[i+2] {
+		case ':':
+		case '=', '!':
+		case '<':
+			if i+3 < len(pattern) && (pattern[i+3] == '=' || pattern[i+3] == '!') {
+				continue
+			}
+			end := strings.IndexByte(pattern[i+3:], '>')
+			if end >= 0 {
+				name := pattern[i+3 : i+3+end]
+				captures = append(captures, regexpCapture{name: name})
+			}
+		}
+	}
+	return captures
 }
 
 func (vm *VM) compileRegExp(pattern, flags string) (*native.ObjRegExp, error) {
@@ -39,22 +105,39 @@ func (vm *VM) compileRegExp(pattern, flags string) (*native.ObjRegExp, error) {
 	if hasUnicode && hasUnicodeSets {
 		return nil, &JSException{Name: "SyntaxError", Message: "Invalid regular expression flags"}
 	}
-	prefix := ""
+	options := regexp2.RegexOptions(regexp2.ECMAScript)
 	if seen['i'] {
-		prefix += "(?i)"
+		options |= regexp2.IgnoreCase
 	}
 	if seen['m'] {
-		prefix += "(?m)"
+		options |= regexp2.Multiline
 	}
 	if seen['s'] {
-		prefix += "(?s)"
+		options |= regexp2.Singleline
 	}
-	compiled, err := regexp.Compile(prefix + translateRegExpPattern(pattern))
+	if hasUnicode || hasUnicodeSets {
+		options |= regexp2.Unicode
+	}
+	compiled, err := regexp2.Compile(translateRegExpPattern(pattern), options)
 	if err != nil {
 		return nil, &JSException{Name: "SyntaxError", Message: err.Error()}
 	}
 	obj := native.NewRegExpObject(pattern, flags)
 	obj.Compiled = compiled
+	unnamed := 0
+	for _, capture := range parseRegExpCaptures(pattern) {
+		groupNumber := 0
+		if capture.name == "" {
+			unnamed++
+			groupNumber = unnamed
+		} else {
+			groupNumber = compiled.GroupNumberFromName(capture.name)
+			obj.NamedGroups = append(obj.NamedGroups, capture.name)
+		}
+		if groupNumber > 0 {
+			obj.GroupOrder = append(obj.GroupOrder, groupNumber)
+		}
+	}
 	return obj, nil
 }
 
@@ -110,78 +193,172 @@ func (vm *VM) regexpFromValue(v value.Value) (*native.ObjRegExp, bool) {
 	return re, ok
 }
 
-func (vm *VM) regexpMatch(re *native.ObjRegExp, text string, start int, sticky bool) []int {
-	if re.Compiled == nil {
-		prefix := ""
-		if strings.Contains(re.Flags, "i") {
-			prefix += "(?i)"
-		}
-		if strings.Contains(re.Flags, "m") {
-			prefix += "(?m)"
-		}
-		if strings.Contains(re.Flags, "s") {
-			prefix += "(?s)"
-		}
-		compiled, err := regexp.Compile(prefix + translateRegExpPattern(re.Pattern))
-		if err != nil {
-			return nil
-		}
-		re.Compiled = compiled
-	}
-	if sticky {
-		if start < 0 || start > len(text) {
-			return nil
-		}
-		match := re.Compiled.FindStringSubmatchIndex(text[start:])
-		if match == nil || match[0] != 0 {
-			return nil
-		}
-		for i := range match {
-			if match[i] >= 0 {
-				match[i] += start
-			}
-		}
-		return match
-	}
-	return re.Compiled.FindStringSubmatchIndex(text[start:])
+type regexpText struct {
+	original string
+	units    []rune
+	unicode  bool
 }
 
-func (vm *VM) regexpResult(re *native.ObjRegExp, text string, match []int, offset int) value.Value {
+func newRegexpText(text string, unicode bool) regexpText {
+	if unicode {
+		return regexpText{original: text, units: []rune(text), unicode: true}
+	}
+	units16 := utf16.Encode([]rune(text))
+	units := make([]rune, len(units16))
+	for i, unit := range units16 {
+		units[i] = rune(unit)
+	}
+	return regexpText{original: text, units: units}
+}
+
+func (t regexpText) utf16Index(runeIndex int) int {
+	if !t.unicode {
+		return runeIndex
+	}
+	if runeIndex <= 0 {
+		return 0
+	}
+	if runeIndex > len(t.units) {
+		runeIndex = len(t.units)
+	}
+	return native.UTF16Length(string(t.units[:runeIndex]))
+}
+
+func (t regexpText) runeIndex(utf16Index int) int {
+	if !t.unicode {
+		return utf16Index
+	}
+	if utf16Index <= 0 {
+		return 0
+	}
+	units := native.UTF16Units(t.original)
+	if utf16Index > len(units) {
+		utf16Index = len(units)
+	}
+	return len([]rune(native.UTF16FromUnits(units[:utf16Index])))
+}
+
+func (t regexpText) groupValue(group *regexp2.Group) value.Value {
+	if group == nil || len(group.Captures) == 0 {
+		return value.UNDEFINED
+	}
+	if t.unicode {
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(group.String())))
+	}
+	units := make([]uint16, group.Length)
+	for i := 0; i < group.Length; i++ {
+		units[i] = uint16(t.units[group.Index+i])
+	}
+	return value.EncodeHandle(heap.Allocate(native.NewLightString(native.UTF16FromUnits(units))))
+}
+
+func (t regexpText) groupLength(group *regexp2.Group) int {
+	if group == nil || len(group.Captures) == 0 {
+		return 0
+	}
+	if t.unicode {
+		return native.UTF16Length(group.String())
+	}
+	return group.Length
+}
+
+func (vm *VM) regexpFind(re *native.ObjRegExp, text regexpText, start int, sticky bool) (*regexp2.Match, error) {
+	startRune := text.runeIndex(start)
+	match, err := re.Compiled.FindRunesMatchStartingAt(text.units, startRune)
+	if err != nil {
+		return nil, &JSException{Name: "Error", Message: err.Error()}
+	}
+	if match == nil {
+		return nil, nil
+	}
+	if sticky && match.Index != startRune {
+		return nil, nil
+	}
+	return match, nil
+}
+
+func (vm *VM) regexpResult(re *native.ObjRegExp, text regexpText, match *regexp2.Match) value.Value {
 	if match == nil {
 		return value.NULL
 	}
-	items := make([]value.Value, len(match)/2)
-	for i := 0; i < len(match)/2; i++ {
-		begin := match[i*2]
-		end := match[i*2+1]
-		if begin < 0 || end < 0 {
-			items[i] = value.UNDEFINED
-		} else {
-			items[i] = value.EncodeHandle(heap.Allocate(native.NewLightString(text[begin+offset : end+offset])))
+	groups := []*regexp2.Group{}
+	if len(re.GroupOrder) > 0 {
+		groups = append(groups, &match.Group)
+		for _, groupNumber := range re.GroupOrder {
+			groups = append(groups, match.GroupByNumber(groupNumber))
+		}
+	} else {
+		matchGroups := match.Groups()
+		for i := range matchGroups {
+			group := matchGroups[i]
+			groups = append(groups, &group)
 		}
 	}
+	items := make([]value.Value, len(groups))
+	for i, group := range groups {
+		items[i] = text.groupValue(group)
+	}
 	arr := native.NewArrayFrom(items)
-	arr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("index"))), value.ValueFromFloat64(float64(match[0]+offset)))
-	arr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("input"))), value.EncodeHandle(heap.Allocate(native.NewLightString(text))))
+	arr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("index"))), value.ValueFromFloat64(float64(text.utf16Index(match.Index))))
+	arr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("input"))), value.EncodeHandle(heap.Allocate(native.NewLightString(text.original))))
+
+	if len(re.NamedGroups) > 0 {
+		named := native.NewNullPrototypeObject()
+		for _, name := range re.NamedGroups {
+			group := match.GroupByName(name)
+			named.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString(name))), text.groupValue(group))
+		}
+		arr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("groups"))), value.EncodeHandle(heap.Allocate(named)))
+	}
+
+	if strings.Contains(re.Flags, "d") {
+		indices := make([]value.Value, len(groups))
+		for i, group := range groups {
+			if group == nil || len(group.Captures) == 0 {
+				indices[i] = value.UNDEFINED
+				continue
+			}
+			start := text.utf16Index(group.Index)
+			end := start + text.groupLength(group)
+			indices[i] = value.EncodeHandle(heap.Allocate(native.NewArrayFrom([]value.Value{value.ValueFromFloat64(float64(start)), value.ValueFromFloat64(float64(end))})))
+		}
+		indicesArr := native.NewArrayFrom(indices)
+		if len(re.NamedGroups) > 0 {
+			named := native.NewNullPrototypeObject()
+			for _, name := range re.NamedGroups {
+				group := match.GroupByName(name)
+				if group == nil || len(group.Captures) == 0 {
+					named.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString(name))), value.UNDEFINED)
+					continue
+				}
+				start := text.utf16Index(group.Index)
+				end := start + text.groupLength(group)
+				named.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString(name))), value.EncodeHandle(heap.Allocate(native.NewArrayFrom([]value.Value{value.ValueFromFloat64(float64(start)), value.ValueFromFloat64(float64(end))}))))
+			}
+			indicesArr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("groups"))), value.EncodeHandle(heap.Allocate(named)))
+		}
+		arr.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("indices"))), value.EncodeHandle(heap.Allocate(indicesArr)))
+	}
 	return value.EncodeHandle(heap.Allocate(arr))
 }
 
 func (vm *VM) callRegExpMethod(re *native.ObjRegExp, kind string, argCount int) (value.Value, error) {
 	args := vm.popN(argCount)
-	text := ""
-	if len(args) > 0 {
+	textString := ""
+	if len(args) > 0 && args[0] != value.UNDEFINED {
 		textValue, err := vm.toStringValue(args[0])
 		if err != nil {
 			return value.UNDEFINED, err
 		}
-		text, _ = vm.valueAsString(textValue)
+		textString, _ = vm.valueAsString(textValue)
 	}
+	text := newRegexpText(textString, re.Unicode)
 	start := 0
 	global := strings.Contains(re.Flags, "g")
 	sticky := strings.Contains(re.Flags, "y")
 	if global || sticky {
 		start = re.LastIndex
-		if start < 0 || start > len(text) {
+		if start < 0 || start > native.UTF16Length(textString) {
 			re.LastIndex = 0
 			if kind == "test" {
 				return value.FALSE, nil
@@ -189,18 +366,21 @@ func (vm *VM) callRegExpMethod(re *native.ObjRegExp, kind string, argCount int) 
 			return value.NULL, nil
 		}
 	}
-	match := vm.regexpMatch(re, text, start, sticky)
+	match, err := vm.regexpFind(re, text, start, sticky)
+	if err != nil {
+		return value.UNDEFINED, err
+	}
 	if global || sticky {
 		if match == nil {
 			re.LastIndex = 0
 		} else {
-			re.LastIndex = match[1]
+			re.LastIndex = text.utf16Index(match.Index + match.Length)
 		}
 	}
 	if kind == "test" {
 		return boolValue(match != nil), nil
 	}
-	return vm.regexpResult(re, text, match, 0), nil
+	return vm.regexpResult(re, text, match), nil
 }
 
 func (vm *VM) regexpObjectType(v value.Value) (object.Object, bool) {

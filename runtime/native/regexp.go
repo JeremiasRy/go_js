@@ -1,7 +1,9 @@
 package native
 
 import (
-	"regexp"
+	"sort"
+
+	"github.com/dlclark/regexp2"
 
 	"go_js/heap"
 	"go_js/object"
@@ -10,14 +12,29 @@ import (
 
 type ObjRegExp struct {
 	ObjObject
-	Pattern   string
-	Flags     string
-	LastIndex int
-	Compiled  *regexp.Regexp
+	Pattern     string
+	Flags       string
+	LastIndex   int
+	Compiled    *regexp2.Regexp
+	Unicode     bool
+	GroupOrder  []int
+	NamedGroups []string
+}
+
+func CanonicalRegExpFlags(flags string) string {
+	order := "dgimsuvy"
+	result := []byte{}
+	for i := 0; i < len(order); i++ {
+		if hasFlag(flags, order[i]) {
+			result = append(result, order[i])
+		}
+	}
+	return string(result)
 }
 
 func NewRegExpObject(pattern, flags string) *ObjRegExp {
-	obj := &ObjRegExp{Pattern: pattern, Flags: flags}
+	flags = CanonicalRegExpFlags(flags)
+	obj := &ObjRegExp{Pattern: pattern, Flags: flags, Unicode: hasFlag(flags, 'u')}
 	obj.Members = map[string]ObjectValueEntry{}
 	obj.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("source"))), value.EncodeHandle(heap.Allocate(NewLightString(pattern))))
@@ -89,4 +106,10 @@ func NewRegExpExec() *RegExpExec {
 	fn := &RegExpExec{}
 	fn.name = "exec"
 	return fn
+}
+
+func SortRegExpGroupNames(names []string) []string {
+	result := append([]string{}, names...)
+	sort.Strings(result)
+	return result
 }

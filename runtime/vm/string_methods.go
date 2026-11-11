@@ -220,9 +220,55 @@ func (vm *VM) callStringMethod(method *native.StringMethod, this value.Value, ar
 			result = strings.ReplaceAll(result, "ﬁ", "fi")
 		}
 		return newString(result), nil
+	case native.STRING_MATCH:
+		return vm.stringMatch(owner, args)
+	case native.STRING_SEARCH:
+		return vm.stringSearch(owner, args)
+	case native.STRING_MATCH_ALL:
+		return vm.stringMatchAll(owner, args)
 	case native.STRING_REPLACE, native.STRING_REPLACE_ALL:
-		return vm.stringReplace(owner, args, method.Kind == native.STRING_REPLACE_ALL)
+		all := method.Kind == native.STRING_REPLACE_ALL
+		if len(args) > 0 {
+			search := args[0]
+			replacement := value.UNDEFINED
+			if len(args) > 1 {
+				replacement = args[1]
+			}
+			if hook, ok := vm.symbolMethod(search, native.SYMBOL_REPLACE); ok {
+				return vm.callValue(hook, search, []value.Value{value.EncodeHandle(heap.Allocate(native.NewLightString(owner))), replacement})
+			}
+			if re, ok := vm.regexpFromValue(search); ok {
+				return vm.stringReplaceRegex(owner, re, replacement, all)
+			}
+		}
+		return vm.stringReplace(owner, args, all)
 	case native.STRING_SPLIT:
+		if len(args) > 0 {
+			separator := args[0]
+			limitValue := value.UNDEFINED
+			if len(args) > 1 {
+				limitValue = args[1]
+			}
+			if hook, ok := vm.symbolMethod(separator, native.SYMBOL_SPLIT); ok {
+				return vm.callValue(hook, separator, []value.Value{value.EncodeHandle(heap.Allocate(native.NewLightString(owner))), limitValue})
+			}
+			if re, ok := vm.regexpFromValue(separator); ok {
+				limit := -1
+				if limitValue != value.UNDEFINED {
+					n, err := vm.toNumber(limitValue)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if !math.IsNaN(n) {
+						limit = int(math.Trunc(n))
+						if limit < 0 {
+							limit = -1
+						}
+					}
+				}
+				return vm.stringSplitRegex(owner, re, limit)
+			}
+		}
 		return vm.stringSplit(owner, args)
 	}
 	return value.UNDEFINED, nil

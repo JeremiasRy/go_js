@@ -51,3 +51,13 @@ func (i *JSIterator) Marked() bool {
 func (i *JSIterator) Clear() {
 	i.marked = false
 }
+
+type ArrayIterator struct {
+	ObjNativeFn
+}
+
+func NewArrayIterator() *ArrayIterator {
+	i := &ArrayIterator{}
+	i.name = "iterator"
+	return i
+}

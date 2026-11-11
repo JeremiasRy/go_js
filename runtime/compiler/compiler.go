@@ -1168,18 +1168,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitParameterDefaults(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
+					popReturnValue.push(false)
 					generateByteCode(current.BodyNode, symbolTable, newFn)
+					popReturnValue.pop()
+					newFn.ValueChunk().EmitByte(chunk.OP_RETURN)
 				} else {
 					popReturnValue.push(true)
 					for _, node := range current.BodyNode.Body {
 						generateByteCode(node, symbolTable, newFn)
 					}
 					popReturnValue.pop()
-				}
-
-				if len(newFn.ValueChunk().Code) == 0 {
-					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
-				} else {
 					newFn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_RETURN)
 				}
 

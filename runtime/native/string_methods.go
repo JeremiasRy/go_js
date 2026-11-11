@@ -25,6 +25,9 @@ const (
 	STRING_REPLACE
 	STRING_REPLACE_ALL
 	STRING_SPLIT
+	STRING_MATCH
+	STRING_SEARCH
+	STRING_MATCH_ALL
 )
 
 type StringMethod struct {
@@ -60,6 +63,9 @@ func AddStringMethods(p *Prototype) {
 		{"replace", STRING_REPLACE},
 		{"replaceAll", STRING_REPLACE_ALL},
 		{"split", STRING_SPLIT},
+		{"match", STRING_MATCH},
+		{"search", STRING_SEARCH},
+		{"matchAll", STRING_MATCH_ALL},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
