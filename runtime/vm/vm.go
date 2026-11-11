@@ -2148,6 +2148,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			vm.frames[vm.frameCount-1].localStart = f.localStart
 			vm.frames[vm.frameCount-1].heapScope = f.heapScope
 			vm.frames[vm.frameCount-1].ownScope = f.ownScope
+			for _, exception := range promise.State.Exceptions {
+				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: exception.JumpTo, stackTop: exception.StackTop, frame: vm.frameCount})
+			}
 			for _, v := range promise.State.Stack {
 				vm.push(v)
 			}
@@ -5282,7 +5285,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 					}
 
-					promise.Resolve(value)
+					if promise.Promise != nil {
+						vm.resolvePromise(promise.Promise, value)
+					} else {
+						promise.Resolve(value)
+					}
 
 					if vm.frameCount <= 0 {
 						vm.stackTop = 0
@@ -5850,7 +5857,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					count := (vm.stackTop - f.localStart) + 1
 					stack := make([]value.Value, count)
 					copy(stack, append(vm.stack[f.localStart:vm.stackTop], value.EncodeHandle(heap.Allocate(promise))))
-					curentAsyncFn.Pause(stack, ip, f.localStart, f.heapScope, f.ownScope)
+					exceptions := []native.AsyncException{}
+					kept := vm.exceptionStack[:0]
+					frameIndex := vm.frameCount - 1
+					for _, state := range vm.exceptionStack {
+						if state.frame >= frameIndex {
+							exceptions = append(exceptions, native.AsyncException{JumpTo: state.jumpTo, StackTop: state.stackTop, Frame: state.frame})
+						} else {
+							kept = append(kept, state)
+						}
+					}
+					vm.exceptionStack = kept
+					curentAsyncFn.Pause(stack, ip, f.localStart, f.heapScope, f.ownScope, exceptions)
 					curentAsyncFn.Await(promise)
 					heap.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
 

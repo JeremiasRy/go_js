@@ -552,9 +552,10 @@ func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionSco
 		{"BigUint64Array", native.NewTypedArrayConstructor("BigUint64Array", native.TYPED_BIGUINT64, 8)},
 	}
 	for _, ctor := range constructors {
-		symbolTable.addVariable(ctor.name, CONST, false, nil)
+		main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
+		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(ctor.name))))
 		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(ctor.obj)))
-		main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+		main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
 	}
 }
 
