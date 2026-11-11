@@ -2754,10 +2754,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						{
 							v = cloneFunctionValue(v, f.heapScope)
 						}
-					case *native.ObjPromise:
-						{
-							v = obj.(*native.ObjPromise).Value
-						}
 					}
 				}
 				vm.stack[vm.stackTop] = v
