@@ -14,6 +14,7 @@ import (
 	"go_js/queue"
 	"go_js/value"
 	"math"
+	"math/big"
 	"slices"
 	"strconv"
 	"strings"
@@ -384,6 +385,8 @@ func truthyValue(v value.Value) bool {
 			return len(obj.Value) > 0
 		case *native.LightString, *native.StringConstructor:
 			return len(obj.String()) > 0
+		case *native.ObjBigInt:
+			return obj.Value.Sign() != 0
 		default:
 			return true
 		}
@@ -992,6 +995,9 @@ func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
 		if boxed, ok := obj.(*native.BoxedPrimitive); ok {
 			return boxed.Primitive, nil
 		}
+		if _, ok := obj.(*native.ObjBigInt); ok {
+			return v, nil
+		}
 	}
 	if native.SYMBOL_TO_PRIMITIVE != 0 {
 		method, err := vm.getMemberValue(v, native.SYMBOL_TO_PRIMITIVE)
@@ -1195,6 +1201,9 @@ func (vm *VM) toStringValue(v value.Value) (value.Value, error) {
 	if s, ok := vm.valueAsString(v); ok {
 		return value.EncodeHandle(heap.Allocate(native.NewLightString(s))), nil
 	}
+	if b, ok := bigIntFromValue(v); ok {
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(b.String()))), nil
+	}
 	if v.IsObject() {
 		if obj, err := heap.GetObject(v.GetHandle()); err == nil {
 			if arr, ok := obj.(*native.ObjArr); ok {
@@ -1247,6 +1256,8 @@ func (vm *VM) typeofValue(v value.Value) string {
 		switch obj.(type) {
 		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ObjNativeFn:
 			return "function"
+		case *native.ObjBigInt:
+			return "bigint"
 		case *native.LightString, *native.ObjStringBuilder:
 			return "string"
 		case *native.ObjSymbol:
@@ -1397,6 +1408,12 @@ func strictEquals(a, b value.Value) bool {
 		if aString != bString {
 			return false
 		}
+		if ab, ok := bigIntFromValue(a); ok {
+			if bb, ok := bigIntFromValue(b); ok {
+				return ab.Cmp(bb) == 0
+			}
+			return false
+		}
 		return heap.GetPointer(a.GetHandle()) == heap.GetPointer(b.GetHandle())
 	}
 	if a.IsNumber() && b.IsNumber() {
@@ -1429,6 +1446,12 @@ func valueAsStringStatic(v value.Value) (string, bool) {
 }
 
 func (vm *VM) compare(a, b value.Value) (int, error) {
+	if ab, ok := bigIntFromValue(a); ok {
+		return vm.compareBigInt(ab, b, true)
+	}
+	if bb, ok := bigIntFromValue(b); ok {
+		return vm.compareBigInt(bb, a, false)
+	}
 	pa, err := vm.toPrimitive(a, "number")
 	if err != nil {
 		return 0, err
@@ -1473,7 +1496,27 @@ func (vm *VM) lessThan(a, b value.Value) (bool, error) {
 	return result == -1, err
 }
 
+func (vm *VM) looseBigIntEquals(b *big.Int, other value.Value) bool {
+	if ob, ok := bigIntFromValue(other); ok {
+		return b.Cmp(ob) == 0
+	}
+	if other.IsType(value.NULL) || other.IsType(value.UNDEFINED) {
+		return false
+	}
+	converted, err := vm.toBigInt(other)
+	if err != nil {
+		return false
+	}
+	return b.Cmp(converted) == 0
+}
+
 func (vm *VM) looseEquals(a, b value.Value) (bool, error) {
+	if ab, ok := bigIntFromValue(a); ok {
+		return vm.looseBigIntEquals(ab, b), nil
+	}
+	if bb, ok := bigIntFromValue(b); ok {
+		return vm.looseBigIntEquals(bb, a), nil
+	}
 	if strictEquals(a, b) {
 		return true, nil
 	}
@@ -1961,6 +2004,22 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if err != nil {
 					return value.UNDEFINED, err
 				}
+				if b, ok := vm.bigIntObject(old); ok {
+					d := big.NewInt(1)
+					if delta < 0 {
+						d.Neg(d)
+					}
+					updatedValue := newBigIntValue(new(big.Int).Add(b.Value, d))
+					if err := vm.setMemberValue(objValue, k, updatedValue); err != nil {
+						return value.UNDEFINED, err
+					}
+					if prefix {
+						vm.push(updatedValue)
+					} else {
+						vm.push(old)
+					}
+					continue
+				}
 				n, err := vm.toNumber(old)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -1984,6 +2043,30 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if ba, aBig := vm.bigIntObject(a); aBig {
+					bb, bBig := vm.bigIntObject(b)
+					if !bBig {
+						if _, isString := vm.valueAsString(b); !isString {
+							errValue := vm.makeError("TypeError", "Cannot mix BigInt and other types")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+					} else {
+						result, _ := bigIntBinaryOp(0, ba.Value, bb.Value)
+						vm.push(newBigIntValue(result))
+						continue
+					}
+				} else if _, bBig := vm.bigIntObject(b); bBig {
+					if _, isString := vm.valueAsString(a); !isString {
+						errValue := vm.makeError("TypeError", "Cannot mix BigInt and other types")
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
+					}
+				}
 
 				pa, err := vm.toPrimitive(a, "default")
 				if err != nil {
@@ -2035,6 +2118,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntBitwise(0, a, b); handled {
+					if err != nil {
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				ai, err := vm.toInt32(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2049,6 +2141,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntBitwise(1, a, b); handled {
+					if err != nil {
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				ai, err := vm.toInt32(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2063,6 +2164,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntBitwise(2, a, b); handled {
+					if err != nil {
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				ai, err := vm.toInt32(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2077,6 +2187,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntArithmetic(1, a, b); handled {
+					if err != nil {
+						name := "TypeError"
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						errValue := vm.makeError(name, err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				an, err := vm.toNumber(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2091,6 +2212,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntArithmetic(3, a, b); handled {
+					if err != nil {
+						name := "TypeError"
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						errValue := vm.makeError(name, err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				an, err := vm.toNumber(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2105,6 +2237,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntArithmetic(2, a, b); handled {
+					if err != nil {
+						name := "TypeError"
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						errValue := vm.makeError(name, err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				an, err := vm.toNumber(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2119,6 +2262,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntArithmetic(5, a, b); handled {
+					if err != nil {
+						name := "TypeError"
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						errValue := vm.makeError(name, err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				an, err := vm.toNumber(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2133,6 +2287,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntArithmetic(4, a, b); handled {
+					if err != nil {
+						name := "TypeError"
+						if strings.Contains(err.Error(), "Division by zero") || strings.Contains(err.Error(), "Exponent") { name = "RangeError" }
+						errValue := vm.makeError(name, err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				an, err := vm.toNumber(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2272,13 +2437,45 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_TO_NUMBER:
 			{
-				n, err := vm.toNumber(vm.pop())
+				v := vm.pop()
+				if _, ok := vm.bigIntObject(v); ok {
+					errValue := vm.makeError("TypeError", "Cannot convert a BigInt value to a number")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				n, err := vm.toNumber(v)
 				if err != nil {
 					errValue := vm.makeError("TypeError", err.Error())
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 						return value.UNDEFINED, err
 					}
 					continue
+				}
+				vm.push(value.ValueFromFloat64(n))
+			}
+		case chunk.OP_UPDATE:
+			{
+				decrement := c.Code[ip] == 1
+				ip++
+				v := vm.pop()
+				if b, ok := vm.bigIntObject(v); ok {
+					delta := big.NewInt(1)
+					if decrement {
+						delta.Neg(delta)
+					}
+					vm.push(newBigIntValue(new(big.Int).Add(b.Value, delta)))
+					continue
+				}
+				n, err := vm.toNumber(v)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				if decrement {
+					n--
+				} else {
+					n++
 				}
 				vm.push(value.ValueFromFloat64(n))
 			}
@@ -2322,7 +2519,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_BITWISE_NOT:
 			{
-				n, err := vm.toInt32(vm.pop())
+				v := vm.pop()
+				if b, ok := vm.bigIntObject(v); ok {
+					vm.push(newBigIntValue(new(big.Int).Not(b.Value)))
+					continue
+				}
+				n, err := vm.toInt32(v)
 				if err != nil {
 					return value.UNDEFINED, err
 				}
@@ -2332,6 +2534,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntBitwise(3, a, b); handled {
+					if err != nil {
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				ai, err := vm.toInt32(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2346,6 +2557,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if v, handled, err := vm.bigIntBitwise(4, a, b); handled {
+					if err != nil {
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+						continue
+					}
+					vm.push(v)
+					continue
+				}
 				ai, err := vm.toInt32(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2360,6 +2580,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				b := vm.pop()
 				a := vm.pop()
+				if _, aBig := vm.bigIntObject(a); aBig {
+					errValue := vm.makeError("TypeError", "BigInts have no unsigned right shift")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+					continue
+				}
+				if _, bBig := vm.bigIntObject(b); bBig {
+					errValue := vm.makeError("TypeError", "BigInts have no unsigned right shift")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil { return value.UNDEFINED, err }
+					continue
+				}
 				ai, err := vm.toUint32(a)
 				if err != nil {
 					return value.UNDEFINED, err
@@ -2456,6 +2686,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_NEGATE:
 			{
 				v := vm.pop()
+				if b, ok := vm.bigIntObject(v); ok {
+					vm.push(newBigIntValue(new(big.Int).Neg(b.Value)))
+					continue
+				}
 
 				if v.IsNumber() {
 					vm.push(value.ValueFromFloat64(-(v.AsNumber())))
@@ -3467,7 +3701,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if argCount > 0 {
 							arg := vm.pop()
 							if arg.IsObject() {
-								vm.push(arg)
+								if _, ok := bigIntFromValue(arg); ok {
+									vm.push(native.NewBoxedPrimitiveValue(arg))
+								} else {
+									vm.push(arg)
+								}
 							} else {
 								vm.push(value.EncodeHandle(heap.Allocate(native.NewObject())))
 							}
@@ -3576,6 +3814,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(value.ValueFromFloat64(0))
 						} else {
 							arg := vm.pop()
+							if f, ok := vm.bigIntToNumber(arg); ok {
+								vm.push(value.ValueFromFloat64(f))
+								continue
+							}
 							n, err := vm.toNumber(arg)
 							if err != nil {
 								return value.UNDEFINED, err
@@ -4043,6 +4285,81 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						arg := vm.pop()
 						vm.push(native.NumberIsSafeIntegerValue(arg))
+					}
+				case *native.BigIntToString:
+					{
+						args := vm.popN(argCount)
+						radix := 10
+						if len(args) > 0 && args[0] != value.UNDEFINED {
+							n, _ := vm.toNumber(args[0])
+							radix = int(n)
+						}
+						vm.push(vm.bigIntToStringValue(thisCtx, radix))
+					}
+				case *native.BigIntValueOf:
+					{
+						vm.popN(argCount)
+						vm.push(thisCtx)
+					}
+				case *native.BigIntConstructor:
+					{
+						args := vm.popN(argCount)
+						if len(args) == 0 {
+							errValue := vm.makeError("TypeError", "Cannot convert undefined to a BigInt")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						result, err := vm.toBigInt(args[0])
+						if err != nil {
+							name := "RangeError"
+							if args[0].IsType(value.NULL) || args[0].IsType(value.UNDEFINED) {
+								name = "TypeError"
+							} else if _, ok := vm.valueAsString(args[0]); ok {
+								name = "SyntaxError"
+							} else if args[0].IsObject() {
+								name = "TypeError"
+							}
+							errValue := vm.makeError(name, err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(newBigIntValue(result))
+					}
+				case *native.BigIntAsIntN, *native.BigIntAsUintN:
+					{
+						args := vm.popN(argCount)
+						signed := false
+						if _, ok := fn.(*native.BigIntAsIntN); ok {
+							signed = true
+						}
+						if len(args) < 2 {
+							errValue := vm.makeError("TypeError", "BigInt.asIntN requires two arguments")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						bitsNumber, err := vm.toNumber(args[0])
+						if err != nil || math.IsNaN(bitsNumber) || bitsNumber < 0 {
+							errValue := vm.makeError("RangeError", "Invalid bit length")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						bigValue, ok := vm.bigIntObject(args[1])
+						if !ok {
+							errValue := vm.makeError("TypeError", "Cannot convert to a BigInt")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(newBigIntValue(vm.bigIntAsIntN(int(bitsNumber), bigValue.Value, signed)))
 					}
 				case *native.FunctionCall:
 					{
@@ -4748,6 +5065,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							continue
 						}
 						vm.push(result)
+					}
+				case *native.BigIntConstructor:
+					{
+						errValue := vm.makeError("TypeError", "BigInt is not a constructor")
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
 					}
 				case native.Constructor:
 					{

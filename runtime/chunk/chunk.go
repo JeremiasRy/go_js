@@ -124,6 +124,7 @@ const (
 	OP_DEFINE_ARGUMENTS_HEAP
 	OP_GET_LOCAL_RAW
 	OP_GET_HEAP_VAR_RAW
+	OP_UPDATE
 )
 
 var OpNames = map[uint8]string{
@@ -248,4 +249,5 @@ var OpNames = map[uint8]string{
 	OP_DEFINE_ARGUMENTS_HEAP:           "OP_DEFINE_ARGUMENTS_HEAP",
 	OP_GET_LOCAL_RAW:                   "OP_GET_LOCAL_RAW",
 	OP_GET_HEAP_VAR_RAW:                "OP_GET_HEAP_VAR_RAW",
+	OP_UPDATE:                          "OP_UPDATE",
 }

@@ -172,6 +172,9 @@ func (s *jsonStringifier) serialize(key string, holder value.Value, indent strin
 	if val == value.UNDEFINED || val == value.UNINITIALIZED {
 		return "", nil
 	}
+	if _, ok := bigIntFromValue(val); ok {
+		return "", fmt.Errorf("Do not know how to serialize a BigInt")
+	}
 	if val.IsBoolean() {
 		if val == value.TRUE {
 			return "true", nil

@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 
 	"go_js/chunk"
@@ -535,6 +536,15 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineBigIntConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	bigIntCtor := native.NewBigIntConstructor()
+	handle := heap.Allocate(bigIntCtor)
+
+	symbolTable.addVariable("BigInt", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 func defineReflectObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	reflectObject := native.NewReflectObject()
 	handle := heap.Allocate(reflectObject)
@@ -631,6 +641,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineNumberConstructor(setup, global)
 	defineJSONObject(setup, global)
 	defineReflectObject(setup, global)
+	defineBigIntConstructor(setup, global)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
@@ -1573,6 +1584,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_LITERAL:
 			{
+				if current.Bigint != "" {
+					number, ok := new(big.Int).SetString(current.Bigint, 0)
+					if !ok {
+						number = big.NewInt(0)
+					}
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewBigInt(number))))
+					return
+				}
 				if current.Regex != nil {
 					regexpObject := native.NewRegExpObject(current.Regex.Pattern, current.Regex.Flags)
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(regexpObject)))
@@ -1837,16 +1856,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					}
 				}
 
-				fn.ValueChunk().EmitByte(chunk.OP_TO_NUMBER)
 				if !current.Prefix {
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
 				}
-				fn.ValueChunk().WriteConstant(value.ValueFromFloat64(1))
+				delta := byte(0)
 				if isDecrement(current) {
-					fn.ValueChunk().EmitByte(chunk.OP_SUBTRACT)
-				} else {
-					fn.ValueChunk().EmitByte(chunk.OP_ADD)
+					delta = 1
 				}
+				fn.ValueChunk().EmitBytes(chunk.OP_UPDATE, delta)
 				if current.Prefix {
 					fn.ValueChunk().EmitByte(chunk.OP_DUP)
 				}

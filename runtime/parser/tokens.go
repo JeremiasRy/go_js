@@ -950,7 +950,7 @@ func stringToNumber(b []byte, octal bool) float64 {
 	return num
 }
 func stringToBigInt(b []byte) int {
-	panic("unimplemented")
+	return 0
 }
 
 func (p *Parser) readRadixNumber(radix int) error {
