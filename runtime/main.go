@@ -72,6 +72,7 @@ func main() {
 
 	virtualMachine.InitFileRoot(rootFileLocation)
 	compiler.InitRootScriptLocation(rootFileLocation)
+	compiler.SetEntryFile(input)
 	virtualMachine.SetScriptMode(*sourceType == "script")
 	compiler.SetModule(*sourceType == "module")
 
@@ -96,6 +97,9 @@ func main() {
 	main, err := compiler.Compile(ast)
 
 	if err != nil {
+		if _, ok := err.(*compiler.ModuleLinkError); ok {
+			diagnostic.Fatal("link", "SyntaxError", err)
+		}
 		diagnostic.Fatal("compile", "Error", err)
 	}
 	heap.InitGC(main.ValueChunk().Constants)

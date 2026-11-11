@@ -18,6 +18,8 @@ func objectAsObjObject(obj object.Object) (*ObjObject, bool) {
 		return &o.ObjObject, true
 	case *Prototype:
 		return &o.ObjObject, true
+	case *ObjModuleNamespace:
+		return &o.ObjObject, true
 	}
 	return nil, false
 }
@@ -849,7 +851,7 @@ func (*ObjectValues) Values(o value.Value) []value.Value {
 				}
 				return r
 			}
-		case *ObjClass, *Instance, *Prototype:
+		case *ObjClass, *Instance, *Prototype, *ObjModuleNamespace:
 			{
 				o, _ := objectAsObjObject(obj)
 				r := []value.Value{}
@@ -910,7 +912,7 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 				}
 				return r
 			}
-		case *ObjClass, *Instance, *Prototype:
+		case *ObjClass, *Instance, *Prototype, *ObjModuleNamespace:
 			{
 				o, _ := objectAsObjObject(obj)
 				r := []value.Value{}

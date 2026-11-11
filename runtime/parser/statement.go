@@ -369,6 +369,25 @@ func (p *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, error
 			return nil, err
 		}
 
+		if p.shouldParseExportStatement() {
+			decl, err := p.parseExportDeclaration(node)
+			if err != nil {
+				return nil, err
+			}
+			node.Declaration = decl
+		} else {
+			expression, err := p.parseMaybeAssign("", nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			node.Expression = expression
+			err = p.semicolon()
+			if err != nil {
+				return nil, err
+			}
+		}
+		node.Specifiers = []*Node{}
+		node.Source = nil
 		return p.finishNode(node, NODE_EXPORT_DEFAULT_DECLARATION), nil
 	}
 
@@ -413,9 +432,6 @@ func (p *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, error
 		node.Specifiers = specifiers
 
 		if p.eatContextual("from") {
-			if p.Type.identifier == TOKEN_STRING {
-				return nil, p.unexpected("Can't have STRING as current type", nil)
-			}
 			exprAtom, err := p.parseExprAtom(nil, "", false)
 
 			if err != nil {

@@ -80,6 +80,8 @@ type FunctionScope struct {
 	hasHeapVars      bool
 	isArrow          bool
 	paramNames       map[string]bool
+	globalBase       int
+	maxSlot          int
 }
 
 const (
@@ -160,6 +162,7 @@ var loopStack = []*Loop{}
 var finalizerStack = []*parser.Node{}
 var chainJumpStack = [][]int{}
 var pendingLoopLabel = ""
+var nextLoopID = 0
 var wantMethodHandle = false
 var nextFunctionIsMethod = false
 var parameterFunction *FunctionScope
@@ -329,7 +332,7 @@ func functionSlotCount(fs *FunctionScope) int {
 }
 func (fs *FunctionScope) getCurrentSlot() int {
 	if fs.tableScope == GLOBAL && fs.block == nil {
-		return functionSlotCount(fs) - 1
+		return fs.globalBase + functionSlotCount(fs) - 1
 	}
 
 	count := -1
@@ -343,7 +346,7 @@ func (fs *FunctionScope) getCurrentSlot() int {
 	}
 
 	if fs.tableScope == GLOBAL {
-		return count
+		return fs.globalBase + count
 	}
 
 	count += functionSlotCount(fs)
@@ -374,6 +377,9 @@ func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared
 		variable.scope = LOCAL
 	}
 	variable.slot = fs.getCurrentSlot()
+	if fs.tableScope == GLOBAL && variable.slot > fs.maxSlot {
+		fs.maxSlot = variable.slot
+	}
 }
 
 func (fs *FunctionScope) findVariable(name string) (*Variable, *FunctionScope) {
@@ -707,6 +713,30 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineBooleanConstructor(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
+	}
+
+	if module {
+		entry, err := compileModuleGraph(ast)
+		if err != nil {
+			return nil, err
+		}
+		var wrapper object.Callable
+		if entry.Async {
+			wrapper = native.NewAsyncFunction(object.MAIN_FN_NAME, 0, nil)
+		} else {
+			wrapper = object.NewFunction(object.MAIN_FN_NAME, 0, nil)
+		}
+		wrapperValue := value.EncodeHandle(heap.Allocate(wrapper))
+		setup.ValueChunk().WriteConstant(wrapperValue)
+		setup.ValueChunk().EmitBytes(chunk.OP_CALL, 0, 0, chunk.OP_RETURN)
+		wrapper.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(entry.Path))))
+		wrapper.ValueChunk().EmitByte(chunk.OP_IMPORT_MODULE)
+		if entry.Async {
+			wrapper.ValueChunk().EmitByte(chunk.OP_AWAIT)
+		}
+		wrapper.ValueChunk().EmitByte(chunk.OP_RETURN)
+		strictContext = savedStrict
+		return setup, nil
 	}
 
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
@@ -1627,7 +1657,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					case GLOBAL:
 						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
 					case LOCAL:
-						fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_LOCAL_SLOT, uint8(variable.slot))
 					case HEAP:
 						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
 					}
@@ -2047,6 +2077,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				bindings := loopBindingNameSet(current.Left)
 				bindings[ITERATOR_VAR_NAME] = true
+				loopID := nextLoopID
+				nextLoopID++
+				fn.ValueChunk().EmitBytes(chunk.OP_STACK_MARK, uint8(loopID))
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_ENSURE_HEAP_SCOPE)
 				}
@@ -2068,7 +2101,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				popReturnValue.pop()
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_OF)
 				iteratorVariable, _ := symbolTable.findVariable(ITERATOR_VAR_NAME)
-				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot))
+				fn.ValueChunk().EmitBytes(chunk.OP_DUP, chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot), chunk.OP_STACK_MARK, uint8(loopID))
 				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 				if blockHasHeapVars(symbolTable.block) {
@@ -2084,35 +2117,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, fn)
 				}
 
-				continuationStart := len(fn.ValueChunk().Code)
-				bodyLocals := bodyLocalVariableCount(symbolTable.block, bindings)
-				for range bodyLocals {
-					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-				}
-				fn.ValueChunk().EmitByte(chunk.OP_JUMP)
+				continueTarget := len(fn.ValueChunk().Code)
+				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_JUMP)
 				fn.ValueChunk().EmitUint32(jumpStart - 2)
-				loopEnd := uint32(len(fn.ValueChunk().Code))
-				fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
-
-				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
-
-				boundLocals := 0
-				for name, variable := range symbolTable.block.vars {
-					if name != ITERATOR_VAR_NAME && bindings[name] && variable.scope != HEAP && variable.type_ != CATCH_PARAM {
-						boundLocals++
-					}
-				}
-				for range boundLocals {
-					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-				}
-				cleanupEnd := uint32(len(fn.ValueChunk().Code))
+				normalStart := len(fn.ValueChunk().Code)
+				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID), chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID))
+				fn.ValueChunk().PatchUint32(jumpStart, uint32(normalStart))
 				for _, breakpoint := range currentLoop().points {
 					pos := breakpoint.position
 					switch breakpoint.type_ {
 					case BREAKPOINT_BREAK:
-						fn.ValueChunk().PatchUint32(uint32(pos), cleanupEnd)
+						fn.ValueChunk().PatchUint32(uint32(pos), uint32(normalStart))
 					case BREAKPOINT_CONTINUE:
-						fn.ValueChunk().PatchUint32(uint32(pos), uint32(continuationStart))
+						fn.ValueChunk().PatchUint32(uint32(pos), uint32(continueTarget))
 					}
 				}
 
@@ -2127,6 +2144,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				bindings := loopBindingNameSet(current.Left)
 				bindings[ITERATOR_VAR_NAME] = true
+				loopID := nextLoopID
+				nextLoopID++
+				fn.ValueChunk().EmitBytes(chunk.OP_STACK_MARK, uint8(loopID))
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_ENSURE_HEAP_SCOPE)
 				}
@@ -2146,7 +2166,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				fn.ValueChunk().EmitBytes(chunk.OP_GET_ITERATOR, ITERATOR_FOR_IN)
 				iteratorVariable, _ := symbolTable.findVariable(ITERATOR_VAR_NAME)
-				fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot))
+				fn.ValueChunk().EmitBytes(chunk.OP_DUP, chunk.OP_SET_LOCAL, uint8(iteratorVariable.slot), chunk.OP_STACK_MARK, uint8(loopID))
 				fn.ValueChunk().EmitBytes(chunk.OP_ITERATOR_NEXT, chunk.OP_JUMP_IF_TRUE, 0, 0, 0, 0)
 				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
 				if blockHasHeapVars(symbolTable.block) {
@@ -2161,34 +2181,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					generateByteCode(node, symbolTable, fn)
 				}
 
-				continuationStart := len(fn.ValueChunk().Code)
-				bodyLocals := bodyLocalVariableCount(symbolTable.block, bindings)
-				for range bodyLocals {
-					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-				}
-				fn.ValueChunk().EmitByte(chunk.OP_JUMP)
+				continueTarget := len(fn.ValueChunk().Code)
+				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_JUMP)
 				fn.ValueChunk().EmitUint32(jumpStart - 2)
-				loopEnd := uint32(len(fn.ValueChunk().Code))
-				fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
-				fn.ValueChunk().EmitByte(chunk.OP_POP) // pop the iterator object
-
-				boundLocals := 0
-				for name, variable := range symbolTable.block.vars {
-					if name != ITERATOR_VAR_NAME && bindings[name] && variable.scope != HEAP && variable.type_ != CATCH_PARAM {
-						boundLocals++
-					}
-				}
-				for range boundLocals {
-					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
-				}
-				cleanupEnd := uint32(len(fn.ValueChunk().Code))
+				normalStart := len(fn.ValueChunk().Code)
+				fn.ValueChunk().EmitBytes(chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID), chunk.OP_STACK_TRIM, uint8(loopID), chunk.OP_STACK_UNMARK, uint8(loopID))
+				fn.ValueChunk().PatchUint32(jumpStart, uint32(normalStart))
 				for _, breakpoint := range currentLoop().points {
 					pos := breakpoint.position
 					switch breakpoint.type_ {
 					case BREAKPOINT_BREAK:
-						fn.ValueChunk().PatchUint32(uint32(pos), cleanupEnd)
+						fn.ValueChunk().PatchUint32(uint32(pos), uint32(normalStart))
 					case BREAKPOINT_CONTINUE:
-						fn.ValueChunk().PatchUint32(uint32(pos), uint32(continuationStart))
+						fn.ValueChunk().PatchUint32(uint32(pos), uint32(continueTarget))
 					}
 				}
 
@@ -2718,39 +2723,37 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_IMPORT_DECLARATION:
 			{
-				generateByteCode(current.Source, symbolTable, fn)
-
-				fn.ValueChunk().EmitBytes(chunk.OP_IMPORT)
 			}
 		case parser.NODE_EXPORT_NAMED_DECLARATION:
 			{
-				generateByteCode(current.Declaration, symbolTable, fn)
-
-				declaration := current.Declaration
-
-				switch declaration.Type {
-				case parser.NODE_VARIABLE_DECLARATION:
-					{
-						declarator := declaration.Declarations[0]
-						v, _ := symbolTable.findVariable(declarator.Identifier.Name)
-						fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
-						withAstTracking(declarator.Identifier, fn, func() {
-
-							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(declarator.Identifier.Name))))
-							fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
-						})
-					}
-				case parser.NODE_FUNCTION_DECLARATION:
-					{
-						v, _ := symbolTable.findVariable(declaration.Identifier.Name)
-						fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL, uint8(v.slot))
-						withAstTracking(declaration.Identifier, fn, func() {
-							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(declaration.Identifier.Name))))
-							fn.ValueChunk().EmitByte(chunk.OP_EXPORT)
-						})
-
+				if current.Declaration != nil {
+					generateByteCode(current.Declaration, symbolTable, fn)
+				}
+			}
+		case parser.NODE_EXPORT_DEFAULT_DECLARATION:
+			{
+				if current.Declaration != nil {
+					generateByteCode(current.Declaration, symbolTable, fn)
+				} else if current.Expression != nil {
+					generateByteCode(current.Expression, symbolTable, fn)
+					if variable, found := DEFAULT_EXPORT_VARS[current]; found {
+						fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+						variable.declared = true
 					}
 				}
+			}
+		case parser.NODE_EXPORT_ALL_DECLARATION:
+			{
+			}
+		case parser.NODE_IMPORT_EXPRESSION:
+			{
+				if current.Source != nil {
+					generateByteCode(current.Source, symbolTable, fn)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+				}
+				fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(compilingModulePath))))
+				fn.ValueChunk().EmitByte(chunk.OP_DYNAMIC_IMPORT)
 			}
 		case parser.NODE_CHAIN_EXPRESSION:
 			{
@@ -3339,7 +3342,7 @@ func emitVarInitializers(symbolTable *FunctionScope, fn object.Callable) {
 				fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot), nameArg)
 			}
 		case LOCAL:
-			fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_LOCAL_SLOT, uint8(variable.slot))
 		case HEAP:
 			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
 		}

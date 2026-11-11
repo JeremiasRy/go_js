@@ -40,11 +40,14 @@ func SetScriptMode(isScript bool) {
 	scriptMode = isScript
 }
 
+var sharedGlobalObject value.Value
+
 func (vm *VM) ensureGlobalObject() value.Value {
-	if vm.globalObject == 0 {
-		vm.globalObject = value.EncodeHandle(heap.Allocate(native.NewGlobalObject()))
+	if sharedGlobalObject == 0 {
+		sharedGlobalObject = value.EncodeHandle(heap.Allocate(native.NewGlobalObject()))
 	}
-	return vm.globalObject
+	vm.globalObject = sharedGlobalObject
+	return sharedGlobalObject
 }
 
 type CallFrame struct {
@@ -106,7 +109,8 @@ type VM struct {
 	globalObject      value.Value
 	catchValues       map[int]value.Value
 
-	main bool
+	main      bool
+	loopMarks map[int][]int
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -123,6 +127,7 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		main:           main,
 		callCounts:     map[object.Callable]int{},
 		catchValues:    map[int]value.Value{},
+		loopMarks:      map[int][]int{},
 	}
 }
 
@@ -1415,6 +1420,9 @@ func (vm *VM) setMemberValueWithReceiver(objValue value.Value, key, v, receiver 
 	if proxy, ok := obj.(*native.ObjProxy); ok {
 		return vm.proxySet(proxy, key, v, receiver, strict)
 	}
+	if _, ok := obj.(*native.ObjModuleNamespace); ok {
+		return fmt.Errorf("Cannot assign to read only property")
+	}
 	if k, ok := vm.valueAsString(key); ok {
 		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
 	}
@@ -1602,6 +1610,11 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if re, ok := obj.(*native.ObjRegExp); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "lastIndex" {
 			return value.ValueFromFloat64(float64(re.LastIndex)), nil
+		}
+	}
+	if namespace, ok := obj.(*native.ObjModuleNamespace); ok {
+		if member, found := vm.moduleNamespaceMember(namespace, key); found {
+			return member, nil
 		}
 	}
 	if boxed, ok := obj.(*native.BoxedPrimitive); ok {
@@ -2701,7 +2714,23 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				rejectValue := promise.RejectValue
 				promise.HasRejection = false
 				if err := vm.throwValue(rejectValue, &f, &c, &ip); err != nil {
-					return value.UNDEFINED, err
+					if promise.Promise != nil {
+						vm.rejectPromise(promise.Promise, rejectValue)
+					}
+					vm.frameCount--
+					if vm.frameCount > 0 {
+						ip = f.returnIp
+						vm.stackTop = f.localStart
+						for _, v := range promise.CallerStack {
+							vm.push(v)
+						}
+						promise.CallerStack = nil
+						f = vm.currentFrame()
+						c = *f.fn.ValueChunk()
+					} else {
+						vm.stackTop = 0
+						return value.UNDEFINED, nil
+					}
 				}
 			}
 		}
@@ -2861,7 +2890,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 					updatedValue := newBigIntValue(new(big.Int).Add(b.Value, d))
 					if err := vm.setMemberValue(objValue, k, updatedValue); err != nil {
-						return value.UNDEFINED, err
+						errValue := vm.makeError("TypeError", err.Error())
+						if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+							return value.UNDEFINED, err
+						}
+						continue
 					}
 					if prefix {
 						vm.push(updatedValue)
@@ -2877,7 +2910,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				updated := n + delta
 				updatedValue := value.ValueFromFloat64(updated)
 				if err := vm.setMemberValue(objValue, k, updatedValue); err != nil {
-					return value.UNDEFINED, err
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
 				}
 				if prefix {
 					vm.push(updatedValue)
@@ -3951,6 +3988,28 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.stack[vm.stackTop] = v
 				vm.stackTop++
+			}
+		case chunk.OP_DEFINE_LOCAL_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				v := vm.pop()
+				if v == value.TAG_METHOD_HANDLE {
+					v = vm.pop()
+					vm.pop()
+				}
+				if v.IsObject() {
+					v = cloneFunctionValue(v, f.heapScope)
+				}
+				target := f.localStart + slot
+				for vm.stackTop <= target {
+					vm.stack[vm.stackTop] = value.UNDEFINED
+					vm.stackTop++
+				}
+				vm.stack[target] = v
+				if vm.stackTop <= target {
+					vm.stackTop = target + 1
+				}
 			}
 		case chunk.OP_GET_LOCAL_RAW:
 			{
@@ -5531,6 +5590,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						key := vm.pop()
 						target := vm.pop()
+						if target.IsObject() {
+							if targetObj, err := heap.GetObject(target.GetHandle()); err == nil {
+								if namespace, ok := targetObj.(*native.ObjModuleNamespace); ok {
+									vm.push(vm.moduleNamespaceDescriptor(namespace, key))
+									continue
+								}
+							}
+						}
 						if proxy, ok := vm.asProxy(target); ok {
 							result, err := vm.proxyGetOwnPropertyDescriptor(proxy, key)
 							if err != nil {
@@ -6209,6 +6276,21 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.push(boolValue(done))
 			}
+		case chunk.OP_ITERATOR_NEXT_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				iterator := vm.stack[f.localStart+slot]
+				done, err := vm.iteratorNext(iterator)
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(boolValue(done))
+			}
 		case chunk.OP_ITERATOR_CURRENT:
 			{
 				iterator := vm.peek()
@@ -6217,6 +6299,50 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, err
 				}
 				vm.push(current)
+			}
+		case chunk.OP_ITERATOR_CURRENT_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				iterator := vm.stack[f.localStart+slot]
+				current, err := vm.iteratorCurrent(iterator)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(current)
+			}
+		case chunk.OP_TRIM_STACK_SLOT:
+			{
+				slot := int(c.Code[ip])
+				ip++
+				target := f.localStart + slot + 1
+				if target < vm.stackTop {
+					vm.stackTop = target
+				}
+			}
+		case chunk.OP_STACK_MARK:
+			{
+				id := int(c.Code[ip])
+				ip++
+				vm.loopMarks[id] = append(vm.loopMarks[id], vm.stackTop)
+			}
+		case chunk.OP_STACK_TRIM:
+			{
+				id := int(c.Code[ip])
+				ip++
+				marks := vm.loopMarks[id]
+				if len(marks) > 0 {
+					vm.stackTop = marks[len(marks)-1]
+				}
+			}
+		case chunk.OP_STACK_UNMARK:
+			{
+				id := int(c.Code[ip])
+				ip++
+				marks := vm.loopMarks[id]
+				if len(marks) > 0 {
+					vm.loopMarks[id] = marks[:len(marks)-1]
+				}
 			}
 		case chunk.OP_ITERATOR_VALUE_OR_UNDEFINED:
 			{
@@ -7281,6 +7407,75 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				f = vm.currentFrame()
 				c = *f.fn.ValueChunk()
 				vm.push(yieldResult)
+			}
+		case chunk.OP_IMPORT_MODULE:
+			{
+				source := vm.pop()
+				pathString := ""
+				if source.IsObject() {
+					if sourceObj, err := heap.GetObject(source.GetHandle()); err == nil {
+						pathString = sourceObj.String()
+					}
+				}
+				result, err := vm.importModule(pathString, "")
+				if err != nil {
+					errValue := value.UNDEFINED
+					if thrown, ok := err.(*moduleThrownError); ok {
+						errValue = thrown.value
+					} else {
+						errValue = vm.errorValue(err)
+					}
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(result)
+			}
+		case chunk.OP_GET_MODULE_NAMESPACE:
+			{
+				source := vm.pop()
+				pathString := ""
+				if source.IsObject() {
+					if sourceObj, err := heap.GetObject(source.GetHandle()); err == nil {
+						pathString = sourceObj.String()
+					}
+				}
+				record, err := compiler.LoadModule(pathString, "")
+				if err != nil {
+					errValue := vm.makeError("SyntaxError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(vm.moduleNamespaceValue(record))
+			}
+		case chunk.OP_DYNAMIC_IMPORT:
+			{
+				parentValue := vm.pop()
+				specifierValue := vm.pop()
+				parent := ""
+				if parentValue.IsObject() {
+					if parentObj, err := heap.GetObject(parentValue.GetHandle()); err == nil {
+						parent = parentObj.String()
+					}
+				}
+				specifier, err := vm.toStringValue(specifierValue)
+				if err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				specifierString := ""
+				if specifier.IsObject() {
+					if specifierObj, err := heap.GetObject(specifier.GetHandle()); err == nil {
+						specifierString = specifierObj.String()
+					}
+				}
+				vm.push(vm.dynamicImport(specifierString, parent))
 			}
 		case chunk.OP_IMPORT:
 			{

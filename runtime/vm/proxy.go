@@ -252,6 +252,9 @@ func (vm *VM) deletePropertyValue(objValue, key value.Value) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if _, ok := obj.(*native.ObjModuleNamespace); ok {
+		return false, nil
+	}
 	if deletable, ok := obj.(object.Deletable); ok {
 		return deletable.Delete(key), nil
 	}

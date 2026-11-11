@@ -26,6 +26,7 @@ const (
 	OP_LOGICAL_OR
 	OP_LOGICAL_AND
 	OP_DEFINE_LOCAL
+	OP_DEFINE_LOCAL_SLOT
 	OP_GET_LOCAL
 	OP_SET_LOCAL
 	OP_POP_LOCAL
@@ -50,6 +51,12 @@ const (
 	OP_GET_ITERATOR // op <type>; 0 -> for..of (i.e values), 1 -> for..in (i.e keys/indexes)
 	OP_ITERATOR_NEXT
 	OP_ITERATOR_CURRENT
+	OP_ITERATOR_NEXT_SLOT
+	OP_ITERATOR_CURRENT_SLOT
+	OP_TRIM_STACK_SLOT
+	OP_STACK_MARK
+	OP_STACK_TRIM
+	OP_STACK_UNMARK
 	OP_TRY_BLOCK_START
 	OP_TRY_BLOCK_END
 	OP_TRY_FINALLY_START
@@ -77,6 +84,9 @@ const (
 	OP_YIELD_DELEGATE
 	OP_IMPORT
 	OP_EXPORT
+	OP_IMPORT_MODULE
+	OP_GET_MODULE_NAMESPACE
+	OP_DYNAMIC_IMPORT
 	OP_IN
 	OP_NOT
 	OP_NULL_COALESHING
@@ -159,6 +169,7 @@ var OpNames = map[uint8]string{
 	OP_GREATER_THAN:                     "OP_GREATER_THAN",
 	OP_LOGICAL_AND:                      "OP_LOGICAL_AND",
 	OP_LOGICAL_OR:                       "OP_LOGICAL_OR",
+	OP_DEFINE_LOCAL_SLOT:                "OP_DEFINE_LOCAL_SLOT",
 	OP_DEFINE_LOCAL:                     "OP_DEFINE_LOCAL",
 	OP_GET_LOCAL:                        "OP_GET_LOCAL",
 	OP_SET_LOCAL:                        "OP_SET_LOCAL",
@@ -182,6 +193,12 @@ var OpNames = map[uint8]string{
 	OP_PUSH_ELEMENT:                     "OP_PUSH_ELEMENT",
 	OP_PUSH_UNDEFINED:                   "OP_PUSH_UNDEFINED",
 	OP_GET_ITERATOR:                     "OP_GET_ITERATOR",
+	OP_ITERATOR_NEXT_SLOT:               "OP_ITERATOR_NEXT_SLOT",
+	OP_ITERATOR_CURRENT_SLOT:            "OP_ITERATOR_CURRENT_SLOT",
+	OP_TRIM_STACK_SLOT:                  "OP_TRIM_STACK_SLOT",
+	OP_STACK_MARK:                       "OP_STACK_MARK",
+	OP_STACK_TRIM:                       "OP_STACK_TRIM",
+	OP_STACK_UNMARK:                     "OP_STACK_UNMARK",
 	OP_ITERATOR_NEXT:                    "OP_ITERATOR_NEXT",
 	OP_ITERATOR_CURRENT:                 "OP_ITERATOR_CURRENT",
 	OP_TRY_BLOCK_START:                  "OP_TRY_BLOCK_START",
