@@ -592,8 +592,15 @@ func cloneFunctionValue(v value.Value, scope int) value.Value {
 
 func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget value.Value) (value.Value, error) {
 	instance := native.NewObject()
-	if fn, ok := callable.(*object.ObjFunction); ok && fn.Prototype.IsObject() {
-		instance.SetPrototypeValue(fn.Prototype)
+	if fn, ok := callable.(*object.ObjFunction); ok {
+		if fn.Prototype == value.UNDEFINED {
+			proto := native.NewObject()
+			proto.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("constructor"))), value.EncodeHandle(heap.Allocate(fn)))
+			fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
+		}
+		if fn.Prototype.IsObject() {
+			instance.SetPrototypeValue(fn.Prototype)
+		}
 	}
 	instanceValue := value.EncodeHandle(heap.Allocate(instance))
 	runner := NewVM(false, vm.output)
@@ -835,6 +842,18 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 		}
 	}
 	if obj.Type() == object.OBJ_NATIVE_FN {
+		if keyString, ok := vm.valueAsString(key); ok {
+			switch keyString {
+			case "call":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionCall())), nil
+			case "apply":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionApply())), nil
+			case "bind":
+				return value.EncodeHandle(heap.Allocate(native.NewFunctionBind())), nil
+			}
+		}
+	}
+	if _, ok := obj.(*native.ObjBoundFunction); ok {
 		if keyString, ok := vm.valueAsString(key); ok {
 			switch keyString {
 			case "call":
@@ -2872,6 +2891,38 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				switch fn := fn.(type) {
+				case *native.ObjBoundFunction:
+					{
+						args := vm.popN(argCount)
+						target := fn.Target
+						allArgs := append(append([]value.Value{}, fn.Args...), args...)
+						if targetObj, err := heap.GetObject(target.GetHandle()); err == nil {
+							if inner, ok := targetObj.(*native.ObjBoundFunction); ok {
+								target = inner.Target
+								allArgs = append(append([]value.Value{}, inner.Args...), allArgs...)
+							}
+						}
+						targetObj, err := heap.GetObject(target.GetHandle())
+						if err != nil {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						callable, ok := targetObj.(object.Callable)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						for _, arg := range allArgs {
+							vm.push(arg)
+						}
+						f, c = vm.Call(callable, &ip, vm.normalizeThis(callable, fn.This), len(allArgs), false)
+					}
 				case *native.ObjAsyncFunction:
 					{
 						fn = fn.Clone().(*native.ObjAsyncFunction)
@@ -3761,6 +3812,37 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 							continue
 						}
+						if bound, ok := obj.(*native.ObjBoundFunction); ok {
+							allArgs := append(append([]value.Value{}, bound.Args...), rest...)
+							boundTarget := bound.Target
+							if innerObj, err := heap.GetObject(boundTarget.GetHandle()); err == nil {
+								if inner, ok := innerObj.(*native.ObjBoundFunction); ok {
+									boundTarget = inner.Target
+									allArgs = append(append([]value.Value{}, inner.Args...), allArgs...)
+								}
+							}
+							targetObj, err := heap.GetObject(boundTarget.GetHandle())
+							if err != nil {
+								errValue := vm.makeError("TypeError", "Value is not callable")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							boundCallable, ok := targetObj.(object.Callable)
+							if !ok {
+								errValue := vm.makeError("TypeError", "Value is not callable")
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							for _, arg := range allArgs {
+								vm.push(arg)
+							}
+							f, c = vm.Call(boundCallable, &ip, vm.normalizeThis(boundCallable, bound.This), len(allArgs), false)
+							break
+						}
 						callable, ok := obj.(object.Callable)
 						if !ok {
 							switch nativeFn := obj.(type) {
@@ -3903,7 +3985,29 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							thisArg = args[0]
 							boundArgs = args[1:]
 						}
+						length := 0
+						name := ""
+						if targetObj, err := heap.GetObject(target.GetHandle()); err == nil {
+							if inner, ok := targetObj.(*native.ObjBoundFunction); ok {
+								target = inner.Target
+								thisArg = inner.This
+								boundArgs = append(append([]value.Value{}, inner.Args...), boundArgs...)
+								length = int(inner.GetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("length")))).AsNumber())
+								nameValue, _ := vm.valueAsString(inner.GetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("name")))))
+								name = nameValue
+							} else if fn, ok := targetObj.(*object.ObjFunction); ok {
+								length = fn.Length
+								name = fn.Name
+							}
+						}
+						if length > len(boundArgs) {
+							length -= len(boundArgs)
+						} else {
+							length = 0
+						}
 						bound := native.NewBoundFunction(target, thisArg, boundArgs)
+						bound.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("length"))), value.ValueFromFloat64(float64(length)))
+						bound.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("name"))), value.EncodeHandle(heap.Allocate(native.NewLightString("bound "+name))))
 						vm.push(value.EncodeHandle(heap.Allocate(bound)))
 					}
 				case *native.ParseInt:
