@@ -726,6 +726,16 @@ func (obj *ObjObject) SetMember(k, v value.Value) {
 	obj.Members[key] = obj.NewValueEntry(v)
 }
 
+func (obj *ObjObject) DefineNonConfigurableMember(k, v value.Value) {
+	key, ok := objectKeyString(k)
+	if !ok {
+		return
+	}
+	entry := obj.NewValueEntry(v)
+	entry.nonConfigurable = true
+	obj.Members[key] = entry
+}
+
 func (obj *ObjObject) NewValueEntry(v value.Value) ObjectValueEntry {
 	obj.init++
 	return ObjectValueEntry{Value: v, init: obj.init}

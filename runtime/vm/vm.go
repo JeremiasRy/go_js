@@ -30,6 +30,8 @@ const IS_HOT_PATH = 0
 var ROOT_SCRIPT_LOCATION string
 var globals = make([]value.Value, 30)
 var globalsCount = 0
+var globalVarSlots = map[string]int{}
+var globalVarNames = map[int]string{}
 var imports = make(map[string]value.Value)
 var scriptMode = true
 
@@ -605,6 +607,19 @@ func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
 	return vm.setMemberValueStrict(objValue, key, v, false)
 }
 
+func (vm *VM) syncGlobalVar(objValue, key, v value.Value) {
+	if vm.globalObject == 0 || objValue != vm.globalObject {
+		return
+	}
+	keyString, ok := vm.valueAsString(key)
+	if !ok {
+		return
+	}
+	if slot, found := globalVarSlots[keyString]; found {
+		globals[slot] = v
+	}
+}
+
 func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, strict bool) error {
 	if !objValue.IsObject() {
 		return fmt.Errorf("cannot set property on non-object")
@@ -713,10 +728,12 @@ func (vm *VM) setMemberValueStrict(objValue value.Value, key, v value.Value, str
 		if hashable, ok := obj.(object.Hashable); ok {
 			hashable.SetMember(key, v)
 		}
+		vm.syncGlobalVar(objValue, key, v)
 		return nil
 	}
 	if hashable, ok := obj.(object.Hashable); ok {
 		hashable.SetMember(key, v)
+		vm.syncGlobalVar(objValue, key, v)
 		return nil
 	}
 	return fmt.Errorf("cannot set property on this value")
@@ -2497,6 +2514,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 				globals[global] = v
+				if name, ok := globalVarNames[int(global)]; ok {
+					globalValue := vm.ensureGlobalObject()
+					globalObj, _ := heap.GetObject(globalValue.GetHandle())
+					globalObj.(object.Hashable).SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString(name))), v)
+				}
 			}
 		case chunk.OP_SET_GLOBAL_NAMED:
 			{
@@ -2523,7 +2545,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				globals[global] = v
 				globalValue := vm.ensureGlobalObject()
 				globalObj, _ := heap.GetObject(globalValue.GetHandle())
-				globalObj.(object.Hashable).SetMember(name, v)
+				if nameString, ok := vm.valueAsString(name); ok {
+					globalVarSlots[nameString] = int(global)
+					globalVarNames[int(global)] = nameString
+				}
+				if obj, ok := globalObj.(*native.ObjObject); ok {
+					obj.DefineNonConfigurableMember(name, v)
+				} else {
+					globalObj.(object.Hashable).SetMember(name, v)
+				}
 			}
 		case chunk.OP_POP_LOCAL:
 			{
@@ -2830,6 +2860,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						queue.Enqueue(object.Callback{Fn: fn, ThisCtx: value.UNDEFINED, Stack: []value.Value{v}}, queue.MICRO_TASK, false)
 						vm.push(value.UNDEFINED)
+					}
+				case *native.ReflectDeleteProperty:
+					{
+						key := vm.pop()
+						target := vm.pop()
+						result := false
+						if target.IsObject() {
+							if obj, err := heap.GetObject(target.GetHandle()); err == nil {
+								if d, ok := obj.(object.Deletable); ok {
+									result = d.Delete(key)
+								}
+							}
+						}
+						vm.push(boolValue(result))
 					}
 				case *native.MapGet:
 					{

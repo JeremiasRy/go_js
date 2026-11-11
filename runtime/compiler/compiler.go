@@ -27,6 +27,7 @@ type VariableType uint8
 const (
 	CONST VariableType = iota
 	LET
+	VAR
 	FUNCTION
 	METHOD
 	FOR
@@ -530,6 +531,15 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
+func defineReflectObject(main *object.ObjFunction, symbolTable *FunctionScope) {
+	reflectObject := native.NewReflectObject()
+	handle := heap.Allocate(reflectObject)
+
+	symbolTable.addVariable(native.REFLECT_OBJECT_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
 func defineSymbolConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	symbolCtor := native.NewSymbolConstructor()
 	handle := heap.Allocate(symbolCtor)
@@ -616,6 +626,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineParseFloat(setup, global)
 	defineNumberConstructor(setup, global)
 	defineJSONObject(setup, global)
+	defineReflectObject(setup, global)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
@@ -721,6 +732,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						variable.allocated = true
 					}
 				}
+
+				emitVarInitializers(symbolTable, fn)
 
 				for _, node := range current.Body {
 					generateByteCode(node, symbolTable, fn)
@@ -937,6 +950,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 				}
 
+				emitVarInitializers(symbolTable, fn)
+
 				if fn.GetArity() > 0 {
 					heapVars := []int{}
 
@@ -1021,6 +1036,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
 				}
 
+				emitVarInitializers(symbolTable, fn)
+
 				if len(current.Params) > 0 {
 					heapVars := []int{}
 
@@ -1080,6 +1097,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if symbolTable.hasHeapVars {
 					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
+
+				emitVarInitializers(symbolTable, newFn)
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -1415,11 +1434,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					if current.Initializer != nil {
 						generateByteCode(current.Initializer, symbolTable, fn)
 
-					} else if current.Initializer == nil && variable.type_ != FOR {
+					} else if current.Initializer == nil && variable.type_ != FOR && variable.type_ != VAR {
 						fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 					}
 
 					variable.declared = true
+
+					if variable.type_ == VAR && current.Initializer == nil {
+						return
+					}
 
 					// for of loop i.e for (const item of arr) {}
 					if variable.type_ == FOR {
@@ -1441,6 +1464,18 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							}
 							variable.init = true
 							fn.ValueChunk().EmitByte(op)
+						}
+						return
+					}
+
+					if variable.type_ == VAR {
+						switch variable.scope {
+						case GLOBAL:
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+						case LOCAL:
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
+						case HEAP:
+							emitHeapAccess(fn, chunk.OP_SET_HEAP_VAR, symbolTable, variable)
 						}
 						return
 					}
@@ -2315,6 +2350,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					method.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
 
+				emitVarInitializers(symbolTable, method)
+
 				for _, node := range function.BodyNode.Body {
 					generateByteCode(node, symbolTable, method)
 				}
@@ -2855,6 +2892,36 @@ func patternValueNode(node *parser.Node) *parser.Node {
 	return node
 }
 
+func emitVarInitializers(symbolTable *FunctionScope, fn object.Callable) {
+	for _, variable := range symbolTable.varOrder {
+		if variable.type_ != VAR || variable.declared {
+			continue
+		}
+		variable.declared = true
+		fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
+		switch variable.scope {
+		case GLOBAL:
+			if module {
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+			} else {
+				var name string
+				for n, v := range symbolTable.vars {
+					if v == variable {
+						name = n
+						break
+					}
+				}
+				nameArg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot), nameArg)
+			}
+		case LOCAL:
+			fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+		case HEAP:
+			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
+		}
+	}
+}
+
 func emitSetVariable(fn object.Callable, symbolTable *FunctionScope, variable *Variable) {
 	var op uint8
 	switch variable.scope {
@@ -3195,7 +3262,7 @@ func initializerLocalVariableCount(node *parser.Node, symbolTable *FunctionScope
 	count := 0
 	for _, declaration := range node.Declarations {
 		if declaration.Identifier.Type == parser.NODE_IDENTIFIER {
-			if variable, _ := symbolTable.findVariable(declaration.Identifier.Name); variable != nil && variable.scope != HEAP && variable.type_ != CATCH_PARAM {
+			if variable, _ := symbolTable.findVariable(declaration.Identifier.Name); variable != nil && variable.scope != HEAP && variable.type_ != CATCH_PARAM && variable.type_ != VAR {
 				count++
 			}
 		}

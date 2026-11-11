@@ -242,9 +242,15 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		kind := LET
 		if current.Kind == parser.KIND_DECLARATION_CONST {
 			kind = CONST
+		} else if current.Kind == parser.KIND_DECLARATION_VAR {
+			kind = VAR
 		}
 		for _, declaration := range current.Declarations {
-			addPatternVariables(declaration.Identifier, kind, symbolTable)
+			if kind == VAR {
+				addVarPatternVariables(declaration.Identifier, symbolTable)
+			} else {
+				addPatternVariables(declaration.Identifier, kind, symbolTable)
+			}
 			prePass(declaration.Initializer, symbolTable)
 		}
 
@@ -518,6 +524,44 @@ func moveUndeclaredToGlobal(symbolTable *FunctionScope) {
 		if variable.undeclared && variable.scope != GLOBAL {
 			delete(symbolTable.vars, name)
 			global.addVariable(name, LET, true, nil)
+		}
+	}
+}
+
+func addVarPatternVariables(node *parser.Node, symbolTable *FunctionScope) {
+	if node == nil {
+		return
+	}
+	switch node.Type {
+	case parser.NODE_IDENTIFIER:
+		if _, found := symbolTable.vars[node.Name]; found {
+			return
+		}
+		slot := 0
+		if symbolTable.tableScope == LOCAL {
+			slot = functionSlotCount(symbolTable)
+		}
+		variable := &Variable{scope: symbolTable.tableScope, type_: VAR, slot: slot, owner: symbolTable}
+		symbolTable.vars[node.Name] = variable
+		symbolTable.varOrder = append(symbolTable.varOrder, variable)
+	case parser.NODE_ASSIGNMENT_PATTERN:
+		addVarPatternVariables(node.Left, symbolTable)
+	case parser.NODE_REST_ELEMENT:
+		addVarPatternVariables(node.Argument, symbolTable)
+	case parser.NODE_ARRAY_PATTERN:
+		for _, element := range node.Elements {
+			addVarPatternVariables(element, symbolTable)
+		}
+	case parser.NODE_OBJECT_PATTERN:
+		for _, property := range node.Properties {
+			switch property.Type {
+			case parser.NODE_PROPERTY:
+				if value, ok := property.Value.(*parser.Node); ok {
+					addVarPatternVariables(value, symbolTable)
+				}
+			case parser.NODE_REST_ELEMENT:
+				addVarPatternVariables(property.Argument, symbolTable)
+			}
 		}
 	}
 }
