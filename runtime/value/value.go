@@ -24,6 +24,7 @@ const (
 	TAG_METHOD_HANDLE  Value = QNAN | (1 << 4)
 	TAG_ARGUMENT_START Value = QNAN | (1 << 5)
 	EMPTY_ARRAY_ITEM   Value = QNAN | (1 << 6)
+	UNINITIALIZED      Value = QNAN | (1 << 7)
 )
 
 type ValueChunk struct {
@@ -145,7 +146,7 @@ func (v Value) IsType(tag Value) bool {
 }
 
 func (v Value) IsNumber() bool {
-	return !v.IsObject() && !v.IsBoolean() && !v.IsType(NULL) && !v.IsType(UNDEFINED) && !v.IsType(TAG_METHOD_HANDLE)
+	return !v.IsObject() && !v.IsBoolean() && !v.IsType(NULL) && !v.IsType(UNDEFINED) && !v.IsType(TAG_METHOD_HANDLE) && !v.IsType(UNINITIALIZED) && !v.IsType(EMPTY_ARRAY_ITEM) && !v.IsType(TAG_ARGUMENT_START)
 }
 
 func (v Value) IsInteger() bool {

@@ -100,9 +100,11 @@ func initArrayPrototype() {
 	shift := value.EncodeHandle(heap.Allocate(NewArrayShift()))
 	reverse := value.EncodeHandle(heap.Allocate(NewArrayReverse()))
 	fill := value.EncodeHandle(heap.Allocate(NewArrayFill()))
+	toString := value.EncodeHandle(heap.Allocate(NewArrayToString()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
+	p.SetMember(KEY_TOSTRING, toString)
 	p.SetMember(KEY_FILTER, filter)
 	p.SetMember(KEY_PUSH, push)
 	p.SetMember(KEY_FOREACH, forEach)

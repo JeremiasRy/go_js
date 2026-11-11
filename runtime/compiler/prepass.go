@@ -194,29 +194,13 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		}
 
 	case parser.NODE_VARIABLE_DECLARATION:
+		kind := LET
+		if current.Kind == parser.KIND_DECLARATION_CONST {
+			kind = CONST
+		}
 		for _, declaration := range current.Declarations {
-			ident := declaration.Identifier
-			switch ident.Type {
-			case parser.NODE_ARRAY_PATTERN:
-				for _, node := range ident.Elements {
-					symbolTable.addVariable(node.Name, LET, false, nil)
-				}
-			case parser.NODE_OBJECT_PATTERN:
-				for _, node := range ident.Properties {
-					switch node.Type {
-					case parser.NODE_PROPERTY:
-						symbolTable.addVariable(node.Value.(*parser.Node).Name, LET, false, nil)
-					case parser.NODE_REST_ELEMENT:
-						symbolTable.addVariable(node.Argument.Name, LET, false, nil)
-					}
-				}
-			default:
-				for _, declaration := range current.Declarations {
-					name := declaration.Identifier.Name
-					symbolTable.addVariable(name, LET, false, nil)
-					prePass(declaration.Initializer, symbolTable)
-				}
-			}
+			addPatternVariables(declaration.Identifier, kind, symbolTable)
+			prePass(declaration.Initializer, symbolTable)
 		}
 
 	case parser.NODE_RETURN_STATEMENT:
@@ -326,6 +310,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		{
 			prePass(current.Block, symbolTable)
 			prePass(current.Handler, symbolTable)
+			prePass(current.Finalizer, symbolTable)
 		}
 	case parser.NODE_CATCH_CLAUSE:
 		{
@@ -425,8 +410,66 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		{
 			prePass(current.Test, symbolTable)
 			prePass(current.Consequent, symbolTable)
+			for _, node := range current.ConsequentSlice {
+				prePass(node, symbolTable)
+			}
 		}
-
+	case parser.NODE_DO_WHILE_STATEMENT:
+		{
+			prePass(current.BodyNode, symbolTable)
+			symbolTable.enterBlockScope(current.BodyNode)
+			prePass(current.Test, symbolTable)
+			symbolTable.exitBlockScope()
+		}
+	case parser.NODE_LABELED_STATEMENT:
+		prePass(current.BodyNode, symbolTable)
+	case parser.NODE_SEQUENCE_EXPRESSION:
+		for _, expression := range current.Expressions {
+			prePass(expression, symbolTable)
+		}
+	case parser.NODE_UNARY_EXPRESSION:
+		prePass(current.Argument, symbolTable)
+	case parser.NODE_UPDATE_EXPRESSION:
+		prePass(current.Argument, symbolTable)
+	case parser.NODE_CONDITIONAL_EXPRESSION:
+		prePass(current.Test, symbolTable)
+		prePass(current.Consequent, symbolTable)
+		prePass(current.Alternate, symbolTable)
+	case parser.NODE_YIELD_EXPRESSION:
+		prePass(current.Argument, symbolTable)
+	case parser.NODE_SPREAD_ELEMENT:
+		prePass(current.Argument, symbolTable)
+	case parser.NODE_REST_ELEMENT:
+		prePass(current.Argument, symbolTable)
 	}
 
+}
+
+func addPatternVariables(node *parser.Node, kind VariableType, symbolTable *FunctionScope) {
+	if node == nil {
+		return
+	}
+	switch node.Type {
+	case parser.NODE_IDENTIFIER:
+		symbolTable.addVariable(node.Name, kind, false, nil)
+	case parser.NODE_ASSIGNMENT_PATTERN:
+		addPatternVariables(node.Left, kind, symbolTable)
+	case parser.NODE_REST_ELEMENT:
+		addPatternVariables(node.Argument, kind, symbolTable)
+	case parser.NODE_ARRAY_PATTERN:
+		for _, element := range node.Elements {
+			addPatternVariables(element, kind, symbolTable)
+		}
+	case parser.NODE_OBJECT_PATTERN:
+		for _, property := range node.Properties {
+			switch property.Type {
+			case parser.NODE_PROPERTY:
+				if value, ok := property.Value.(*parser.Node); ok {
+					addPatternVariables(value, kind, symbolTable)
+				}
+			case parser.NODE_REST_ELEMENT:
+				addPatternVariables(property.Argument, kind, symbolTable)
+			}
+		}
+	}
 }

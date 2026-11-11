@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 	"unsafe"
 )
 
@@ -49,14 +50,22 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 	cf.thisCtx = this
 }
 
+type JSException struct {
+	Name    string
+	Message string
+}
+
+func (e *JSException) Error() string {
+	return e.Message
+}
+
 type ExceptionState struct {
 	stackTop int
 	jumpTo   int
 	frame    int
 }
 
-type VM struct {
-	frames         []CallFrame
+type VM struct {	frames         []CallFrame
 	frameCount     int
 	stack          []value.Value
 	stackTop       int
@@ -65,6 +74,9 @@ type VM struct {
 	output         *strings.Builder
 
 	exports *native.ObjObject
+
+	completionValue value.Value
+	globalObject    value.Value
 
 	main bool
 }
@@ -342,15 +354,549 @@ func truthyValue(v value.Value) bool {
 		}
 	}
 
-	if v.IsType(value.NULL) || v.IsType(value.UNDEFINED) {
+	if v.IsType(value.NULL) || v.IsType(value.UNDEFINED) || v.IsType(value.UNINITIALIZED) {
 		return false
 	}
 
 	if v.IsNumber() {
-		return v.AsNumber() > 0
+		n := v.AsNumber()
+		return n != 0 && !math.IsNaN(n)
 	}
 
 	return value.TRUE == v
+}
+
+func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
+	obj, err := heap.GetObject(fn.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	callable, ok := obj.(object.Callable)
+	if !ok {
+		return value.UNDEFINED, fmt.Errorf("value is not callable")
+	}
+	runner := NewVM(false, vm.output)
+	for _, arg := range args {
+		runner.push(arg)
+	}
+	f, c := runner.Call(callable, nil, this, len(args), false)
+	return runner.run(f, c)
+}
+
+func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
+	if !objValue.IsObject() {
+		return fmt.Errorf("cannot set property on non-object")
+	}
+	obj, err := heap.GetObject(objValue.GetHandle())
+	if err != nil {
+		return err
+	}
+	if k, ok := vm.valueAsString(key); ok {
+		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
+	}
+	if arr, ok := obj.(*native.ObjArr); ok && key.IsInteger() {
+		i := int(key.AsNumber())
+		if i >= 0 {
+			arr.SetElementAt(i, v)
+			return nil
+		}
+	}
+	if hashable, ok := obj.(object.Hashable); ok {
+		hashable.SetMember(key, v)
+		return nil
+	}
+	return fmt.Errorf("cannot set property on this value")
+}
+
+func (vm *VM) getMemberValue(objValue value.Value, key value.Value) (value.Value, error) {
+	obj, err := heap.GetObject(objValue.GetHandle())
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	switch obj := obj.(type) {
+	case *native.ObjArr:
+		if key.IsInteger() {
+			i := int(key.AsNumber())
+			if i >= 0 && i < len(obj.Values()) {
+				return obj.GetElementAt(i), nil
+			}
+			return value.UNDEFINED, nil
+		}
+		if key.IsObject() {
+			keyObj, _ := heap.GetObject(key.GetHandle())
+			if keyObj.Type() == object.OBJ_STRING {
+				return obj.GetMember(key), nil
+			}
+		}
+		return obj.GetMember(key), nil
+	case *native.LightString:
+		return native.NewObjString(obj.String()).GetMember(key), nil
+	case *native.ObjStringBuilder:
+		return native.NewObjString(obj.String()).GetMember(key), nil
+	case object.Hashable:
+		return obj.GetMember(key), nil
+	}
+	return value.UNDEFINED, nil
+}
+
+func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
+	if !v.IsObject() {
+		return v, nil
+	}
+	order := []string{"valueOf", "toString"}
+	if hint == "string" {
+		order = []string{"toString", "valueOf"}
+	}
+	foundMethod := false
+	for _, name := range order {
+		method, err := vm.getMemberValue(v, value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+		if err != nil || !method.IsObject() {
+			continue
+		}
+		methodObj, err := heap.GetObject(method.GetHandle())
+		if err != nil {
+			continue
+		}
+		if _, ok := methodObj.(object.Callable); !ok {
+			continue
+		}
+		foundMethod = true
+		result, err := vm.callValue(method, v, nil)
+		if err == nil {
+			if !result.IsObject() {
+				return result, nil
+			}
+			if _, ok := vm.valueAsString(result); ok {
+				return result, nil
+			}
+		}
+	}
+
+	obj, _ := heap.GetObject(v.GetHandle())
+	switch obj := obj.(type) {
+	case *native.ObjArr:
+		return vm.arrayToString(obj)
+	case *native.LightString:
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(obj.String()))), nil
+	case *native.ObjString:
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(obj.String()))), nil
+	case *native.ObjStringBuilder:
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(obj.String()))), nil
+	}
+	if foundMethod {
+		return value.UNDEFINED, fmt.Errorf("cannot convert object to primitive value")
+	}
+	return value.EncodeHandle(heap.Allocate(native.NewLightString("[object Object]"))), nil
+}
+
+func (vm *VM) arrayToString(arr *native.ObjArr) (value.Value, error) {
+	parts := make([]string, len(arr.Values()))
+	for i, item := range arr.Values() {
+		if item == value.UNDEFINED || item == value.NULL || item == value.EMPTY_ARRAY_ITEM {
+			parts[i] = ""
+			continue
+		}
+		s, err := vm.toStringValue(item)
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		str, _ := vm.valueAsString(s)
+		parts[i] = str
+	}
+	return value.EncodeHandle(heap.Allocate(native.NewLightString(strings.Join(parts, ",")))), nil
+}
+
+func (vm *VM) toNumber(v value.Value) (float64, error) {
+	if s, ok := vm.valueAsString(v); ok {
+		return parseNumericString(s)
+	}
+	if v.IsObject() {
+		primitive, err := vm.toPrimitive(v, "number")
+		if err != nil {
+			return 0, err
+		}
+		return vm.toNumber(primitive)
+	}
+	if v.IsBoolean() {
+		if v == value.TRUE {
+			return 1, nil
+		}
+		return 0, nil
+	}
+	if v.IsType(value.NULL) {
+		return 0, nil
+	}
+	if v.IsType(value.UNDEFINED) {
+		return math.NaN(), nil
+	}
+	if v.IsNumber() {
+		return v.AsNumber(), nil
+	}
+	return math.NaN(), nil
+}
+
+func parseNumericString(str string) (float64, error) {
+	s := strings.TrimFunc(str, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '\uFEFF'
+	})
+	if s == "" {
+		return 0, nil
+	}
+	switch s {
+	case "Infinity", "+Infinity":
+		return math.Inf(1), nil
+	case "-Infinity":
+		return math.Inf(-1), nil
+	}
+	if strings.HasPrefix(s, "0x") || strings.HasPrefix(s, "0X") {
+		n, err := strconv.ParseUint(s[2:], 16, 64)
+		if err != nil {
+			return math.NaN(), nil
+		}
+		return float64(n), nil
+	}
+	if strings.HasPrefix(s, "0o") || strings.HasPrefix(s, "0O") {
+		n, err := strconv.ParseUint(s[2:], 8, 64)
+		if err != nil {
+			return math.NaN(), nil
+		}
+		return float64(n), nil
+	}
+	if strings.HasPrefix(s, "0b") || strings.HasPrefix(s, "0B") {
+		n, err := strconv.ParseUint(s[2:], 2, 64)
+		if err != nil {
+			return math.NaN(), nil
+		}
+		return float64(n), nil
+	}
+	n, err := strconv.ParseFloat(s, 64)
+	if err != nil {
+		return math.NaN(), nil
+	}
+	return n, nil
+}
+
+func formatNumber(n float64) string {
+	if math.IsNaN(n) {
+		return "NaN"
+	}
+	if math.IsInf(n, 1) {
+		return "Infinity"
+	}
+	if math.IsInf(n, -1) {
+		return "-Infinity"
+	}
+	if n == 0 {
+		return "0"
+	}
+	abs := math.Abs(n)
+	if abs >= 1e-6 && abs < 1e21 {
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	}
+	s := strconv.FormatFloat(n, 'e', -1, 64)
+	if idx := strings.IndexByte(s, 'e'); idx >= 0 {
+		mantissa, exponent := s[:idx], s[idx+1:]
+		exponent = strings.TrimPrefix(exponent, "+")
+		exp, _ := strconv.Atoi(exponent)
+		exponent = strconv.Itoa(exp)
+		if exp >= 0 {
+			exponent = "+" + exponent
+		}
+		s = mantissa + "e" + exponent
+	}
+	return s
+}
+
+func (vm *VM) toStringValue(v value.Value) (value.Value, error) {
+	if s, ok := vm.valueAsString(v); ok {
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(s))), nil
+	}
+	if v.IsObject() {
+		if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+			if arr, ok := obj.(*native.ObjArr); ok {
+				return vm.arrayToString(arr)
+			}
+		}
+		primitive, err := vm.toPrimitive(v, "string")
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		return vm.toStringValue(primitive)
+	}
+	if v.IsBoolean() {
+		if v == value.TRUE {
+			return value.EncodeHandle(heap.Allocate(native.NewLightString("true"))), nil
+		}
+		return value.EncodeHandle(heap.Allocate(native.NewLightString("false"))), nil
+	}
+	if v.IsType(value.UNDEFINED) {
+		return value.EncodeHandle(heap.Allocate(native.NewLightString("undefined"))), nil
+	}
+	if v.IsType(value.NULL) {
+		return value.EncodeHandle(heap.Allocate(native.NewLightString("null"))), nil
+	}
+	if v.IsNumber() {
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(formatNumber(v.AsNumber())))), nil
+	}
+	return v, nil
+}
+
+func (vm *VM) toInt32(v value.Value) (int32, error) {
+	n, err := vm.toNumber(v)
+	if err != nil {
+		return 0, err
+	}
+	return int32(uint32(int64(n))), nil
+}
+
+func (vm *VM) toUint32(v value.Value) (uint32, error) {
+	n, err := vm.toNumber(v)
+	if err != nil {
+		return 0, err
+	}
+	return uint32(int64(n)), nil
+}
+
+func (vm *VM) typeofValue(v value.Value) string {
+	if v.IsObject() {
+		obj, _ := heap.GetObject(v.GetHandle())
+		switch obj.(type) {
+		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ObjNativeFn:
+			return "function"
+		case *native.LightString, *native.ObjString, *native.ObjStringBuilder:
+			return "string"
+		}
+		return "object"
+	}
+	if v.IsBoolean() {
+		return "boolean"
+	}
+	if v.IsType(value.UNDEFINED) {
+		return "undefined"
+	}
+	if v.IsType(value.NULL) {
+		return "object"
+	}
+	return "number"
+}
+
+func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
+	if !objValue.IsObject() {
+		return false, nil
+	}
+	if !ctor.IsObject() {
+		return false, fmt.Errorf("right-hand side of instanceof is not callable")
+	}
+	ctorObj, err := heap.GetObject(ctor.GetHandle())
+	if err != nil {
+		return false, err
+	}
+	var prototype value.Value
+	switch ctorObj := ctorObj.(type) {
+	case *object.ObjFunction:
+		prototype = ctorObj.Prototype
+	case *native.ObjClass:
+		prototype = ctorObj.GetMember(native.KEY_PROTO)
+	}
+	if !prototype.IsObject() {
+		return false, fmt.Errorf("function has non-object prototype in instanceof check")
+	}
+	protoPtr := heap.GetPointer(prototype.GetHandle())
+	current := objValue
+	for current.IsObject() {
+		obj, err := heap.GetObject(current.GetHandle())
+		if err != nil {
+			return false, err
+		}
+		hashable, ok := obj.(object.Hashable)
+		if !ok {
+			break
+		}
+		next := hashable.GetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("__proto__"))))
+		if next == value.UNDEFINED {
+			next = hashable.GetMember(native.KEY_PROTO)
+		}
+		if !next.IsObject() {
+			break
+		}
+		if heap.GetPointer(next.GetHandle()) == protoPtr {
+			return true, nil
+		}
+		current = next
+	}
+	return false, nil
+}
+
+func boolValue(b bool) value.Value {
+	if b {
+		return value.TRUE
+	}
+	return value.FALSE
+}
+
+func (vm *VM) valueAsString(v value.Value) (string, bool) {
+	if !v.IsObject() {
+		return "", false
+	}
+	obj, err := heap.GetObject(v.GetHandle())
+	if err != nil {
+		return "", false
+	}
+	switch obj := obj.(type) {
+	case *native.LightString:
+		return obj.String(), true
+	case *native.ObjString:
+		return obj.String(), true
+	case *native.ObjStringBuilder:
+		return obj.String(), true
+	}
+	return "", false
+}
+
+func strictEquals(a, b value.Value) bool {
+	if a.IsObject() && b.IsObject() {
+		as, aString := valueAsStringStatic(a)
+		bs, bString := valueAsStringStatic(b)
+		if aString && bString {
+			return as == bs
+		}
+		if aString != bString {
+			return false
+		}
+		return heap.GetPointer(a.GetHandle()) == heap.GetPointer(b.GetHandle())
+	}
+	if a.IsNumber() && b.IsNumber() {
+		an, bn := a.AsNumber(), b.AsNumber()
+		if math.IsNaN(an) || math.IsNaN(bn) {
+			return false
+		}
+		return an == bn
+	}
+	return a == b
+}
+
+func valueAsStringStatic(v value.Value) (string, bool) {
+	if !v.IsObject() {
+		return "", false
+	}
+	obj, err := heap.GetObject(v.GetHandle())
+	if err != nil {
+		return "", false
+	}
+	switch obj := obj.(type) {
+	case *native.LightString:
+		return obj.String(), true
+	case *native.ObjString:
+		return obj.String(), true
+	case *native.ObjStringBuilder:
+		return obj.String(), true
+	}
+	return "", false
+}
+
+func (vm *VM) lessThan(a, b value.Value) (bool, error) {
+	pa, err := vm.toPrimitive(a, "number")
+	if err != nil {
+		return false, err
+	}
+	pb, err := vm.toPrimitive(b, "number")
+	if err != nil {
+		return false, err
+	}
+	as, aString := vm.valueAsString(pa)
+	bs, bString := vm.valueAsString(pb)
+	if aString && bString {
+		return as < bs, nil
+	}
+	an, err := vm.toNumber(pa)
+	if err != nil {
+		return false, err
+	}
+	bn, err := vm.toNumber(pb)
+	if err != nil {
+		return false, err
+	}
+	if math.IsNaN(an) || math.IsNaN(bn) {
+		return false, nil
+	}
+	return an < bn, nil
+}
+
+func (vm *VM) looseEquals(a, b value.Value) (bool, error) {
+	if strictEquals(a, b) {
+		return true, nil
+	}
+	if (a.IsType(value.NULL) && b.IsType(value.UNDEFINED)) || (a.IsType(value.UNDEFINED) && b.IsType(value.NULL)) {
+		return true, nil
+	}
+	if a.IsType(value.NULL) || a.IsType(value.UNDEFINED) || b.IsType(value.NULL) || b.IsType(value.UNDEFINED) {
+		return false, nil
+	}
+	if a.IsObject() && b.IsObject() {
+		return false, nil
+	}
+	if a.IsObject() {
+		primitive, err := vm.toPrimitive(a, "number")
+		if err != nil {
+			return false, err
+		}
+		return vm.looseEquals(primitive, b)
+	}
+	if b.IsObject() {
+		primitive, err := vm.toPrimitive(b, "number")
+		if err != nil {
+			return false, err
+		}
+		return vm.looseEquals(a, primitive)
+	}
+	if a.IsBoolean() || b.IsBoolean() {
+		an, err := vm.toNumber(a)
+		if err != nil {
+			return false, err
+		}
+		bn, err := vm.toNumber(b)
+		if err != nil {
+			return false, err
+		}
+		return an == bn, nil
+	}
+	_, aString := vm.valueAsString(a)
+	_, bString := vm.valueAsString(b)
+	if aString != bString {
+		an, err := vm.toNumber(a)
+		if err != nil {
+			return false, err
+		}
+		bn, err := vm.toNumber(b)
+		if err != nil {
+			return false, err
+		}
+		return an == bn, nil
+	}
+	return false, nil
+}
+
+func (vm *VM) throwValue(v value.Value, f *CallFrame, c *value.ValueChunk, ip *int) error {
+	if len(vm.exceptionStack) == 0 {
+		return &JSException{Name: "Error", Message: native.String(v)}
+	}
+	state := vm.exceptionStack[len(vm.exceptionStack)-1]
+	vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+
+	vm.frameCount = state.frame
+	*f = vm.currentFrame()
+	*c = *f.fn.ValueChunk()
+	*ip = state.jumpTo
+	vm.stackTop = state.stackTop
+	vm.push(v)
+	return nil
+}
+
+func (vm *VM) makeError(name, message string) value.Value {
+	err := native.NewError()
+	err.SetMember(native.KEY_MESSAGE, value.EncodeHandle(heap.Allocate(native.NewLightString(message))))
+	err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
+	return value.EncodeHandle(heap.Allocate(err))
 }
 
 func (vm *VM) popN(n int) []value.Value {
@@ -477,7 +1023,11 @@ Run:
 		_, err := vm.run(f, c)
 
 		if err != nil {
-			diagnostic.Fatal("runtime", "Error", err)
+			name := "Error"
+			if jsErr, ok := err.(*JSException); ok {
+				name = jsErr.Name
+			}
+			diagnostic.Fatal("runtime", name, err)
 		}
 		callback, errDequeue = queue.Dequeue()
 	}
@@ -584,6 +1134,75 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				vm.pop()
 			}
+		case chunk.OP_DUP:
+			{
+				vm.push(vm.peek())
+			}
+		case chunk.OP_DUP2:
+			{
+				a := vm.peekN(1)
+				b := vm.peekN(0)
+				vm.push(a)
+				vm.push(b)
+			}
+		case chunk.OP_POP_BELOW2:
+			{
+				v := vm.pop()
+				vm.pop()
+				vm.pop()
+				vm.push(v)
+			}
+		case chunk.OP_SET_MEMBER_RETURN:
+			{
+				v := vm.pop()
+				k := vm.pop()
+				objValue := vm.pop()
+				if err := vm.setMemberValue(objValue, k, v); err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(v)
+			}
+		case chunk.OP_SET_MEMBER_KEEP:
+			{
+				v := vm.pop()
+				keep := vm.pop()
+				k := vm.pop()
+				objValue := vm.pop()
+				if err := vm.setMemberValue(objValue, k, v); err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(keep)
+			}
+		case chunk.OP_MEMBER_UPDATE:
+			{
+				prefix := c.Code[ip] == 1
+				ip++
+				delta := 1.0
+				if c.Code[ip] == 1 {
+					delta = -1
+				}
+				ip++
+				k := vm.pop()
+				objValue := vm.pop()
+				old, err := vm.getMemberValue(objValue, k)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				n, err := vm.toNumber(old)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				updated := n + delta
+				updatedValue := value.ValueFromFloat64(updated)
+				if err := vm.setMemberValue(objValue, k, updatedValue); err != nil {
+					return value.UNDEFINED, err
+				}
+				if prefix {
+					vm.push(updatedValue)
+				} else {
+					vm.push(value.ValueFromFloat64(n))
+				}
+			}
 		case chunk.OP_PUSH_CURRENT:
 			{
 				vm.push(vm.peek())
@@ -593,178 +1212,239 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				b := vm.pop()
 				a := vm.pop()
 
-				vm.push(vm.concatenate(a, b))
+				pa, err := vm.toPrimitive(a, "number")
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				pb, err := vm.toPrimitive(b, "number")
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				as, aIsString := vm.valueAsString(pa)
+				bs, bIsString := vm.valueAsString(pb)
+				if aIsString || bIsString {
+					if !aIsString {
+						asValue, err := vm.toStringValue(pa)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						as, _ = vm.valueAsString(asValue)
+					}
+					if !bIsString {
+						bsValue, err := vm.toStringValue(pb)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						bs, _ = vm.valueAsString(bsValue)
+					}
+					vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(as + bs))))
+				} else {
+					an, err := vm.toNumber(pa)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					bn, err := vm.toNumber(pb)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					vm.push(value.ValueFromFloat64(an + bn))
+				}
 			}
 		case chunk.OP_B_AND:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result := float64(int32(uint32((b.AsNumber()))) & int32(uint32(a.AsNumber())))
-
-				vm.push(value.ValueFromFloat64(result))
+				ai, err := vm.toInt32(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bi, err := vm.toInt32(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(ai & bi)))
 			}
 		case chunk.OP_B_OR:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result := float64(int32(uint32((b.AsNumber()))) | int32(uint32(a.AsNumber())))
-
-				vm.push(value.ValueFromFloat64(result))
+				ai, err := vm.toInt32(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bi, err := vm.toInt32(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(ai | bi)))
 			}
 		case chunk.OP_B_XOR:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				result := float64(int32(uint32((b.AsNumber()))) ^ int32(uint32(a.AsNumber())))
-
-				vm.push(value.ValueFromFloat64(result))
+				ai, err := vm.toInt32(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bi, err := vm.toInt32(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(ai ^ bi)))
 			}
 		case chunk.OP_SUBTRACT:
 			{
 				b := vm.pop()
 				a := vm.pop()
-
-				vm.push(vm.subtract(a, b))
+				an, err := vm.toNumber(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bn, err := vm.toNumber(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(an - bn))
 			}
 		case chunk.OP_DIVIDE:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				// type checks required
-				vm.push(value.ValueFromFloat64(a.AsNumber() / b.AsNumber()))
+				an, err := vm.toNumber(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bn, err := vm.toNumber(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(an / bn))
 			}
 		case chunk.OP_MULTIPLY:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				// type checks required
-				vm.push(value.ValueFromFloat64(a.AsNumber() * b.AsNumber()))
+				an, err := vm.toNumber(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bn, err := vm.toNumber(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(an * bn))
 			}
 		case chunk.OP_EXPONENTIATION:
 			{
-
 				b := vm.pop()
 				a := vm.pop()
-				// type checks required
-				vm.push(value.ValueFromFloat64(math.Pow(a.AsNumber(), b.AsNumber())))
+				an, err := vm.toNumber(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bn, err := vm.toNumber(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(math.Pow(an, bn)))
 			}
 		case chunk.OP_MODULO:
 			{
 				b := vm.pop()
 				a := vm.pop()
-				// type checks required
-				vm.push(value.ValueFromFloat64(math.Mod(a.AsNumber(), b.AsNumber())))
+				an, err := vm.toNumber(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bn, err := vm.toNumber(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(math.Mod(an, bn)))
 			}
 		case chunk.OP_LESS_THAN:
 			{
 				b := vm.pop()
 				a := vm.pop()
-
-				if a.AsNumber() < b.AsNumber() {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
+				result, err := vm.lessThan(a, b)
+				if err != nil {
+					return value.UNDEFINED, err
 				}
+				vm.push(boolValue(result))
 			}
 		case chunk.OP_LESS_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
-
-				if a.AsNumber() <= b.AsNumber() {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
+				result, err := vm.lessThan(b, a)
+				if err != nil {
+					return value.UNDEFINED, err
 				}
+				vm.push(boolValue(!result))
 			}
 		case chunk.OP_GREATER_THAN:
 			{
 				b := vm.pop()
 				a := vm.pop()
-
-				if a.AsNumber() > b.AsNumber() {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
+				result, err := vm.lessThan(b, a)
+				if err != nil {
+					return value.UNDEFINED, err
 				}
+				vm.push(boolValue(result))
 			}
 		case chunk.OP_GREATER_THAN_EQUAL:
 			{
 				b := vm.pop()
 				a := vm.pop()
-
-				if a.AsNumber() >= b.AsNumber() {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
+				result, err := vm.lessThan(a, b)
+				if err != nil {
+					return value.UNDEFINED, err
 				}
+				vm.push(boolValue(!result))
 			}
 		case chunk.OP_EQUALS:
 			{
 				b := vm.pop()
 				a := vm.pop()
-
-				if looseComparison(a, b) {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
+				result, err := vm.looseEquals(a, b)
+				if err != nil {
+					return value.UNDEFINED, err
 				}
+				vm.push(boolValue(result))
+			}
+		case chunk.OP_NOT_EQUALS:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				result, err := vm.looseEquals(a, b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(boolValue(!result))
 			}
 		case chunk.OP_STRICT_EQUALS:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				if b.IsObject() && a.IsObject() {
-					if heap.GetPointer(b.GetHandle()) == heap.GetPointer(a.GetHandle()) {
-						vm.push(value.TRUE)
-					} else {
-						vm.push(value.FALSE)
-					}
-				} else if a == b {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
-				}
+				vm.push(boolValue(strictEquals(a, b)))
 			}
 		case chunk.OP_STRICT_NOT_EQUALS:
 			{
 				b := vm.pop()
 				a := vm.pop()
 
-				if b.IsObject() && a.IsObject() {
-					if heap.GetPointer(b.GetHandle()) != heap.GetPointer(a.GetHandle()) {
-						vm.push(value.TRUE)
-					} else {
-						vm.push(value.FALSE)
-					}
-				} else if a != b {
-					vm.push(value.TRUE)
-				} else {
-					vm.push(value.FALSE)
-				}
+				vm.push(boolValue(!strictEquals(a, b)))
 			}
 		case chunk.OP_LOGICAL_OR:
 			{
 				right := vm.pop()
 				left := vm.pop()
 
-				if right.IsBoolean() && left.IsBoolean() {
-					if truthyValue(left) {
-						vm.push(value.TRUE)
-					} else {
-						vm.push(right)
-					}
-				}
-
 				if truthyValue(left) {
 					vm.push(left)
 				} else {
-					if truthyValue(right) {
-						vm.push(right)
-					} else {
-						vm.push(value.FALSE)
-					}
+					vm.push(right)
 				}
 			}
 		case chunk.OP_LOGICAL_AND:
@@ -772,19 +1452,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				right := vm.pop()
 				left := vm.pop()
 
-				if right.IsBoolean() && left.IsBoolean() {
-					if truthyValue(left) && truthyValue(right) {
-						vm.push(value.TRUE)
-					} else {
-						vm.push(value.FALSE)
-					}
-					continue
-				}
-
 				if truthyValue(left) {
-					if truthyValue(right) {
-						vm.push(right)
-					}
+					vm.push(right)
 				} else {
 					vm.push(left)
 				}
@@ -816,6 +1485,127 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				} else {
 					vm.push(left)
 				}
+			}
+		case chunk.OP_TO_NUMBER:
+			{
+				n, err := vm.toNumber(vm.pop())
+				if err != nil {
+					errValue := vm.makeError("TypeError", err.Error())
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(value.ValueFromFloat64(n))
+			}
+		case chunk.OP_TO_STRING:
+			{
+				s, err := vm.toStringValue(vm.pop())
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(s)
+			}
+		case chunk.OP_TYPEOF:
+			{
+				vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(vm.typeofValue(vm.pop())))))
+			}
+		case chunk.OP_VOID:
+			{
+				vm.pop()
+				vm.push(value.UNDEFINED)
+			}
+		case chunk.OP_BITWISE_NOT:
+			{
+				n, err := vm.toInt32(vm.pop())
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(^n)))
+			}
+		case chunk.OP_LEFT_SHIFT:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				ai, err := vm.toInt32(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bi, err := vm.toUint32(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(ai << (bi & 0x1f))))
+			}
+		case chunk.OP_RIGHT_SHIFT:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				ai, err := vm.toInt32(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bi, err := vm.toUint32(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(ai >> (bi & 0x1f))))
+			}
+		case chunk.OP_UNSIGNED_RIGHT_SHIFT:
+			{
+				b := vm.pop()
+				a := vm.pop()
+				ai, err := vm.toUint32(a)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				bi, err := vm.toUint32(b)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(value.ValueFromFloat64(float64(ai >> (bi & 0x1f))))
+			}
+		case chunk.OP_DELETE:
+			{
+				k := vm.pop()
+				objValue := vm.pop()
+				result := true
+				if objValue.IsObject() {
+					obj, _ := heap.GetObject(objValue.GetHandle())
+					if d, ok := obj.(object.Deletable); ok {
+						result = d.Delete(k)
+					}
+				}
+				vm.push(boolValue(result))
+			}
+		case chunk.OP_INSTANCEOF:
+			{
+				ctor := vm.pop()
+				objValue := vm.pop()
+				result, err := vm.instanceOf(objValue, ctor)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				vm.push(boolValue(result))
+			}
+		case chunk.OP_SAVE_COMPLETION:
+			{
+				vm.completionValue = vm.pop()
+			}
+		case chunk.OP_RESTORE_COMPLETION:
+			{
+				vm.push(vm.completionValue)
+			}
+		case chunk.OP_PUSH_UNINITIALIZED:
+			{
+				vm.push(value.UNINITIALIZED)
+			}
+		case chunk.OP_PUSH_GLOBAL_OBJECT:
+			{
+				if vm.globalObject == 0 {
+					vm.globalObject = value.EncodeHandle(heap.Allocate(native.NewGlobalObject()))
+				}
+				vm.push(vm.globalObject)
 			}
 		case chunk.OP_NEGATE:
 			{
@@ -864,6 +1654,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if truthyValue(v) {
+					ip = jump
+				}
+			}
+		case chunk.OP_JUMP_IF_NULLISH:
+			{
+				v := vm.pop()
+				jump := c.ReadInt(&ip)
+
+				if v == value.NULL || v == value.UNDEFINED {
 					ip = jump
 				}
 			}
@@ -1125,8 +1924,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.pop() // pop this context
 				}
 
-				if objValue == value.UNDEFINED {
-					vm.push(value.UNDEFINED)
+				if objValue == value.UNDEFINED || objValue == value.NULL {
+					errValue := vm.makeError("TypeError", "Cannot read properties of null")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+
+				if objValue == value.UNINITIALIZED {
+					errValue := vm.makeError("ReferenceError", "Cannot access uninitialized variable")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
 					continue
 				}
 
@@ -1516,6 +2326,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 						vm.push(fn.Join(arr.(*native.ObjArr), s))
 					}
+				case *native.ArrayToString:
+					{
+						arr, _ := heap.GetObject(thisCtx.GetHandle())
+						vm.push(fn.ToString(arr.(*native.ObjArr)))
+					}
 				case *native.ArrayShift:
 					{
 						arr, _ := heap.GetObject(thisCtx.GetHandle())
@@ -1723,8 +2538,54 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 			}
+		case chunk.OP_CALL_OPTIONAL:
+			fallthrough
+		case chunk.OP_CALL_CALLEE_FIRST:
+			{
+				optional := code == chunk.OP_CALL_OPTIONAL
+				argCount := int(c.Code[ip])
+				ip++
+				spread := c.Code[ip]
+				ip++
+
+				args := vm.popN(argCount)
+				callee := vm.pop()
+				thisCtx := value.UNDEFINED
+				if callee == value.TAG_METHOD_HANDLE {
+					callee = vm.pop()
+					thisCtx = vm.pop()
+				}
+				if optional && (callee == value.UNDEFINED || callee == value.NULL) {
+					vm.push(value.UNDEFINED)
+					continue
+				}
+				obj, err := heap.GetObject(callee.GetHandle())
+				if err != nil {
+					errValue := vm.makeError("TypeError", "Value is not callable")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				fn, ok := obj.(object.Callable)
+				if !ok {
+					errValue := vm.makeError("TypeError", "Value is not callable")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				for _, arg := range args {
+					vm.push(arg)
+				}
+				calledWithSpread := spread == 1
+				f, c = vm.Call(fn, &ip, thisCtx, argCount, calledWithSpread)
+			}
 		case chunk.OP_RETURN:
 			{
+				for len(vm.exceptionStack) > 0 && vm.exceptionStack[len(vm.exceptionStack)-1].frame >= vm.frameCount {
+					vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
+				}
 				if promise, ok := f.fn.(*native.ObjAsyncFunction); ok {
 					ip = f.returnIp
 					value := value.UNDEFINED
@@ -2001,14 +2862,29 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		case chunk.OP_THROW:
 			{
 				err := vm.pop()
-				exceptionState := vm.exceptionStack[len(vm.exceptionStack)-1]
+				if len(vm.exceptionStack) == 0 {
+					if err.IsObject() {
+						obj, _ := heap.GetObject(err.GetHandle())
+						if e, ok := obj.(*native.ObjError); ok {
+							name := "Error"
+							if n := e.GetMember(native.KEY_NAME); n != value.UNDEFINED {
+								if ns, ok := vm.valueAsString(n); ok {
+									name = ns
+								}
+							}
+							return value.UNDEFINED, &JSException{Name: name, Message: native.String(err)}
+						}
+					}
+					return value.UNDEFINED, &JSException{Name: "Error", Message: native.String(err)}
+				}
+				state := vm.exceptionStack[len(vm.exceptionStack)-1]
 				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
 
-				vm.frameCount = exceptionState.frame
+				vm.frameCount = state.frame
 				f = vm.currentFrame()
 				c = *f.fn.ValueChunk()
-				ip = exceptionState.jumpTo
-				vm.stackTop = exceptionState.stackTop
+				ip = state.jumpTo
+				vm.stackTop = state.stackTop
 				vm.push(err)
 			}
 		case chunk.OP_AWAIT:

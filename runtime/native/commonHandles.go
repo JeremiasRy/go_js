@@ -44,6 +44,7 @@ var (
 
 	// error
 	KEY_MESSAGE value.Value
+	KEY_NAME    value.Value
 
 	// generator
 	KEY_THROW  value.Value
@@ -94,6 +95,7 @@ func createCommonHandles() {
 	KEY_CTOR = value.EncodeHandle(heap.Allocate(NewLightString("constructor")))
 
 	KEY_MESSAGE = value.EncodeHandle(heap.Allocate(NewLightString("message")))
+	KEY_NAME = value.EncodeHandle(heap.Allocate(NewLightString("name")))
 
 	KEY_THROW = value.EncodeHandle(heap.Allocate(NewLightString("throw")))
 	KEY_NEXT = value.EncodeHandle(heap.Allocate(NewLightString("next")))

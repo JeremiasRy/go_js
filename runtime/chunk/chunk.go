@@ -71,6 +71,30 @@ const (
 	OP_SPREAD
 	OP_CREATE_REST_OBJECT // op <len of exluded> <...excluded constant slot>
 	OP_SET_FROM_SPREAD
+	OP_DUP
+	OP_DUP2
+	OP_SET_MEMBER_RETURN
+	OP_SET_MEMBER_KEEP
+	OP_POP_BELOW2
+	OP_TO_NUMBER
+	OP_TO_STRING
+	OP_TYPEOF
+	OP_VOID
+	OP_BITWISE_NOT
+	OP_LEFT_SHIFT
+	OP_RIGHT_SHIFT
+	OP_UNSIGNED_RIGHT_SHIFT
+	OP_DELETE
+	OP_NOT_EQUALS
+	OP_INSTANCEOF
+	OP_SAVE_COMPLETION
+	OP_RESTORE_COMPLETION
+	OP_MEMBER_UPDATE
+	OP_PUSH_UNINITIALIZED
+	OP_PUSH_GLOBAL_OBJECT
+	OP_JUMP_IF_NULLISH
+	OP_CALL_OPTIONAL
+	OP_CALL_CALLEE_FIRST
 )
 
 var OpNames = map[uint8]string{
@@ -142,4 +166,28 @@ var OpNames = map[uint8]string{
 	OP_B_AND:                           "OP_B_AND",
 	OP_B_OR:                            "OP_B_OR",
 	OP_B_XOR:                           "OP_B_XOR",
+	OP_DUP:                             "OP_DUP",
+	OP_DUP2:                            "OP_DUP2",
+	OP_SET_MEMBER_RETURN:               "OP_SET_MEMBER_RETURN",
+	OP_SET_MEMBER_KEEP:                 "OP_SET_MEMBER_KEEP",
+	OP_POP_BELOW2:                      "OP_POP_BELOW2",
+	OP_TO_NUMBER:                       "OP_TO_NUMBER",
+	OP_TO_STRING:                       "OP_TO_STRING",
+	OP_TYPEOF:                          "OP_TYPEOF",
+	OP_VOID:                            "OP_VOID",
+	OP_BITWISE_NOT:                     "OP_BITWISE_NOT",
+	OP_LEFT_SHIFT:                      "OP_LEFT_SHIFT",
+	OP_RIGHT_SHIFT:                     "OP_RIGHT_SHIFT",
+	OP_UNSIGNED_RIGHT_SHIFT:            "OP_UNSIGNED_RIGHT_SHIFT",
+	OP_DELETE:                          "OP_DELETE",
+	OP_NOT_EQUALS:                      "OP_NOT_EQUALS",
+	OP_INSTANCEOF:                      "OP_INSTANCEOF",
+	OP_SAVE_COMPLETION:                 "OP_SAVE_COMPLETION",
+	OP_RESTORE_COMPLETION:              "OP_RESTORE_COMPLETION",
+	OP_MEMBER_UPDATE:                   "OP_MEMBER_UPDATE",
+	OP_PUSH_UNINITIALIZED:              "OP_PUSH_UNINITIALIZED",
+	OP_PUSH_GLOBAL_OBJECT:              "OP_PUSH_GLOBAL_OBJECT",
+	OP_JUMP_IF_NULLISH:                 "OP_JUMP_IF_NULLISH",
+	OP_CALL_OPTIONAL:                   "OP_CALL_OPTIONAL",
+	OP_CALL_CALLEE_FIRST:               "OP_CALL_CALLEE_FIRST",
 }

@@ -1180,6 +1180,7 @@ func (p *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 			node.Cases = append(node.Cases, cur)
 
 			cur.Consequent = &Node{}
+			cur.ConsequentSlice = []*Node{}
 			p.next(false)
 			if isCase {
 				test, err := p.parseExpression("", nil)
@@ -1209,6 +1210,7 @@ func (p *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 			}
 
 			cur.Consequent = stmt
+			cur.ConsequentSlice = append(cur.ConsequentSlice, stmt)
 		}
 		sawDefault = false
 	}

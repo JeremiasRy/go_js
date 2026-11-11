@@ -18,6 +18,7 @@ type ObjFunction struct {
 	Chunk     *value.ValueChunk
 	Arity     int
 	HeapScope int
+	Prototype value.Value
 	rest      bool
 	arguments bool
 }

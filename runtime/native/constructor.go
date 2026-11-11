@@ -6,6 +6,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"math"
 	"time"
 )
 
@@ -88,6 +89,15 @@ func NewObject() *ObjObject {
 	obj := &ObjObject{Members: map[string]ObjectValueEntry{}}
 
 	obj.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	return obj
+}
+
+func NewGlobalObject() *ObjObject {
+	obj := NewObject()
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("undefined"))), value.UNDEFINED)
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("NaN"))), value.STANDARD_NAN)
+	inf := value.ValueFromFloat64(math.Inf(1))
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("Infinity"))), inf)
 	return obj
 }
 

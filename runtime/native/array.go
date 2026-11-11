@@ -92,6 +92,24 @@ func (oa *ObjArr) Keys() []value.Value {
 	return arr
 }
 
+type ArrayToString struct {
+	ObjNativeFn
+}
+
+func NewArrayToString() *ArrayToString {
+	t := &ArrayToString{}
+	t.name = "toString"
+	return t
+}
+
+func (*ArrayToString) ToString(arr *ObjArr) value.Value {
+	parts := make([]string, len(arr.items))
+	for i, item := range arr.items {
+		parts[i] = String(item)
+	}
+	return value.EncodeHandle(heap.Allocate(NewLightString(strings.Join(parts, ","))))
+}
+
 type ArrayForEach struct {
 	ObjNativeFn
 }

@@ -78,6 +78,10 @@ type Hashable interface {
 	HasOwn(prop value.Value) bool
 }
 
+type Deletable interface {
+	Delete(k value.Value) bool
+}
+
 type Callable interface {
 	Object
 	ValueChunk() *value.ValueChunk
