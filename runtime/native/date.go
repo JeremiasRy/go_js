@@ -20,7 +20,7 @@ func NewNow() *Now {
 }
 
 func (*Now) Now() value.Value {
-	return value.Value(math.Float64bits(float64(time.Now().UnixMilli())))
+	return value.ValueFromFloat64(float64(time.Now().UnixMilli()))
 }
 
 type DateConstructor struct {
