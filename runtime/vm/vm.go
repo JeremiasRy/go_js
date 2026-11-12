@@ -1446,6 +1446,27 @@ func (vm *VM) setMemberValueWithReceiver(objValue value.Value, key, v, receiver 
 	if k, ok := vm.valueAsString(key); ok {
 		key = value.EncodeHandle(heap.Allocate(native.NewLightString(k)))
 	}
+	if keyString, ok := vm.valueAsString(key); ok && keyString == "__proto__" {
+		if own, ok := obj.(interface {
+			GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
+			SetPrototypeValue(value.Value)
+			PrototypeValue() value.Value
+			Extensible() bool
+		}); ok {
+			if _, found := own.GetOwnEntry(key); !found {
+				if v == value.NULL || v.IsObject() {
+					if own.Extensible() {
+						own.SetPrototypeValue(v)
+					} else if strict {
+						return fmt.Errorf("Cannot set prototype of non-extensible object")
+					}
+				} else if strict {
+					return fmt.Errorf("Object prototype may only be an Object or null")
+				}
+				return nil
+			}
+		}
+	}
 	if fn, ok := obj.(*object.ObjFunction); ok {
 		if keyString, ok := vm.valueAsString(key); ok {
 			if keyString == "prototype" {
@@ -1626,6 +1647,16 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	}
 	if proxy, ok := obj.(*native.ObjProxy); ok {
 		return vm.proxyGet(proxy, objValue, key, receiver)
+	}
+	if keyString, ok := vm.valueAsString(key); ok && keyString == "__proto__" {
+		if own, ok := obj.(interface {
+			GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
+			PrototypeValue() value.Value
+		}); ok {
+			if _, found := own.GetOwnEntry(key); !found {
+				return own.PrototypeValue(), nil
+			}
+		}
 	}
 	if re, ok := obj.(*native.ObjRegExp); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "lastIndex" {
@@ -5342,9 +5373,51 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.ToString:
 					{
-						this, _ := heap.GetObject(thisCtx.GetHandle())
-						handle := heap.Allocate(native.NewObjString(fn.ToString(this)))
-						vm.push(value.EncodeHandle(handle))
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(native.ObjectToStringTag(thisCtx)))))
+					}
+				case *native.IsPrototypeOf:
+					{
+						args := vm.popN(argCount)
+						result := false
+						if len(args) > 0 && args[0].IsObject() {
+							current := args[0]
+							for current.IsObject() {
+								currentObj, err := heap.GetObject(current.GetHandle())
+								if err != nil {
+									break
+								}
+								p, ok := currentObj.(interface{ PrototypeValue() value.Value })
+								if !ok {
+									break
+								}
+								current = p.PrototypeValue()
+								if !current.IsObject() {
+									break
+								}
+								if heap.GetPointer(current.GetHandle()) == heap.GetPointer(thisCtx.GetHandle()) {
+									result = true
+									break
+								}
+							}
+						}
+						vm.push(boolValue(result))
+					}
+				case *native.PropertyIsEnumerable:
+					{
+						args := vm.popN(argCount)
+						result := false
+						if len(args) > 0 && thisCtx.IsObject() {
+							if obj, err := heap.GetObject(thisCtx.GetHandle()); err == nil {
+								if o, ok := obj.(interface {
+									GetOwnEntry(value.Value) (native.ObjectValueEntry, bool)
+								}); ok {
+									if entry, found := o.GetOwnEntry(args[0]); found {
+										result = entry.Enumerable()
+									}
+								}
+							}
+						}
+						vm.push(boolValue(result))
 					}
 				case *native.Log:
 					{
@@ -5578,9 +5651,34 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					vm.push(fn.Now())
 				case *native.Create:
 					{
-						arg := vm.pop()
-						o := native.NewObjectFromObject(arg)
-						vm.push(value.EncodeHandle(heap.Allocate(o)))
+						args := vm.popN(argCount)
+						proto := value.NULL
+						if len(args) > 0 && args[0] != value.UNDEFINED {
+							proto = args[0]
+						}
+						o := native.NewObjectFromObject(proto)
+						result := value.EncodeHandle(heap.Allocate(o))
+						if len(args) > 1 && args[1].IsObject() {
+							if descObj, err := heap.GetObject(args[1].GetHandle()); err == nil {
+								if descriptors, ok := descObj.(*native.ObjObject); ok {
+									definer := &native.ObjectDefineProperty{}
+									for _, item := range native.ObjectEnumerableKeys(descriptors) {
+										key := native.ObjectPropertyKeyValue(item)
+										desc, err := vm.getMemberValue(args[1], key)
+										if err != nil {
+											return value.UNDEFINED, err
+										}
+										if definer.Define(result, key, desc) == value.UNDEFINED {
+											errValue := vm.makeError("TypeError", "Cannot define property")
+											if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+												return value.UNDEFINED, err
+											}
+										}
+									}
+								}
+							}
+						}
+						vm.push(result)
 					}
 				case *native.ObjectMethod:
 					{

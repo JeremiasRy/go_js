@@ -72,6 +72,8 @@ func initObjectPrototype() {
 	p.SetMember(KEY_TOSTRING, handle)
 	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(heap.Allocate(NewHasOwnProperty())))
 	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("valueOf"))), value.EncodeHandle(heap.Allocate(NewObjectValueOf())))
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isPrototypeOf"))), value.EncodeHandle(heap.Allocate(NewIsPrototypeOf())))
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("propertyIsEnumerable"))), value.EncodeHandle(heap.Allocate(NewPropertyIsEnumerable())))
 
 	PROTOTYPE_OBJECT = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(

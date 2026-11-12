@@ -527,6 +527,9 @@ func (*ObjectDefineProperty) Define(target, key, descriptor value.Value) value.V
 	}
 	entry, found := o.Members[keyString]
 	if !found {
+		if !o.Extensible() {
+			return value.UNDEFINED
+		}
 		entry.init = o.nextInit()
 		entry.nonWritable = true
 		entry.nonEnumerable = true
@@ -838,6 +841,18 @@ func (*ObjectValues) Values(o value.Value) []value.Value {
 		}
 
 		switch obj := obj.(type) {
+		case *LightString:
+			r := []value.Value{}
+			for _, unit := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(UTF16FromUnits([]uint16{unit})))))
+			}
+			return r
+		case *ObjString:
+			r := []value.Value{}
+			for _, unit := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(UTF16FromUnits([]uint16{unit})))))
+			}
+			return r
 		case *ObjObject:
 			{
 				r := []value.Value{}
@@ -898,6 +913,18 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 		}
 
 		switch obj := obj.(type) {
+		case *LightString:
+			r := []value.Value{}
+			for i := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(strconv.Itoa(i)))))
+			}
+			return r
+		case *ObjString:
+			r := []value.Value{}
+			for i := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(strconv.Itoa(i)))))
+			}
+			return r
 		case *ObjObject:
 			{
 				r := []value.Value{}
@@ -962,4 +989,70 @@ func OwnPropertyKeys(target value.Value) []value.Value {
 		result = append(result, value.EncodeHandle(heap.Allocate(NewLightString(item.Key))))
 	}
 	return result
+}
+
+type IsPrototypeOf struct {
+	ObjNativeFn
+}
+
+func NewIsPrototypeOf() *IsPrototypeOf {
+	i := &IsPrototypeOf{}
+	i.name = "isPrototypeOf"
+	return i
+}
+
+type PropertyIsEnumerable struct {
+	ObjNativeFn
+}
+
+func NewPropertyIsEnumerable() *PropertyIsEnumerable {
+	p := &PropertyIsEnumerable{}
+	p.name = "propertyIsEnumerable"
+	return p
+}
+
+func ObjectToStringTag(v value.Value) string {
+	if v.IsObject() {
+		obj, err := heap.GetObject(v.GetHandle())
+		if err == nil {
+			switch obj.(type) {
+			case *ObjArr:
+				return "[object Array]"
+			case *ObjRegExp:
+				return "[object RegExp]"
+			case *DateObject:
+				return "[object Date]"
+			case *ObjError:
+				return "[object Error]"
+			case *Map:
+				return "[object Map]"
+			case *Set:
+				return "[object Set]"
+			case *ObjPromise:
+				return "[object Promise]"
+			case *object.ObjFunction, *ObjAsyncFunction, *ObjGenerator, *ObjBoundFunction, *ObjNativeFn:
+				return "[object Function]"
+			case *ObjSymbol:
+				return "[object Symbol]"
+			case *LightString, *ObjString, *ObjStringBuilder:
+				return "[object String]"
+			case *BoxedPrimitive:
+				return ObjectToStringTag(obj.(*BoxedPrimitive).Primitive)
+			}
+		}
+		return "[object Object]"
+	}
+	if v == value.UNDEFINED {
+		return "[object Undefined]"
+	}
+	if v == value.NULL {
+		return "[object Null]"
+	}
+	if v.IsBoolean() {
+		return "[object Boolean]"
+	}
+	if v.IsNumber() {
+		return "[object Number]"
+	}
+	return "[object Object]"
 }
