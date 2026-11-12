@@ -219,9 +219,7 @@ func (s *jsonStringifier) serialize(key string, holder value.Value, indent strin
 		}
 		items := make([]string, obj.Length())
 		for i := 0; i < obj.Length(); i++ {
-			childHolder := native.NewObjectHash()
-			childHolder.SetMember(jsonKey("0"), arrayAt(obj, i))
-			item, err := s.serialize("0", value.EncodeHandle(heap.Allocate(childHolder)), nextIndent)
+			item, err := s.serialize(strconv.Itoa(i), val, nextIndent)
 			if err != nil {
 				return "", err
 			}
@@ -250,9 +248,7 @@ func (s *jsonStringifier) serialize(key string, holder value.Value, indent strin
 		}
 		parts := []string{}
 		for _, key := range keys {
-			childHolder := native.NewObjectHash()
-			childHolder.SetMember(jsonKey(key), obj.GetMember(jsonKey(key)))
-			item, err := s.serialize(key, value.EncodeHandle(heap.Allocate(childHolder)), nextIndent)
+			item, err := s.serialize(key, val, nextIndent)
 			if err != nil {
 				return "", err
 			}
