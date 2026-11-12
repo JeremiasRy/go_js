@@ -18,6 +18,7 @@ import (
 
 type ModuleLinkError struct {
 	Message string
+	Class   string
 }
 
 func (e *ModuleLinkError) Error() string {
@@ -501,6 +502,22 @@ func compileModuleRecord(record *ModuleRecord) error {
 	return nil
 }
 
+func dependencyLoadError(record *ModuleRecord, visited map[*ModuleRecord]bool) error {
+	if record == nil || visited[record] {
+		return nil
+	}
+	visited[record] = true
+	for _, dependency := range record.Dependencies {
+		if dependency.LoadErr != nil {
+			return dependency.LoadErr
+		}
+		if err := dependencyLoadError(dependency, visited); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func compileModuleGraph(ast *parser.Node) (*ModuleRecord, error) {
 	moduleRecords = map[string]*ModuleRecord{}
 	entryPath := path.Clean(entryFilePath)
@@ -539,6 +556,11 @@ func compileModuleGraph(ast *parser.Node) (*ModuleRecord, error) {
 			continue
 		}
 		linkModuleImports(record)
+		if record == entry && record.LinkErr == nil {
+			if loadErr := dependencyLoadError(record, map[*ModuleRecord]bool{}); loadErr != nil {
+				record.LinkErr = &ModuleLinkError{Message: loadErr.Error(), Class: "Error"}
+			}
+		}
 		if record == entry && record.LinkErr != nil {
 			return entry, record.LinkErr
 		}
