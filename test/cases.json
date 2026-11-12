@@ -36,6 +36,7 @@
         { "file": "negative-scripts/16-getter-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
         { "file": "negative-scripts/17-proxy-get-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
         { "file": "negative-scripts/70-json-circular.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
-        { "file": "negative-scripts/71-json-bigint.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" }
+        { "file": "negative-scripts/71-json-bigint.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/73-array-reduce-empty.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" }
     ]
 }
