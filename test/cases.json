@@ -13,6 +13,11 @@
         "module-top-level-await.js": ["module"],
         "31-module-meta-null.js": ["module"]
     },
+    "expectedOutputs": {
+        "109-host-missing-requestanimationframe.js": "function\n",
+        "111-host-missing-node-require.js": "function\n",
+        "119-host-missing-temporal.js": "object\n"
+    },
     "negative": [
         { "file": "negative-scripts/duplicate-lexical-binding.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/const-without-initializer.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
