@@ -135,3 +135,7 @@ func NewResolve() *Resolve {
 	r.name = "resolve"
 	return r
 }
+
+func (asyncFn *ObjAsyncFunction) FunctionBase() *object.ObjFunction {
+	return &asyncFn.ObjFunction
+}

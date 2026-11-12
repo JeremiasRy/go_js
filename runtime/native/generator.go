@@ -174,3 +174,7 @@ func NewGeneratorIterator() *GeneratorIterator {
 	g.name = "iterator"
 	return g
 }
+
+func (gn *ObjGenerator) FunctionBase() *object.ObjFunction {
+	return &gn.ObjFunction
+}

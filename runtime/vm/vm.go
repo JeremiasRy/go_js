@@ -6829,26 +6829,24 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CLONE_FUNCTION:
 			{
-				v := vm.peek()
-				if v.IsObject() {
-					if obj, err := heap.GetObject(v.GetHandle()); err == nil {
-						if fn, ok := obj.(*object.ObjFunction); ok {
-							vm.pop()
-							clone := fn.Clone().(*object.ObjFunction)
-							clone.Cloned = true
-							clone.SetHeapScope(f.heapScope)
-							if clone.IsArrow {
-								clone.LexicalThis = f.thisCtx
-								if outer, ok := f.fn.(*object.ObjFunction); ok && outer.IsArrow {
-									clone.LexicalNewTarget = outer.LexicalNewTarget
+				v := vm.pop()
+				clone := cloneFunctionValue(v, f.heapScope)
+				if clone.IsObject() {
+					if obj, err := heap.GetObject(clone.GetHandle()); err == nil {
+						if fn, ok := obj.(interface{ FunctionBase() *object.ObjFunction }); ok {
+							base := fn.FunctionBase()
+							if base.IsArrow {
+								base.LexicalThis = f.thisCtx
+								if outer, ok := f.fn.(interface{ FunctionBase() *object.ObjFunction }); ok && outer.FunctionBase().IsArrow {
+									base.LexicalNewTarget = outer.FunctionBase().LexicalNewTarget
 								} else {
-									clone.LexicalNewTarget = f.newTarget
+									base.LexicalNewTarget = f.newTarget
 								}
 							}
-							vm.push(value.EncodeHandle(heap.Allocate(clone)))
 						}
 					}
 				}
+				vm.push(clone)
 			}
 		case chunk.OP_ENSURE_HEAP_SCOPE:
 			{

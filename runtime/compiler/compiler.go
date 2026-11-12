@@ -1138,10 +1138,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
-				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
-				newFn.Strict = module || nodeHasUseStrict(current)
-				newFn.IsArrow = true
-				newFn.Length = functionLength(current.Params)
+				newFn := newFunctionForNode(current, "ANONYMOYS_FN", len(current.Params))
+				if base := functionBase(newFn); base != nil {
+					base.Strict = module || nodeHasUseStrict(current)
+					base.IsArrow = true
+					base.Length = functionLength(current.Params)
+				}
 				setDefaultParams(newFn, current.Params)
 
 				if symbolTable.hasRestParameter {
@@ -1151,7 +1153,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if symbolTable.needsArguments {
 					newFn.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
-						newFn.ArgumentsHeapSlot = variable.slot
+						if base := functionBase(newFn); base != nil {
+							base.ArgumentsHeapSlot = variable.slot
+						}
 					}
 				}
 
@@ -1236,15 +1240,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
-				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
-				newFn.Strict = module || nodeHasUseStrict(current)
-				newFn.IsMethod = nextFunctionIsMethod
-				newFn.Length = functionLength(current.Params)
+				newFn := newFunctionForNode(current, "ANONYMOYS_FN", len(current.Params))
+				if base := functionBase(newFn); base != nil {
+					base.Strict = module || nodeHasUseStrict(current)
+					base.IsMethod = nextFunctionIsMethod
+					base.Length = functionLength(current.Params)
+				}
 				setDefaultParams(newFn, current.Params)
 				if symbolTable.needsArguments {
 					newFn.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
-						newFn.ArgumentsHeapSlot = variable.slot
+						if base := functionBase(newFn); base != nil {
+							base.ArgumentsHeapSlot = variable.slot
+						}
 					}
 				}
 				if symbolTable.hasRestParameter {
@@ -1260,6 +1268,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
 				emitPatternParameters(current.Params, symbolTable, newFn)
+				emitParameterDefaults(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -2621,16 +2630,23 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				function := current.Value.(*parser.Node)
-				method := object.NewFunction(keyName, len(function.Params), nil)
-				method.Strict = true
-				method.IsMethod = true
-				method.Length = functionLength(function.Params)
+				method := newFunctionForNode(function, keyName, len(function.Params))
+				if base := functionBase(method); base != nil {
+					base.Strict = true
+					base.IsMethod = true
+					base.Length = functionLength(function.Params)
+				}
 				setDefaultParams(method, function.Params)
 				if symbolTable.needsArguments {
 					method.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
-						method.ArgumentsHeapSlot = variable.slot
+						if base := functionBase(method); base != nil {
+							base.ArgumentsHeapSlot = variable.slot
+						}
 					}
+				}
+				if symbolTable.hasRestParameter {
+					method.SetHasRestParameter()
 				}
 				markParamsDeclared(function.Params, symbolTable)
 
@@ -2641,9 +2657,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitVarInitializers(symbolTable, method)
 				emitArgumentsHeap(method)
 				emitPatternParameters(function.Params, symbolTable, method)
+				emitParameterDefaults(function.Params, symbolTable, method)
 
 				if current.Kind == parser.KIND_CONSTRUCTOR {
-					method.IsDerivedConstructor = currentClassDerived
+					if base := functionBase(method); base != nil {
+						base.IsDerivedConstructor = currentClassDerived
+					}
 					if !currentClassDerived {
 						method.ValueChunk().EmitByte(chunk.OP_INIT_INSTANCE_FIELDS)
 					}
@@ -3330,6 +3349,26 @@ func needsFallthroughReturn(fn *parser.Node) bool {
 	return last.Type != parser.NODE_RETURN_STATEMENT && last.Type != parser.NODE_THROW_STATEMENT
 }
 
+func newFunctionForNode(node *parser.Node, name string, arity int) object.Callable {
+	if node != nil && node.IsAsync && node.IsGenerator {
+		return native.NewAsyncGenerator(name, arity, nil)
+	}
+	if node != nil && node.IsAsync {
+		return native.NewAsyncFunction(name, arity, nil)
+	}
+	if node != nil && node.IsGenerator {
+		return native.NewGenerator(name, arity, nil)
+	}
+	return object.NewFunction(name, arity, nil)
+}
+
+func functionBase(fn object.Callable) *object.ObjFunction {
+	if base, ok := fn.(interface{ FunctionBase() *object.ObjFunction }); ok {
+		return base.FunctionBase()
+	}
+	return nil
+}
+
 func functionLength(params []*parser.Node) int {
 	length := 0
 	for _, param := range params {
@@ -3342,7 +3381,7 @@ func functionLength(params []*parser.Node) int {
 }
 
 func setDefaultParams(fn object.Callable, params []*parser.Node) {
-	if objFn, ok := fn.(*object.ObjFunction); ok {
+	if objFn := functionBase(fn); objFn != nil {
 		flags := make([]bool, len(params))
 		for i, param := range params {
 			if param != nil && param.Type == parser.NODE_ASSIGNMENT_PATTERN {
