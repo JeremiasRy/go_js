@@ -19,6 +19,7 @@
         { "file": "negative-scripts/uncaught-type-error.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/module-missing-export.js", "sourceGoal": "module", "phase": "link", "error": "SyntaxError" },
         { "file": "negative-scripts/module-import-assignment.js", "sourceGoal": "module", "phase": "runtime", "error": "TypeError" },
-        { "file": "negative-scripts/class-private-undeclared.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
+        { "file": "negative-scripts/class-private-undeclared.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/19-parse-top-level-return.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
     ]
 }
