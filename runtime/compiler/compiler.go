@@ -169,6 +169,7 @@ var nextLoopID = 0
 var wantMethodHandle = false
 var nextFunctionIsMethod = false
 var parameterFunction *FunctionScope
+var withDepth = 0
 
 func currentLoop() *Loop {
 	if len(loopStack) == 0 {
@@ -429,6 +430,32 @@ func (fs *FunctionScope) currentBlockVarCount() (int, bool) {
 	return count, false
 }
 
+func linkConstructorPrototype(ctorValue, prototype value.Value) {
+	if ctorValue.IsObject() {
+		if ctor, err := heap.GetObject(ctorValue.GetHandle()); err == nil {
+			key := value.EncodeHandle(heap.Allocate(native.NewLightString("prototype")))
+			if setter, ok := ctor.(interface {
+				SetNonEnumerableMember(value.Value, value.Value)
+			}); ok {
+				setter.SetNonEnumerableMember(key, prototype)
+			} else if hashable, ok := ctor.(object.Hashable); ok {
+				hashable.SetMember(key, prototype)
+			}
+		}
+	}
+	if prototype.IsObject() {
+		if proto, err := heap.GetObject(prototype.GetHandle()); err == nil {
+			if setter, ok := proto.(interface {
+				SetNonEnumerableMember(value.Value, value.Value)
+			}); ok {
+				setter.SetNonEnumerableMember(native.KEY_CTOR, ctorValue)
+			} else if hashable, ok := proto.(object.Hashable); ok {
+				hashable.SetMember(native.KEY_CTOR, ctorValue)
+			}
+		}
+	}
+}
+
 func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 	console := native.NewObjectConsole()
 	consoleHandle := heap.Allocate(console)
@@ -441,6 +468,7 @@ func defineConsole(main *object.ObjFunction, symbolTable *FunctionScope) {
 func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	objCtor := native.NewObjectMethodConstructor()
 	objCtorHandle := heap.Allocate(objCtor)
+	linkConstructorPrototype(value.EncodeHandle(objCtorHandle), native.PROTOTYPE_OBJECT)
 
 	symbolTable.addVariable(native.OBJECT_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(objCtorHandle))
@@ -450,6 +478,7 @@ func defineObjectConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 func defineArrayConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	arrCtor := native.NewArrayConstructor()
 	arrCtorHandle := heap.Allocate(arrCtor)
+	linkConstructorPrototype(value.EncodeHandle(arrCtorHandle), native.PROTOTYPE_ARRAY)
 
 	symbolTable.addVariable(native.ARRAY_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(arrCtorHandle))
@@ -460,6 +489,9 @@ func defineErrorConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 	for _, name := range []string{"Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "AggregateError"} {
 		ctor := native.NewNamedErrorConstructor(name)
 		ctorHandle := heap.Allocate(ctor)
+		if prototype, found := native.ERROR_PROTOTYPES[name]; found {
+			linkConstructorPrototype(value.EncodeHandle(ctorHandle), prototype)
+		}
 
 		symbolTable.addVariable(name, CONST, false, nil)
 		main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
@@ -479,6 +511,7 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	promiseCtor := native.NewPromiseConstructor()
 	promiseCtorHandle := heap.Allocate(promiseCtor)
+	linkConstructorPrototype(value.EncodeHandle(promiseCtorHandle), native.PROTOTYPE_PROMISE)
 
 	symbolTable.addVariable(native.PROMISE_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(promiseCtorHandle))
@@ -488,6 +521,7 @@ func definePromiseConstructor(main *object.ObjFunction, symbolTable *FunctionSco
 func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	dateCtor := native.NewDateConstructor()
 	dateCtorHandle := heap.Allocate(dateCtor)
+	linkConstructorPrototype(value.EncodeHandle(dateCtorHandle), native.PROTOTYPE_DATE)
 
 	symbolTable.addVariable(native.DATE_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(dateCtorHandle))
@@ -497,6 +531,7 @@ func defineDateConstructor(main *object.ObjFunction, symbolTable *FunctionScope)
 func defineMapConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	mapCtor := native.NewMapConstructor()
 	mapCtorHandle := heap.Allocate(mapCtor)
+	linkConstructorPrototype(value.EncodeHandle(mapCtorHandle), native.PROTOTYPE_MAP)
 
 	symbolTable.addVariable(native.MAP_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(mapCtorHandle))
@@ -506,6 +541,7 @@ func defineMapConstructor(main *object.ObjFunction, symbolTable *FunctionScope) 
 func defineSetConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	setCtor := native.NewSetConstructor()
 	setCtorHandle := heap.Allocate(setCtor)
+	linkConstructorPrototype(value.EncodeHandle(setCtorHandle), native.PROTOTYPE_SET)
 
 	symbolTable.addVariable(native.SET_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(setCtorHandle))
@@ -544,6 +580,7 @@ func defineParseFloat(main *object.ObjFunction, symbolTable *FunctionScope) {
 func defineNumberConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	numberCtor := native.NewNumberConstructor()
 	handle := heap.Allocate(numberCtor)
+	linkConstructorPrototype(value.EncodeHandle(handle), native.PROTOTYPE_NUMBER)
 
 	symbolTable.addVariable(native.NUMBER_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
@@ -564,7 +601,12 @@ func defineProxyConstructor(main *object.ObjFunction, symbolTable *FunctionScope
 }
 
 func defineRegExpConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
-	defineObjectGlobal(main, symbolTable, "RegExp", native.NewRegExpConstructor())
+	ctor := native.NewRegExpConstructor()
+	handle := heap.Allocate(ctor)
+	linkConstructorPrototype(value.EncodeHandle(handle), native.PROTOTYPE_REGEXP)
+	symbolTable.addVariable("RegExp", CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
 func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -581,6 +623,7 @@ func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionSco
 		{"Int16Array", native.NewTypedArrayConstructor("Int16Array", native.TYPED_INT16, 2)},
 		{"Uint32Array", native.NewTypedArrayConstructor("Uint32Array", native.TYPED_UINT32, 4)},
 		{"Int32Array", native.NewTypedArrayConstructor("Int32Array", native.TYPED_INT32, 4)},
+		{"Float16Array", native.NewTypedArrayConstructor("Float16Array", native.TYPED_FLOAT16, 2)},
 		{"Float32Array", native.NewTypedArrayConstructor("Float32Array", native.TYPED_FLOAT32, 4)},
 		{"Float64Array", native.NewTypedArrayConstructor("Float64Array", native.TYPED_FLOAT64, 8)},
 		{"BigInt64Array", native.NewTypedArrayConstructor("BigInt64Array", native.TYPED_BIGINT64, 8)},
@@ -621,6 +664,7 @@ func defineSymbolConstructor(main *object.ObjFunction, symbolTable *FunctionScop
 func defineStringConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
 	stringCtor := native.NewStringConstructorObject()
 	handle := heap.Allocate(stringCtor)
+	linkConstructorPrototype(value.EncodeHandle(handle), native.PROTOTYPE_STRING)
 
 	symbolTable.addVariable(native.STRING_CONSTRUCTOR_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
@@ -658,10 +702,32 @@ func defineGlobalFunctions(main *object.ObjFunction, symbolTable *FunctionScope)
 	defineObjectGlobal(main, symbolTable, "WeakSet", native.NewWeakSetConstructor())
 	defineObjectGlobal(main, symbolTable, "Intl", native.NewIntlObject())
 	defineObjectGlobal(main, symbolTable, "URL", native.NewURLConstructor())
+	defineObjectGlobal(main, symbolTable, "URLSearchParams", native.NewURLSearchParamsConstructor())
 	defineObjectGlobal(main, symbolTable, "Function", native.NewFunctionConstructor())
 	defineObjectGlobal(main, symbolTable, "setInterval", native.NewSetInterval())
 	defineObjectGlobal(main, symbolTable, "clearTimeout", native.NewClearTimeout("clearTimeout"))
 	defineObjectGlobal(main, symbolTable, "clearInterval", native.NewClearTimeout("clearInterval"))
+	defineObjectGlobal(main, symbolTable, "TextEncoder", native.NewTextEncoderConstructor())
+	defineObjectGlobal(main, symbolTable, "TextDecoder", native.NewTextDecoderConstructor())
+	defineObjectGlobal(main, symbolTable, "atob", native.NewAtobFunction())
+	defineObjectGlobal(main, symbolTable, "btoa", native.NewBtoaFunction())
+	defineObjectGlobal(main, symbolTable, "structuredClone", native.NewStructuredCloneFunction())
+	defineObjectGlobal(main, symbolTable, "crypto", native.NewCryptoObject())
+	defineObjectGlobal(main, symbolTable, "performance", native.NewPerformanceObject())
+	defineObjectGlobal(main, symbolTable, "fetch", native.NewFetchFunction())
+	defineObjectGlobal(main, symbolTable, "requestAnimationFrame", native.NewRequestAnimationFrameFunction())
+	defineObjectGlobal(main, symbolTable, "cancelAnimationFrame", native.NewCancelAnimationFrameFunction())
+	defineObjectGlobal(main, symbolTable, "setImmediate", native.NewSetImmediateFunction())
+	defineObjectGlobal(main, symbolTable, "clearImmediate", native.NewClearImmediateFunction())
+	defineObjectGlobal(main, symbolTable, "process", native.NewProcessObject())
+	defineObjectGlobal(main, symbolTable, "require", native.NewRequireFunction(ROOT_SCRIPT_LOCATION))
+	defineObjectGlobal(main, symbolTable, "Buffer", native.NewBufferConstructor())
+	defineObjectGlobal(main, symbolTable, "WeakRef", native.NewWeakRefConstructor())
+	defineObjectGlobal(main, symbolTable, "FinalizationRegistry", native.NewFinalizationRegistryConstructor())
+	defineObjectGlobal(main, symbolTable, "SharedArrayBuffer", native.NewSharedArrayBufferConstructor())
+	defineObjectGlobal(main, symbolTable, "Atomics", native.NewAtomicsObject())
+	defineObjectGlobal(main, symbolTable, "WebAssembly", native.NewWebAssemblyObject())
+	defineObjectGlobal(main, symbolTable, "Temporal", native.NewTemporalObject())
 }
 
 func defineBooleanConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -680,6 +746,38 @@ var inferredClassName = ""
 
 func privateKeyName(name string) string {
 	return "\x00#" + name
+}
+
+func emitEarlyClassBinding(fn object.Callable, symbolTable *FunctionScope, current *parser.Node) {
+	if current.Identifier == nil {
+		return
+	}
+	if current.Type == parser.NODE_CLASS_EXPRESSION {
+		syntheticName := "\x00class:" + current.Identifier.Name + ":" + strconv.Itoa(current.Id)
+		if variable, found := global.vars[syntheticName]; found {
+			fn.ValueChunk().EmitByte(chunk.OP_DUP_CLASS)
+			fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+			variable.declared = true
+		}
+		return
+	}
+	variable, _ := symbolTable.findVariable(current.Identifier.Name)
+	if variable == nil {
+		return
+	}
+	fn.ValueChunk().EmitByte(chunk.OP_DUP_CLASS)
+	switch variable.scope {
+	case GLOBAL:
+		fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+	case LOCAL:
+		fn.ValueChunk().EmitBytes(chunk.OP_SET_LOCAL, uint8(variable.slot))
+	case HEAP:
+		emitVarOp(fn, chunk.OP_SET_HEAP_VAR, symbolTable, variable)
+	default:
+		fn.ValueChunk().EmitByte(chunk.OP_POP)
+		return
+	}
+	variable.declared = true
 }
 
 func classMemberKind(kind parser.Kind) native.ClassMemberKind {
@@ -725,6 +823,7 @@ func SetModule(isModule bool) {
 
 func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	savedStrict := strictContext
+	withDepth = 0
 	strictContext = module
 	setup := object.NewFunction(object.SETUP_FN_NAME, 0, nil)
 	setup.ValueChunk().SetCompTimeAstId(INITIAL_SETUP_AST_ID)
@@ -802,6 +901,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 
 func CompileModule(src string) (*object.ObjFunction, error) {
 	savedModule := module
+	withDepth = 0
 	module = true
 	main := object.NewFunction(fmt.Sprintf("MODULE %s", src), 0, nil)
 	generateByteCode(imports[src], global, main)
@@ -1019,6 +1119,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					switch operator {
 					case parser.ASSIGN:
 						generateByteCode(current.Right, symbolTable, fn)
+						if withDepth > 0 && (variable.scope == GLOBAL || variable.undeclared) {
+							slot := uint8(variable.slot)
+							if variable.scope != GLOBAL {
+								slot = 255
+							}
+							nameArg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(left.Name))))
+							fn.ValueChunk().EmitBytes(chunk.OP_WITH_SET, slot, nameArg)
+							break
+						}
 						fn.ValueChunk().EmitByte(chunk.OP_DUP)
 						if variable.undeclared {
 							if defineOp == chunk.OP_DEFINE_GLOBAL && !module {
@@ -1354,6 +1463,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					}
 				}
 				symbolTable.exitBlockScope()
+			}
+		case parser.NODE_WITH_STATEMENT:
+			{
+				generateByteCode(current.Object, symbolTable, fn)
+				fn.ValueChunk().EmitByte(chunk.OP_ENTER_WITH)
+				withDepth++
+				generateByteCode(current.BodyNode, symbolTable, fn)
+				withDepth--
+				fn.ValueChunk().EmitByte(chunk.OP_EXIT_WITH)
 			}
 		case parser.NODE_VARIABLE_DECLARATION:
 			{
@@ -1895,7 +2013,21 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if variable == nil {
 					arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
+					if withDepth > 0 {
+						fn.ValueChunk().EmitBytes(chunk.OP_WITH_GET, 255, arg)
+						return
+					}
 					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL_BY_NAME, arg)
+					return
+				}
+
+				if withDepth > 0 && (variable.scope == GLOBAL || variable.undeclared) {
+					slot := uint8(variable.slot)
+					if variable.scope != GLOBAL {
+						slot = 255
+					}
+					arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
+					fn.ValueChunk().EmitBytes(chunk.OP_WITH_GET, slot, arg)
 					return
 				}
 
@@ -2636,6 +2768,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_CREATE_CLASS_START)
 				}
 
+				emitEarlyClassBinding(fn, symbolTable, current)
+
 				savedDerived := currentClassDerived
 				currentClassDerived = current.SuperClass != nil
 				generateByteCode(current.BodyNode, symbolTable, fn)
@@ -3125,6 +3259,9 @@ func parseForDotDotLoopVariable(current *parser.Node, symbolTable *FunctionScope
 }
 
 func argumentIsPromise(current *parser.Node) bool {
+	if current == nil {
+		return false
+	}
 	switch current.Type {
 	case parser.NODE_NEW_EXPRESSION:
 		{
@@ -4063,6 +4200,7 @@ func calleeIsPromiseFunction(current *parser.Node) bool {
 }
 
 func CompileDynamicFunction(params []string, body string) (object.Callable, error) {
+	withDepth = 0
 	source := "var __gojs_dynamic_function__ = function(" + strings.Join(params, ",") + ") {\n" + body + "\n};"
 	ast, err := parser.GetAst([]byte(source), &parser.Options{SourceType: "script"}, 0)
 	if err != nil {

@@ -81,6 +81,72 @@ func ObjectAsObj(v value.Value) (*ObjObject, bool) {
 		return &o.ObjObject, true
 	case *ObjError:
 		return &o.ObjObject, true
+	case *ObjRegExp:
+		return &o.ObjObject, true
+	case *ObjTypedArray:
+		return &o.ObjObject, true
+	case *ObjArrayBuffer:
+		return &o.ObjObject, true
+	case *ObjDataView:
+		return &o.ObjObject, true
+	case *Map:
+		return &o.ObjObject, true
+	case *Set:
+		return &o.ObjObject, true
+	case *MapConstructor:
+		return &o.ObjObject, true
+	case *SetConstructor:
+		return &o.ObjObject, true
+	case *ObjectConstructor:
+		return &o.ObjObject, true
+	case *ArrayConstructor:
+		return &o.ObjObject, true
+	case *StringConstructor:
+		return &o.ObjObject, true
+	case *NumberConstructor:
+		return &o.ObjObject, true
+	case *BooleanConstructor:
+		return &o.ObjObject, true
+	case *FunctionConstructor:
+		return &o.ObjObject, true
+	case *URLConstructor:
+		return &o.ObjObject, true
+	case *DateConstructor:
+		return &o.ObjObject, true
+	case *PromiseConstructor:
+		return &o.ObjObject, true
+	case *RegExpConstructor:
+		return &o.ObjObject, true
+	case *ProxyConstructor:
+		return &o.ObjObject, true
+	case *SymbolConstructor:
+		return &o.ObjObject, true
+	case *BigIntConstructor:
+		return &o.ObjObject, true
+	case *TypedArrayConstructor:
+		return &o.ObjObject, true
+	case *ArrayBufferConstructor:
+		return &o.ObjObject, true
+	case *DataViewConstructor:
+		return &o.ObjObject, true
+	case *ObjClass:
+		return &o.ObjObject, true
+	case *Instance:
+		return &o.ObjObject, true
+	case *Prototype:
+		return &o.ObjObject, true
+	case *ObjModuleNamespace:
+		return &o.ObjObject, true
+	case *ObjPromise:
+		return &o.ObjObject, true
+	case *ObjGenerator:
+		return &o.ObjObject, true
+	case *BoxedPrimitive:
+		return &o.ObjObject, true
+	case *ObjBoundFunction:
+		return &o.ObjObject, true
+	case *ObjProxy:
+		return &o.ObjObject, true
 	}
 	return nil, false
 }

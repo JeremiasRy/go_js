@@ -166,6 +166,26 @@ func NewPromiseReject() *PromiseReject {
 	return r
 }
 
+type PromiseWithResolvers struct {
+	ObjNativeFn
+}
+
+func NewPromiseWithResolvers() *PromiseWithResolvers {
+	p := &PromiseWithResolvers{}
+	p.name = "withResolvers"
+	return p
+}
+
+type PromiseTry struct {
+	ObjNativeFn
+}
+
+func NewPromiseTry() *PromiseTry {
+	p := &PromiseTry{}
+	p.name = "try"
+	return p
+}
+
 type PromiseAll struct {
 	ObjNativeFn
 }
@@ -215,12 +235,15 @@ func NewPromiseConstructor() *PromiseConstructor {
 	pctor.Members = map[string]ObjectValueEntry{}
 
 	pctor.SetMember(KEY_PROTO, PROTOTYPE_PROMISE_CONSTRUCTOR)
+	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_PROMISE)
 	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("resolve"))), value.EncodeHandle(heap.Allocate(NewPromiseResolve())))
 	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("reject"))), value.EncodeHandle(heap.Allocate(NewPromiseReject())))
 	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("all"))), value.EncodeHandle(heap.Allocate(NewPromiseAll())))
 	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("allSettled"))), value.EncodeHandle(heap.Allocate(NewPromiseAllSettled())))
 	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("race"))), value.EncodeHandle(heap.Allocate(NewPromiseRace())))
 	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("any"))), value.EncodeHandle(heap.Allocate(NewPromiseAny())))
+	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("withResolvers"))), value.EncodeHandle(heap.Allocate(NewPromiseWithResolvers())))
+	pctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("try"))), value.EncodeHandle(heap.Allocate(NewPromiseTry())))
 	return pctor
 }
 

@@ -94,6 +94,12 @@ func NewRegExpObject(pattern, flags string) *ObjRegExp {
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("multiline"))), boolValueValue(hasFlag(flags, 'm')))
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("hasIndices"))), boolValueValue(hasFlag(flags, 'd')))
 	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("lastIndex"))), value.ValueFromFloat64(0))
+	for _, key := range []string{"source", "flags", "global", "sticky", "unicode", "dotAll", "ignoreCase", "multiline", "hasIndices", "lastIndex"} {
+		keyValue := value.EncodeHandle(heap.Allocate(NewLightString(key)))
+		entry, _ := obj.GetOwnEntry(keyValue)
+		entry.nonEnumerable = true
+		obj.Members[key] = entry
+	}
 	return obj
 }
 
@@ -118,6 +124,16 @@ type RegExpConstructor struct {
 	ObjObject
 }
 
+type RegExpEscape struct {
+	ObjNativeFn
+}
+
+func NewRegExpEscape() *RegExpEscape {
+	fn := &RegExpEscape{}
+	fn.name = "escape"
+	return fn
+}
+
 func NewRegExpConstructor() *RegExpConstructor {
 	ctor := &RegExpConstructor{}
 	ctor.Members = map[string]ObjectValueEntry{}
@@ -125,6 +141,7 @@ func NewRegExpConstructor() *RegExpConstructor {
 	if PROTOTYPE_REGEXP != 0 {
 		ctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_REGEXP)
 	}
+	ctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("escape"))), value.EncodeHandle(heap.Allocate(NewRegExpEscape())))
 	return ctor
 }
 

@@ -1,0 +1,1 @@
+console.log(Reflect.apply(parseInt,null,['42']))

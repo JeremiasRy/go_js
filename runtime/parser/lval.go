@@ -202,15 +202,21 @@ func (p *Parser) checkLValPattern(expr *Node, bindingType Flags, checkClashes st
 	switch expr.Type {
 	case NODE_OBJECT_PATTERN:
 		for _, prop := range expr.Properties {
-			return p.checkLValInnerPattern(prop, bindingType, checkClashes)
+			if err := p.checkLValInnerPattern(prop, bindingType, checkClashes); err != nil {
+				return err
+			}
 		}
+		return nil
 
 	case NODE_ARRAY_PATTERN:
 		for _, elem := range expr.Elements {
 			if elem != nil {
-				return p.checkLValInnerPattern(elem, bindingType, checkClashes)
+				if err := p.checkLValInnerPattern(elem, bindingType, checkClashes); err != nil {
+					return err
+				}
 			}
 		}
+		return nil
 	}
 	return p.checkLValSimple(expr, bindingType, checkClashes)
 }

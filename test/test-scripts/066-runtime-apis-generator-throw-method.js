@@ -1,0 +1,1 @@
+function* g(){try{yield 1}catch(e){console.log('caught')}}var it=g();it.next();it.throw(new Error('x'))

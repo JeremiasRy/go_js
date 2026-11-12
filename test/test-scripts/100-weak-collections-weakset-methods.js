@@ -1,0 +1,1 @@
+var w=new WeakSet();console.log(typeof w.add+','+typeof w.has+','+typeof w.delete)

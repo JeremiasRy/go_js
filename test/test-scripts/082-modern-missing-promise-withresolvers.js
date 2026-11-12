@@ -1,0 +1,1 @@
+var p=Promise.withResolvers();p.resolve(5);p.promise.then(v=>console.log(v))

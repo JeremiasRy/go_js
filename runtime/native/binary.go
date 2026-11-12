@@ -31,13 +31,20 @@ func bigIntToUint64(v value.Value) uint64 {
 
 type ObjArrayBuffer struct {
 	ObjObject
-	Data []byte
+	Data   []byte
+	Shared bool
 }
 
 func NewArrayBuffer(length int) *ObjArrayBuffer {
 	buffer := &ObjArrayBuffer{Data: make([]byte, length)}
 	buffer.Members = map[string]ObjectValueEntry{}
 	buffer.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	return buffer
+}
+
+func NewSharedArrayBuffer(length int) *ObjArrayBuffer {
+	buffer := NewArrayBuffer(length)
+	buffer.Shared = true
 	return buffer
 }
 
@@ -89,6 +96,16 @@ func NewArrayBufferSlice() *ArrayBufferSlice {
 	return fn
 }
 
+type ArrayBufferTransfer struct {
+	ObjNativeFn
+}
+
+func NewArrayBufferTransfer() *ArrayBufferTransfer {
+	fn := &ArrayBufferTransfer{}
+	fn.name = "transfer"
+	return fn
+}
+
 const (
 	TYPED_UINT8 uint8 = iota
 	TYPED_INT8
@@ -101,7 +118,75 @@ const (
 	TYPED_INT32
 	TYPED_UINT32
 	TYPED_FLOAT32
+	TYPED_FLOAT16
 )
+
+func float32ToFloat16Bits(f float32) uint16 {
+	bits := math.Float32bits(f)
+	sign := uint16(bits>>16) & 0x8000
+	exponent := int((bits >> 23) & 0xff)
+	mantissa := bits & 0x7fffff
+	if exponent == 0xff {
+		if mantissa != 0 {
+			return sign | 0x7e00
+		}
+		return sign | 0x7c00
+	}
+	halfExponent := exponent - 127 + 15
+	if halfExponent >= 31 {
+		return sign | 0x7c00
+	}
+	if halfExponent <= 0 {
+		if halfExponent < -10 {
+			return sign
+		}
+		mantissa |= 0x800000
+		shift := uint(14 - halfExponent)
+		rounded := mantissa >> shift
+		remainder := mantissa & ((1 << shift) - 1)
+		half := uint32(1) << (shift - 1)
+		if remainder > half || (remainder == half && rounded&1 != 0) {
+			rounded++
+		}
+		return sign | uint16(rounded)
+	}
+	rounded := mantissa >> 13
+	remainder := mantissa & 0x1fff
+	if remainder > 0x1000 || (remainder == 0x1000 && rounded&1 != 0) {
+		rounded++
+		if rounded == 0x400 {
+			rounded = 0
+			halfExponent++
+			if halfExponent >= 31 {
+				return sign | 0x7c00
+			}
+		}
+	}
+	return sign | uint16(halfExponent)<<10 | uint16(rounded)
+}
+
+func float16BitsToFloat32(bits uint16) float32 {
+	sign := uint32(bits&0x8000) << 16
+	exponent := uint32(bits>>10) & 0x1f
+	mantissa := uint32(bits & 0x3ff)
+	if exponent == 0 {
+		if mantissa == 0 {
+			return math.Float32frombits(sign)
+		}
+		shift := uint32(0)
+		for mantissa&0x400 == 0 {
+			mantissa <<= 1
+			shift++
+		}
+		mantissa &= 0x3ff
+		exponent32 := uint32(127 - 15 - int(shift) + 1)
+		return math.Float32frombits(sign | exponent32<<23 | mantissa<<13)
+	}
+	if exponent == 31 {
+		return math.Float32frombits(sign | 0x7f800000 | mantissa<<13)
+	}
+	return math.Float32frombits(sign | (exponent-15+127)<<23 | mantissa<<13)
+}
 
 type ObjTypedArray struct {
 	ObjObject
@@ -110,6 +195,7 @@ type ObjTypedArray struct {
 	Offset      int
 	Length      int
 	Kind        uint8
+	IsBuffer    bool
 }
 
 func NewTypedArray(buffer *ObjArrayBuffer, bufferValue value.Value, offset, length int, kind uint8) *ObjTypedArray {
@@ -117,6 +203,12 @@ func NewTypedArray(buffer *ObjArrayBuffer, bufferValue value.Value, offset, leng
 	array.Members = map[string]ObjectValueEntry{}
 	array.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 	return array
+}
+
+func NewUint8ArrayFromBytes(data []byte) *ObjTypedArray {
+	buffer := NewArrayBuffer(len(data))
+	copy(buffer.Data, data)
+	return NewTypedArray(buffer, value.EncodeHandle(heap.Allocate(buffer)), 0, len(data), TYPED_UINT8)
 }
 
 func (*ObjTypedArray) Type() object.ObjType {
@@ -137,7 +229,7 @@ func (a *ObjTypedArray) ElementSize() int {
 	switch a.Kind {
 	case TYPED_UINT8, TYPED_INT8, TYPED_UINT8_CLAMPED:
 		return 1
-	case TYPED_INT16, TYPED_UINT16:
+	case TYPED_INT16, TYPED_UINT16, TYPED_FLOAT16:
 		return 2
 	case TYPED_INT32, TYPED_UINT32, TYPED_FLOAT32:
 		return 4
@@ -172,6 +264,9 @@ func (a *ObjTypedArray) Read(index int) value.Value {
 	case TYPED_UINT32:
 		v := uint32(data[offset]) | uint32(data[offset+1])<<8 | uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
 		return value.ValueFromFloat64(float64(v))
+	case TYPED_FLOAT16:
+		v := uint16(data[offset]) | uint16(data[offset+1])<<8
+		return value.ValueFromFloat64(float64(float16BitsToFloat32(v)))
 	case TYPED_FLOAT32:
 		v := uint32(data[offset]) | uint32(data[offset+1])<<8 | uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
 		return value.ValueFromFloat64(float64(math.Float32frombits(v)))
@@ -233,6 +328,10 @@ func (a *ObjTypedArray) Write(index int, v value.Value) {
 		for i := 0; i < 4; i++ {
 			data[offset+i] = byte(u >> (8 * i))
 		}
+	case TYPED_FLOAT16:
+		u := float32ToFloat16Bits(float32(v.AsNumber()))
+		data[offset] = byte(u)
+		data[offset+1] = byte(u >> 8)
 	case TYPED_FLOAT32:
 		u := math.Float32bits(float32(v.AsNumber()))
 		for i := 0; i < 4; i++ {
@@ -282,6 +381,16 @@ type TypedArrayJoin struct {
 func NewTypedArrayJoin() *TypedArrayJoin {
 	fn := &TypedArrayJoin{}
 	fn.name = "join"
+	return fn
+}
+
+type TypedArrayToBase64 struct {
+	ObjNativeFn
+}
+
+func NewTypedArrayToBase64() *TypedArrayToBase64 {
+	fn := &TypedArrayToBase64{}
+	fn.name = "toBase64"
 	return fn
 }
 

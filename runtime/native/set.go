@@ -237,6 +237,29 @@ func (*SetEntries) Entries(owner *Set) *object.Iterator {
 	})
 }
 
+type SetOperationKind int
+
+const (
+	SET_UNION SetOperationKind = iota
+	SET_INTERSECTION
+	SET_DIFFERENCE
+	SET_SYMMETRIC_DIFFERENCE
+	SET_IS_SUBSET_OF
+	SET_IS_SUPERSET_OF
+	SET_IS_DISJOINT_FROM
+)
+
+type SetOperation struct {
+	ObjNativeFn
+	Kind SetOperationKind
+}
+
+func NewSetOperation(name string, kind SetOperationKind) *SetOperation {
+	fn := &SetOperation{Kind: kind}
+	fn.name = name
+	return fn
+}
+
 type SetForEach struct {
 	ObjNativeFn
 }

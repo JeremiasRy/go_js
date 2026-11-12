@@ -1,0 +1,1 @@
+console.log(JSON.stringify(new Date(0)))

@@ -53,8 +53,17 @@ func Enqueue(callback object.Callback, priority TaskPriority, sendMessage bool) 
 	q.mu.Unlock()
 
 	if sendMessage {
-		QueueC <- struct{}{}
+		select {
+		case QueueC <- struct{}{}:
+		default:
+		}
 	}
+}
+
+func HasTasks() bool {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.microTask.Len() > 0 || q.task.Len() > 0
 }
 
 func Dequeue() (object.Callback, error) {

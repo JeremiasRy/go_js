@@ -333,6 +333,20 @@ func initSetPrototype() {
 	p.SetMember(KEY_VALUES, setValues)
 	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("entries"))), setEntries)
 	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("forEach"))), setForEach)
+	for _, item := range []struct {
+		name string
+		kind SetOperationKind
+	}{
+		{"union", SET_UNION},
+		{"intersection", SET_INTERSECTION},
+		{"difference", SET_DIFFERENCE},
+		{"symmetricDifference", SET_SYMMETRIC_DIFFERENCE},
+		{"isSubsetOf", SET_IS_SUBSET_OF},
+		{"isSupersetOf", SET_IS_SUPERSET_OF},
+		{"isDisjointFrom", SET_IS_DISJOINT_FROM},
+	} {
+		p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString(item.name))), value.EncodeHandle(heap.Allocate(NewSetOperation(item.name, item.kind))))
+	}
 
 	PROTOTYPE_SET = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(

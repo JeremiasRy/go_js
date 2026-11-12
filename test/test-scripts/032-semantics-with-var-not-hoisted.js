@@ -1,0 +1,1 @@
+var o={};with(o){var x=1};console.log(typeof x)

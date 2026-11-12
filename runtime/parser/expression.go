@@ -740,25 +740,31 @@ func (p *Parser) parseTemplate(opts struct{ isTagged bool }) (*Node, error) {
 
 func (p *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, error) {
 	elem := p.startNode()
+	templateValue, ok := p.Value.([]byte)
+	if !ok {
+		return nil, p.raise(p.start, "Unterminated template literal")
+	}
 	if p.Type.identifier == TOKEN_INVALIDTEMPLATE {
 		if !opts.isTagged {
 			return nil, p.raiseRecoverable(p.start, "Bad escape sequence in untagged template literal")
 		}
 
 		elem.Value = TemplateNodeValue{
-			Raw:     strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
+			Raw:     strings.ReplaceAll(string(templateValue), "\r\n", "\n"),
 			Cooked:  "",
 			Invalid: true,
 		}
 	} else {
-		cooked := string(p.Value.([]byte))
+		cooked := string(templateValue)
 		elem.Value = TemplateNodeValue{
 			Raw:     strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
 			Cooked:  cooked,
 			Invalid: strings.IndexByte(cooked, 0) >= 0,
 		}
 	}
-	p.next(false)
+	if err := p.next(false); err != nil {
+		return nil, err
+	}
 	elem.Tail = p.Type.identifier == TOKEN_BACKQUOTE
 	return p.finishNode(elem, NODE_TEMPLATE_ELEMENT), nil
 }
@@ -1566,26 +1572,15 @@ func (p *Parser) isSimpleParamList(params []*Node) bool {
 }
 
 func (p *Parser) checkParams(node *Node, allowDuplicates bool) error {
-	// nameHash = Object.create(null), let's see if I got this right....
+	checkClashes := struct {
+		check bool
+		hash  map[string]bool
+	}{check: !allowDuplicates, hash: map[string]bool{}}
 	for _, param := range node.Params {
-		if allowDuplicates {
-			err := p.checkLValInnerPattern(param, BIND_VAR, struct {
-				check bool
-				hash  map[string]bool
-			}{})
-			if err != nil {
-				return err
-			}
-		} else {
-			err := p.checkLValInnerPattern(param, BIND_VAR, struct {
-				check bool
-				hash  map[string]bool
-			}{check: true, hash: map[string]bool{}})
-			if err != nil {
-				return err
-			}
+		err := p.checkLValInnerPattern(param, BIND_VAR, checkClashes)
+		if err != nil {
+			return err
 		}
-
 	}
 	return nil
 }

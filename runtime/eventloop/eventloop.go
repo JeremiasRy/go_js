@@ -12,8 +12,10 @@ type EventLoop struct {
 	jobCallbackChannel chan *object.JobChannelMessage
 	jobChannel         chan *object.JobChannelMessage
 
-	wg   *sync.WaitGroup
-	work atomic.Int64
+	wg     *sync.WaitGroup
+	work   atomic.Int64
+	mu     sync.Mutex
+	closed bool
 }
 
 var el *EventLoop
@@ -52,8 +54,14 @@ func Start() {
 }
 
 func Dispatch(job object.Job) {
+	el.mu.Lock()
+	if el.closed {
+		el.mu.Unlock()
+		return
+	}
 	el.wg.Add(1)
 	el.work.Add(1)
+	el.mu.Unlock()
 	message := &object.JobChannelMessage{
 		Job:      job,
 		Callback: object.Callback{Fn: nil, ThisCtx: value.UNDEFINED},
@@ -67,4 +75,17 @@ func Dispatch(job object.Job) {
 
 func HasWork() bool {
 	return el.work.Load() > 0
+}
+
+func TryClose() bool {
+	el.mu.Lock()
+	defer el.mu.Unlock()
+	if el.closed {
+		return true
+	}
+	if el.work.Load() == 0 && !queue.HasTasks() {
+		el.closed = true
+		return true
+	}
+	return false
 }

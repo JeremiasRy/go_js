@@ -35,6 +35,7 @@ type Heap struct {
 	asyncWorkKeepAlive  map[uintptr][]value.Value
 	asyncScopeKeepAlive map[uintptr]int
 	callbackRoots       map[uintptr][]value.Value
+	finalizers          map[uint32]map[uint64]func()
 	nextCallbackRoot    uintptr
 	greyStack           []object.Object
 	gcCycleDeterminator uint32
@@ -54,6 +55,7 @@ var a = &Heap{
 	asyncWorkKeepAlive:  map[uintptr][]value.Value{},
 	asyncScopeKeepAlive: map[uintptr]int{},
 	callbackRoots:       map[uintptr][]value.Value{},
+	finalizers:          map[uint32]map[uint64]func(){},
 	nextCallbackRoot:    1,
 	greyStack:           []object.Object{},
 	gcCycleDeterminator: 20,
@@ -232,6 +234,51 @@ func GetPointer(handle uint32) uint32 {
 	return a.getPointer(handle)
 }
 
+func IsLiveValue(v value.Value) bool {
+	if !v.IsObject() {
+		return false
+	}
+	pointer, found := a.handleLayer[v.GetHandle()]
+	if !found {
+		return false
+	}
+	if int(pointer) >= len(a.objects) {
+		return false
+	}
+	_, free := a.freeList[pointer]
+	return !free
+}
+
+func ObjectAt(handle uint32) object.Object {
+	pointer, found := a.handleLayer[handle]
+	if !found || int(pointer) >= len(a.objects) {
+		return nil
+	}
+	if _, free := a.freeList[pointer]; free {
+		return nil
+	}
+	return a.objects[pointer]
+}
+
+func RegisterFinalizer(handle uint32, id uint64, callback func()) {
+	pointer := a.handleLayer[handle]
+	callbacks, found := a.finalizers[pointer]
+	if !found {
+		callbacks = map[uint64]func(){}
+		a.finalizers[pointer] = callbacks
+	}
+	callbacks[id] = callback
+}
+
+func UnregisterFinalizer(pointer uint32, id uint64) {
+	if callbacks, found := a.finalizers[pointer]; found {
+		delete(callbacks, id)
+		if len(callbacks) == 0 {
+			delete(a.finalizers, pointer)
+		}
+	}
+}
+
 // GARBAGE COLLECTION
 func markValue(v value.Value) {
 	if !v.IsObject() {
@@ -317,6 +364,12 @@ func (a *Heap) sweep() {
 				fmt.Println("Cleaning up:", obj.String())
 			}
 			a.freeList[uint32(i)] = struct{}{}
+			if callbacks, found := a.finalizers[uint32(i)]; found {
+				delete(a.finalizers, uint32(i))
+				for _, callback := range callbacks {
+					callback()
+				}
+			}
 			if obj.Type() == object.OBJ_STRING {
 				str := obj.String()
 				if ptr, found := a.strings[str]; found && ptr == uint32(i) {
@@ -390,6 +443,14 @@ func (a *Heap) defragment() {
 		}
 		a.strings[str] = remap[pointer] - 1
 	}
+
+	remappedFinalizers := map[uint32]map[uint64]func(){}
+	for pointer, callbacks := range a.finalizers {
+		if int(pointer) < len(remap) && remap[pointer] != 0 {
+			remappedFinalizers[remap[pointer]-1] = callbacks
+		}
+	}
+	a.finalizers = remappedFinalizers
 
 	clear(a.objects[write:])
 	a.objects = a.objects[:write]

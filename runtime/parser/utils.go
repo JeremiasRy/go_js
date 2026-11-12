@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf16"
 )
 
@@ -35,29 +36,25 @@ var syntaxKeywords = map[string]string{
 	"6":       ecma5AndLessKeywords + " const class extends export import super",
 }
 
+func isUnicodeIdentifierStart(code rune) bool {
+	return unicode.IsLetter(code) ||
+		unicode.In(code, unicode.Nl, unicode.Other_ID_Start)
+}
+
+func isUnicodeIdentifierContinue(code rune) bool {
+	return isUnicodeIdentifierStart(code) ||
+		unicode.In(code, unicode.Mn, unicode.Mc, unicode.Nd, unicode.Pc, unicode.Other_ID_Continue) ||
+		code == 0x200c || code == 0x200d
+}
+
 func IsIdentifierStart(code rune, astral bool) bool {
-	if code < 65 {
-		return code == 36
+	if code < 128 {
+		return code == '$' || code == '_' || code >= 'a' && code <= 'z' || code >= 'A' && code <= 'Z'
 	}
-	if code < 91 {
-		return true
-	}
-	if code < 97 {
-		return code == 95
-	}
-	if code < 123 {
-		return true
-	}
-	if code <= 0xffff {
-		if code >= 0xaa {
-			match, _ := regexp.Match(strings.Join([]string{"[", NonAsciiIdentifierASCIIStartChars, "]"}, ""), []byte{byte(code)}) // bit sketchy here, don't know if I have the patience to make this work? :/
-			return match
-		}
-	}
-	if !astral {
+	if !astral && code > 0xffff {
 		return false
 	}
-	return IsInAstralSet(code, AstralIdentifierStartCodes[:])
+	return isUnicodeIdentifierStart(code)
 }
 
 func IsInAstralSet(code rune, set []rune) bool {
@@ -76,40 +73,13 @@ func IsInAstralSet(code rune, set []rune) bool {
 }
 
 func IsIdentifierChar(code int32, astral bool) bool {
-	if code < 48 {
-		return code == 36
+	if code < 128 {
+		return code == '$' || code == '_' || code >= 'a' && code <= 'z' || code >= 'A' && code <= 'Z' || code >= '0' && code <= '9'
 	}
-
-	if code < 58 {
-		return true
-	}
-
-	if code < 65 {
+	if !astral && code > 0xffff {
 		return false
 	}
-
-	if code < 91 {
-		return true
-	}
-
-	if code < 97 {
-		return code == 95
-	}
-
-	if code < 123 {
-		return true
-	}
-
-	if code < 0xffff {
-		match, _ := regexp.Match(strings.Join([]string{"[", NonAsciiIdentifierASCIIStartChars, NonAsciiIdentifierAsciiChars, "]"}, ""), []byte{byte(code)})
-		return match
-	}
-
-	if !astral {
-		return false
-	}
-
-	return IsInAstralSet(code, AstralIdentifierStartCodes[:]) || IsInAstralSet(code, AstralIdentifierCodes[:])
+	return isUnicodeIdentifierContinue(rune(code))
 }
 
 func hasOwn(obj map[string]interface{}, propName string) bool {

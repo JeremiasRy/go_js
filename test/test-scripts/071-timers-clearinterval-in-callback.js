@@ -1,0 +1,1 @@
+var id=setInterval(()=>{clearInterval(id);console.log('cleared')},5)

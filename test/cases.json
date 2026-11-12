@@ -13,6 +13,11 @@
         "module-top-level-await.js": ["module"],
         "31-module-meta-null.js": ["module"]
     },
+    "expectedOutputs": {
+        "109-host-missing-requestanimationframe.js": "function\n",
+        "111-host-missing-node-require.js": "function\n",
+        "119-host-missing-temporal.js": "object\n"
+    },
     "negative": [
         { "file": "negative-scripts/duplicate-lexical-binding.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/const-without-initializer.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
@@ -44,6 +49,19 @@
         { "file": "negative-scripts/72-json-invalid.js", "sourceGoal": "script", "phase": "runtime", "error": "SyntaxError" },
         { "file": "negative-scripts/19-infinite-loop.js", "sourceGoal": "script", "timeout": true },
         { "file": "negative-scripts/20-unresolved-top-level-await.js", "sourceGoal": "module", "timeout": true },
-        { "file": "negative-scripts/21-redos-regex.js", "sourceGoal": "script", "timeout": true }
+        { "file": "negative-scripts/21-redos-regex.js", "sourceGoal": "script", "timeout": true },
+        { "file": "negative-scripts/001-panic-parser-dot-eof-null.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/003-panic-parser-trailing-dot.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/004-panic-parser-double-dot.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/005-panic-parser-lone-dot.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/006-panic-parser-lone-backslash.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/007-panic-parser-unterminated-template.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/008-panic-parser-bad-exponent.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/015-parser-invalid-unterminated-comment.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/016-parser-invalid-bad-unicode-escape.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/017-parser-invalid-strict-with.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/018-parser-invalid-strict-duplicate-params.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/019-parser-invalid-export-declaration.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/020-parser-invalid-import-declaration.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
     ]
 }

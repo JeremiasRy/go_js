@@ -6,6 +6,7 @@ import (
 	"go_js/object"
 	"go_js/value"
 	"math"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 type Console struct {
 	ObjObject
 	timers map[string]time.Time
+	counts map[string]int
 }
 
 func (*Console) Type() object.ObjType {
@@ -25,17 +27,33 @@ func (*Console) String() string {
 }
 
 func NewObjectConsole() *Console {
-	c := &Console{timers: map[string]time.Time{}}
+	c := &Console{timers: map[string]time.Time{}, counts: map[string]int{}}
 	c.Members = map[string]ObjectValueEntry{}
 	c.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
 	log := value.EncodeHandle(heap.Allocate(NewLightString("log")))
 
 	c.SetMember(log, value.EncodeHandle(heap.Allocate(NewLog())))
-	c.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("error"))), value.EncodeHandle(heap.Allocate(NewConsoleMethod("error", CONSOLE_ERROR))))
-	c.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("table"))), value.EncodeHandle(heap.Allocate(NewConsoleMethod("table", CONSOLE_TABLE))))
-	c.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("time"))), value.EncodeHandle(heap.Allocate(NewConsoleMethod("time", CONSOLE_TIME))))
-	c.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("timeEnd"))), value.EncodeHandle(heap.Allocate(NewConsoleMethod("timeEnd", CONSOLE_TIME_END))))
+	for _, item := range []struct {
+		name string
+		kind ConsoleMethodKind
+	}{
+		{"error", CONSOLE_ERROR},
+		{"warn", CONSOLE_WARN},
+		{"info", CONSOLE_INFO},
+		{"debug", CONSOLE_DEBUG},
+		{"assert", CONSOLE_ASSERT},
+		{"dir", CONSOLE_DIR},
+		{"trace", CONSOLE_TRACE},
+		{"count", CONSOLE_COUNT},
+		{"group", CONSOLE_GROUP},
+		{"groupEnd", CONSOLE_GROUP_END},
+		{"table", CONSOLE_TABLE},
+		{"time", CONSOLE_TIME},
+		{"timeEnd", CONSOLE_TIME_END},
+	} {
+		c.SetMember(value.EncodeHandle(heap.Allocate(NewLightString(item.name))), value.EncodeHandle(heap.Allocate(NewConsoleMethod(item.name, item.kind))))
+	}
 	return c
 }
 
@@ -46,6 +64,15 @@ const (
 	CONSOLE_TABLE
 	CONSOLE_TIME
 	CONSOLE_TIME_END
+	CONSOLE_WARN
+	CONSOLE_INFO
+	CONSOLE_DEBUG
+	CONSOLE_ASSERT
+	CONSOLE_DIR
+	CONSOLE_TRACE
+	CONSOLE_COUNT
+	CONSOLE_GROUP
+	CONSOLE_GROUP_END
 )
 
 type ConsoleMethod struct {
@@ -69,6 +96,14 @@ func (c *Console) Start(label string) {
 func (c *Console) End(label string) (time.Duration, bool) {
 	start, found := c.timers[label]
 	return time.Since(start), found
+}
+
+func (c *Console) Count(label string) int {
+	if c.counts == nil {
+		c.counts = map[string]int{}
+	}
+	c.counts[label]++
+	return c.counts[label]
 }
 
 func ConsoleTable(values []value.Value, output *strings.Builder) {
@@ -186,26 +221,77 @@ func consoleLogString(v value.Value) string {
 			return "-0"
 		}
 	}
-	return String(v)
+	result := String(v)
+	if v.IsObject() {
+		result = strings.TrimSuffix(result, "\n")
+	}
+	return result
+}
+
+func formatConsoleValues(values []value.Value) string {
+	if len(values) == 0 {
+		return ""
+	}
+	format, isFormat := ObjectStringValue(values[0])
+	if !isFormat {
+		parts := make([]string, len(values))
+		for i, v := range values {
+			parts[i] = consoleLogString(v)
+		}
+		return strings.Join(parts, " ")
+	}
+	var builder strings.Builder
+	next := 1
+	for i := 0; i < len(format); i++ {
+		if format[i] != '%' || i+1 >= len(format) {
+			builder.WriteByte(format[i])
+			continue
+		}
+		directive := format[i+1]
+		if directive == '%' {
+			builder.WriteByte('%')
+			i++
+			continue
+		}
+		if directive != 's' && directive != 'd' && directive != 'i' && directive != 'f' && directive != 'o' && directive != 'O' && directive != 'j' && directive != 'c' {
+			builder.WriteByte(format[i])
+			continue
+		}
+		if next >= len(values) {
+			builder.WriteByte(format[i])
+			continue
+		}
+		arg := values[next]
+		next++
+		switch directive {
+		case 'c':
+		case 'd', 'i', 'f':
+			if arg.IsNumber() {
+				builder.WriteString(nativeNumberString(arg.AsNumber()))
+			} else {
+				builder.WriteString(consoleLogString(arg))
+			}
+		default:
+			builder.WriteString(consoleLogString(arg))
+		}
+		i++
+	}
+	for ; next < len(values); next++ {
+		builder.WriteByte(' ')
+		builder.WriteString(consoleLogString(values[next]))
+	}
+	return builder.String()
 }
 
 func (*Log) Log(values []value.Value, sb *strings.Builder) {
-	for i, v := range values {
-		notLast := i < len(values)-1
-		pad := ""
-		if notLast {
-			pad = " "
-		}
-
-		if sb != nil {
-			fmt.Fprintf(sb, "%v%s", consoleLogString(v), pad)
-		} else {
-			fmt.Printf("%v%s", consoleLogString(v), pad)
-		}
-	}
+	text := formatConsoleValues(values)
 	if sb != nil {
-		fmt.Fprintln(sb)
+		fmt.Fprintln(sb, text)
 	} else {
-		fmt.Println()
+		fmt.Println(text)
 	}
+}
+
+func LogStderr(values []value.Value) {
+	fmt.Fprintln(os.Stderr, formatConsoleValues(values))
 }

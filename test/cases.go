@@ -9,11 +9,12 @@ import (
 )
 
 type testCase struct {
-	File       string `json:"file"`
-	SourceGoal string `json:"sourceGoal"`
-	Phase      string `json:"phase,omitempty"`
-	Error      string `json:"error,omitempty"`
-	Timeout    bool   `json:"timeout,omitempty"`
+	File           string `json:"file"`
+	SourceGoal     string `json:"sourceGoal"`
+	Phase          string `json:"phase,omitempty"`
+	Error          string `json:"error,omitempty"`
+	Timeout        bool   `json:"timeout,omitempty"`
+	ExpectedOutput string `json:"expectedOutput,omitempty"`
 }
 
 func (test testCase) label() string {
@@ -21,9 +22,10 @@ func (test testCase) label() string {
 }
 
 type testConfig struct {
-	TimeoutMS   int                 `json:"timeoutMs"`
-	SourceGoals map[string][]string `json:"sourceGoals"`
-	Negative    []testCase          `json:"negative"`
+	TimeoutMS       int                 `json:"timeoutMs"`
+	SourceGoals     map[string][]string `json:"sourceGoals"`
+	ExpectedOutputs map[string]string   `json:"expectedOutputs"`
+	Negative        []testCase          `json:"negative"`
 }
 
 func validSourceGoal(goal string) bool {
@@ -66,17 +68,27 @@ func loadCases(root string) ([]testCase, time.Duration, error) {
 			return nil, 0, fmt.Errorf("no source goals configured for %s", name)
 		}
 		seenGoals := map[string]bool{}
+		expectedOutput, hasExpectedOutput := config.ExpectedOutputs[name]
 		for _, goal := range goals {
 			if !validSourceGoal(goal) || seenGoals[goal] {
 				return nil, 0, fmt.Errorf("invalid or duplicate source goal %q for %s", goal, name)
 			}
 			seenGoals[goal] = true
-			cases = append(cases, testCase{File: filepath.Join(DIR_NAME_TEST_SCRIPTS, name), SourceGoal: goal})
+			test := testCase{File: filepath.Join(DIR_NAME_TEST_SCRIPTS, name), SourceGoal: goal}
+			if hasExpectedOutput {
+				test.ExpectedOutput = expectedOutput
+			}
+			cases = append(cases, test)
 		}
 	}
 	for name := range config.SourceGoals {
 		if !discovered[name] {
 			return nil, 0, fmt.Errorf("source goals configured for missing test %s", name)
+		}
+	}
+	for name := range config.ExpectedOutputs {
+		if !discovered[name] {
+			return nil, 0, fmt.Errorf("expected output configured for missing test %s", name)
 		}
 	}
 

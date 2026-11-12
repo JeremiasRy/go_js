@@ -37,6 +37,7 @@ const (
 	MATH_CLZ32
 	MATH_FROUND
 	MATH_RANDOM
+	MATH_SUM_PRECISE
 )
 
 type MathMethod struct {
@@ -83,6 +84,7 @@ func NewMathObject() *ObjObject {
 		{"clz32", MATH_CLZ32},
 		{"fround", MATH_FROUND},
 		{"random", MATH_RANDOM},
+		{"sumPrecise", MATH_SUM_PRECISE},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))

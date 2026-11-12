@@ -1,0 +1,1 @@
+console.log(typeof Map.prototype+','+(Object.getPrototypeOf(new Map())===Map.prototype))

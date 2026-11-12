@@ -145,14 +145,18 @@ func (vm *VM) callReflectMethod(fn *native.ReflectMethod, args []value.Value) (v
 			}
 			return vm.proxyApply(proxy, args[1], callArgs)
 		}
-		if _, ok := obj.(object.Callable); !ok {
+		callable, ok := obj.(object.Callable)
+		if !ok && obj.Type() != object.OBJ_NATIVE_FN {
 			return value.UNDEFINED, &JSException{Name: "TypeError", Message: "Reflect.apply target is not callable"}
 		}
 		callArgs, ok := vm.arrayValues(args[2])
 		if !ok {
 			return value.UNDEFINED, &JSException{Name: "TypeError", Message: "CreateListFromArrayLike called on non-object"}
 		}
-		return vm.callValue(args[0], args[1], callArgs)
+		if callable != nil {
+			return vm.callValue(args[0], args[1], callArgs)
+		}
+		return vm.invokeCallableWithThis(args[0], args[1], callArgs)
 	case "construct":
 		if len(args) < 2 || !args[0].IsObject() {
 			return value.UNDEFINED, &JSException{Name: "TypeError", Message: "Reflect.construct called on non-object"}

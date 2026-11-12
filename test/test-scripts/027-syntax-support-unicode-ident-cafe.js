@@ -1,0 +1,1 @@
+const café=3;console.log(café)

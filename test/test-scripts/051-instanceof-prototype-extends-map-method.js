@@ -1,0 +1,1 @@
+class M extends Map{};var m=new M();console.log(typeof m.set)

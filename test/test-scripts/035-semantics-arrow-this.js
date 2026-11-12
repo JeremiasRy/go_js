@@ -1,0 +1,1 @@
+var f=()=>this;console.log(f()===globalThis)

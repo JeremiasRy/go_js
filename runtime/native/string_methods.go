@@ -32,6 +32,8 @@ const (
 	STRING_SUBSTR
 	STRING_CONCAT
 	STRING_LOCALE_COMPARE
+	STRING_IS_WELL_FORMED
+	STRING_TO_WELL_FORMED
 )
 
 type StringMethod struct {
@@ -74,6 +76,8 @@ func AddStringMethods(p *Prototype) {
 		{"substr", STRING_SUBSTR},
 		{"concat", STRING_CONCAT},
 		{"localeCompare", STRING_LOCALE_COMPARE},
+		{"isWellFormed", STRING_IS_WELL_FORMED},
+		{"toWellFormed", STRING_TO_WELL_FORMED},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))

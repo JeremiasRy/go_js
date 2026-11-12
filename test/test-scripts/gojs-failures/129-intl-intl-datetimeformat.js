@@ -1,0 +1,1 @@
+console.log(new Intl.DateTimeFormat('en-US',{timeZone:'UTC'}).format(0))

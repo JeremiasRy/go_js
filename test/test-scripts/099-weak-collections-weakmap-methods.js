@@ -1,0 +1,1 @@
+var w=new WeakMap();console.log(typeof w.set+','+typeof w.get+','+typeof w.has+','+typeof w.delete)

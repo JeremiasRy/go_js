@@ -72,6 +72,11 @@ func NewNamedError(name string) *ObjError {
 	objError.SetMember(KEY_PROTO, proto)
 	objError.SetMember(KEY_NAME, value.EncodeHandle(heap.Allocate(NewLightString(name))))
 	objError.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(""))))
+	for _, key := range []value.Value{KEY_NAME, KEY_MESSAGE} {
+		entry, _ := objError.GetOwnEntry(key)
+		entry.nonEnumerable = true
+		objError.Members[objectKeyStringMust(key)] = entry
+	}
 	return objError
 }
 

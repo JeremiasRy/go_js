@@ -1,0 +1,1 @@
+console.log(crypto.getRandomValues(new Uint8Array(4)).length)
