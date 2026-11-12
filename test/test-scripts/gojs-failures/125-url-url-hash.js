@@ -1,0 +1,1 @@
+console.log(new URL('https://e.com/a#h').hash)

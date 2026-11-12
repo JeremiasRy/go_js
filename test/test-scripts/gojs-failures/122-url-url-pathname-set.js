@@ -1,0 +1,1 @@
+var u=new URL('https://e.com/a');u.pathname='/b';console.log(u.href)

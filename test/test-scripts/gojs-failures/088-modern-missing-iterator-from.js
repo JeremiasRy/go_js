@@ -1,0 +1,1 @@
+console.log(Iterator.from([1,2]).toArray().join(','))

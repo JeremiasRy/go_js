@@ -1,0 +1,1 @@
+var o={a:1};with(o){a=2};console.log(o.a)

@@ -1,0 +1,1 @@
+var 日本=4;console.log(日本)

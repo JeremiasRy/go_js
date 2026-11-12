@@ -1,0 +1,1 @@
+var u=new URL('https://user:pass@e.com:8080/a?b=1#c');console.log([u.protocol,u.username,u.password,u.hostname,u.port,u.pathname,u.search,u.hash,u.origin].join('|'))

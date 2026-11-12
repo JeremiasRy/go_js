@@ -1,0 +1,1 @@
+var o={};with(o){console.log('hit')}

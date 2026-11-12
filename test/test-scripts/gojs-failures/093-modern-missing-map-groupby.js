@@ -1,0 +1,1 @@
+var m=Map.groupBy([1,2,3],x=>x%2);console.log(m.get(1).join(','))

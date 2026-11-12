@@ -1,0 +1,1 @@
+console.log(new URL('/x','https://e.com/a').href)

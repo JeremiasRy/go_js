@@ -1,0 +1,1 @@
+Array.fromAsync([1,2]).then(a=>console.log(a.join(',')))

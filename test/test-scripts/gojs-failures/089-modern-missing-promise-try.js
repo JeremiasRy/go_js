@@ -1,0 +1,1 @@
+Promise.try(()=>7).then(v=>console.log(v))

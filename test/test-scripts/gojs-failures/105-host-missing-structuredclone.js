@@ -1,0 +1,1 @@
+console.log(structuredClone({a:1}).a)

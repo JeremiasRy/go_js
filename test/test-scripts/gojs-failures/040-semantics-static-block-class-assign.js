@@ -1,0 +1,1 @@
+class A{static x;static{A.x=5}}console.log(A.x)

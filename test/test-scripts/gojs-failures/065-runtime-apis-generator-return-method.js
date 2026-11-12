@@ -1,0 +1,1 @@
+function* g(){yield 1}var it=g();it.next();console.log(it.return(9).done)

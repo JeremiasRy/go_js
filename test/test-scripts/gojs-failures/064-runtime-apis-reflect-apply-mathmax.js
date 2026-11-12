@@ -1,0 +1,1 @@
+console.log(Reflect.apply(Math.max,null,[1,9]))

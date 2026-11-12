@@ -1,0 +1,1 @@
+var b=new ArrayBuffer(4);var c=b.transfer();console.log(c.byteLength+','+b.byteLength)

@@ -1,0 +1,1 @@
+console.log(JSON.stringify(new Uint8Array([1,2])))

@@ -1,0 +1,1 @@
+var a=setTimeout(()=>console.log('a'),20);var b=setTimeout(()=>console.log('b'),40);clearTimeout(a)

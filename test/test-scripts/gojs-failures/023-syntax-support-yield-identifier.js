@@ -1,0 +1,1 @@
+var yield=1;console.log(yield)

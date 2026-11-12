@@ -1,0 +1,1 @@
+console.log(JSON.stringify([new Map(),new Date(0)]))

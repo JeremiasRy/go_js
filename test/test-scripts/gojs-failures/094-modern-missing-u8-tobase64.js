@@ -1,0 +1,1 @@
+console.log(new Uint8Array([104,105]).toBase64())

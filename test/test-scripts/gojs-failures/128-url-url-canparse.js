@@ -1,0 +1,1 @@
+console.log(URL.canParse('https://x.com'))

@@ -1,0 +1,1 @@
+class A extends Array{};var a=new A();a.push(1)

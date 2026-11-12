@@ -1,0 +1,1 @@
+var o={[Symbol.iterator]:function*(){yield 1;yield 2}};console.log([...o].join(','))

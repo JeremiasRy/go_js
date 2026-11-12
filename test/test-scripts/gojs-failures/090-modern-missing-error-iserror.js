@@ -1,0 +1,1 @@
+console.log(Error.isError(new Error('x')))
