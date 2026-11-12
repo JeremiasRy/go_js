@@ -311,6 +311,12 @@ func (a *Heap) sweep() {
 				fmt.Println("Cleaning up:", obj.String())
 			}
 			a.freeList[uint32(i)] = struct{}{}
+			if obj.Type() == object.OBJ_STRING {
+				str := obj.String()
+				if ptr, found := a.strings[str]; found && ptr == uint32(i) {
+					delete(a.strings, str)
+				}
+			}
 		}
 	}
 
@@ -330,9 +336,6 @@ func (a *Heap) sweep() {
 		a.gcCycleDeterminator /= 2
 	}
 
-	if len(a.freeList) > 0 && len(a.objects)/len(a.freeList) > 1 {
-		defragment()
-	}
 }
 func pushGrey(o object.Object) {
 	a.greyStack = append(a.greyStack, o)
@@ -346,49 +349,6 @@ func popGrey() object.Object {
 	a.greyStack = a.greyStack[:len(a.greyStack)-1]
 
 	return o
-}
-
-func defragment() {
-	arr := make([]object.Object, 0, len(a.objects)-len(a.freeList))
-	indexMap := map[uint32]uint32{}
-
-	for current := range a.objects {
-		if _, found := a.freeList[uint32(current)]; !found {
-			arr = append(arr, a.objects[current])
-			indexMap[uint32(current)] = uint32(len(arr) - 1)
-		}
-		current++
-	}
-
-	deleteMap := map[uint32]struct{}{}
-	deleteStrings := map[string]struct{}{}
-
-	for k, v := range a.handleLayer {
-		if new, found := indexMap[v]; found {
-			a.handleLayer[k] = new
-		} else {
-			deleteMap[k] = struct{}{}
-		}
-	}
-
-	for k, v := range a.strings {
-		if new, found := indexMap[v]; found {
-			a.strings[k] = new
-		} else {
-			deleteStrings[k] = struct{}{}
-		}
-	}
-
-	for k := range deleteMap {
-		delete(a.handleLayer, k)
-	}
-
-	for k := range deleteStrings {
-		delete(a.strings, k)
-	}
-
-	a.freeList = map[uint32]struct{}{}
-	a.objects = arr
 }
 
 func RequestGC(stackValues []value.Value) {

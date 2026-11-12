@@ -1373,6 +1373,18 @@ func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Valu
 	return runner.run(frame, code)
 }
 
+func builderFromValue(v value.Value) (*native.ObjStringBuilder, bool) {
+	if !v.IsObject() {
+		return nil, false
+	}
+	obj, err := heap.GetObject(v.GetHandle())
+	if err != nil {
+		return nil, false
+	}
+	builder, ok := obj.(*native.ObjStringBuilder)
+	return builder, ok
+}
+
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
 	obj, err := heap.GetObject(fn.GetHandle())
 	if err != nil {
@@ -2975,6 +2987,38 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 					continue
 				}
+				paBuilder, aBuilder := builderFromValue(pa)
+				pbBuilder, bBuilder := builderFromValue(pb)
+				if aBuilder {
+					if bBuilder {
+						paBuilder.Concatenate(pbBuilder.String())
+					} else if bs, ok := vm.valueAsString(pb); ok {
+						paBuilder.Concatenate(bs)
+					} else {
+						bsValue, err := vm.toStringValue(pb)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						bs, _ := vm.valueAsString(bsValue)
+						paBuilder.Concatenate(bs)
+					}
+					vm.push(pa)
+					continue
+				}
+				if bBuilder {
+					as, ok := vm.valueAsString(pa)
+					if !ok {
+						asValue, err := vm.toStringValue(pa)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						as, _ = vm.valueAsString(asValue)
+					}
+					result := native.NewStringBuilder(native.NewLightString(as))
+					result.Concatenate(pbBuilder.String())
+					vm.push(value.EncodeHandle(heap.Allocate(result)))
+					continue
+				}
 				as, aIsString := vm.valueAsString(pa)
 				bs, bIsString := vm.valueAsString(pb)
 				if aIsString || bIsString {
@@ -2991,25 +3035,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							return value.UNDEFINED, err
 						}
 						bs, _ = vm.valueAsString(bsValue)
-					}
-					if pa.IsObject() {
-						if obj, err := heap.GetObject(pa.GetHandle()); err == nil {
-							if builder, ok := obj.(*native.ObjStringBuilder); ok {
-								builder.Concatenate(bs)
-								vm.push(pa)
-								continue
-							}
-						}
-					}
-					if pb.IsObject() {
-						if obj, err := heap.GetObject(pb.GetHandle()); err == nil {
-							if builder, ok := obj.(*native.ObjStringBuilder); ok {
-								result := native.NewStringBuilder(native.NewLightString(as))
-								result.Concatenate(builder.String())
-								vm.push(value.EncodeHandle(heap.Allocate(result)))
-								continue
-							}
-						}
 					}
 					result := native.NewStringBuilder(native.NewLightString(as))
 					result.Concatenate(bs)

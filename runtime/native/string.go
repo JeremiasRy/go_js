@@ -209,7 +209,7 @@ func (*ObjStringBuilder) Type() object.ObjType {
 }
 
 func (osb *ObjStringBuilder) String() string {
-	return osb.b.String()
+	return strings.Clone(osb.b.String())
 }
 func (osb *ObjStringBuilder) Mark() {
 	osb.marked = true
@@ -226,7 +226,7 @@ func (osb *ObjStringBuilder) Concatenate(s string) {
 }
 
 func (osb *ObjStringBuilder) Flush() *LightString {
-	str := NewLightString(osb.b.String())
+	str := NewLightString(osb.String())
 	return str
 }
 
