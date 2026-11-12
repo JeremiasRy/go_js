@@ -165,6 +165,9 @@ func compareCase(test testCase, expected, got execution) error {
 		return fmt.Errorf("GO_JS: %w", err)
 	}
 	if !bytes.Equal(expected.Output, got.Output) {
+		if test.ExpectedOutput != "" {
+			return fmt.Errorf("stdout differs from expected output")
+		}
 		return fmt.Errorf("stdout differs from Node")
 	}
 	return nil

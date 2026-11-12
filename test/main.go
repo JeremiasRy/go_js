@@ -32,7 +32,12 @@ func main() {
 	fails := []failure{}
 	for index, test := range cases {
 		fmt.Printf("%-70s %03d/%d... ", test.label(), index+1, len(cases))
-		expected := runNode(test, timeout)
+		expected := execution{}
+		if test.ExpectedOutput != "" {
+			expected.Output = []byte(test.ExpectedOutput)
+		} else {
+			expected = runNode(test, timeout)
+		}
 		got := runRuntime(test, timeout)
 		if err := compareCase(test, expected, got); err != nil {
 			fmt.Println("❌", err)

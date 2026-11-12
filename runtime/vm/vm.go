@@ -2880,25 +2880,25 @@ Run:
 	}
 
 	tick := time.NewTicker(100 * time.Millisecond)
-	hasWork := eventloop.HasWork()
-
-	if flags.Debug {
-		fmt.Printf("eventloop has work: %v\n", hasWork)
+	defer tick.Stop()
+	if eventloop.TryClose() {
+		wg.Done()
+		return
 	}
-	for hasWork {
+	for {
 		select {
 		case <-queue.QueueC:
-			{
+			goto Run
+		case <-tick.C:
+			if queue.HasTasks() {
 				goto Run
 			}
-		case <-tick.C:
-			{
-				hasWork = eventloop.HasWork()
-				continue
+			if eventloop.TryClose() {
+				wg.Done()
+				return
 			}
 		}
 	}
-	wg.Done()
 }
 
 func (vm *VM) runGC() {
@@ -6520,7 +6520,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.SetTimeout:
 					{
 						args := vm.popN(argCount)
-						if len(args) == 0 || !args[0].IsObject() {
+						if len(args) == 0 {
 							errValue := vm.makeError("TypeError", "The callback argument must be of type function")
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
@@ -6535,33 +6535,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if math.IsNaN(delay) || delay < 0 {
 							delay = 0
 						}
-						obj, err := heap.GetObject(callback.GetHandle())
-						if err != nil {
-							errValue := vm.makeError("TypeError", "The callback argument must be of type function")
-							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
-								return value.UNDEFINED, err
-							}
-							continue
-						}
-						callbackFn, ok := obj.(object.Callable)
-						if !ok {
-							errValue := vm.makeError("TypeError", "The callback argument must be of type function")
-							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
-								return value.UNDEFINED, err
-							}
-							continue
-						}
 						var extraArgs []value.Value
 						if len(args) > 2 {
 							extraArgs = args[2:]
 						}
-						fn.Set(int(delay), callbackFn, thisCtx, extraArgs)
-						clone := fn.Clone()
-						key := heap.NewCallbackRoot()
-						clone.SetRootKey(key)
-						heap.StoreCallbackRoot(key, callback, thisCtx)
-						id := native.RegisterTimer(clone)
-						eventloop.Dispatch(clone)
+						id, err := vm.scheduleTimer(fn, callback, thisCtx, int(delay), extraArgs)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
 						vm.push(value.ValueFromFloat64(float64(id)))
 					}
 				case *native.ClearTimeout:
@@ -7318,6 +7303,35 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							name = mustString(vm, args[0])
 						}
 						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.Values.Get(name)))))
+					}
+				case *native.HostFunction:
+					{
+						result, err := vm.callHostFunction(fn, thisCtx, argCount)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.RequireFunction:
+					{
+						args := vm.popN(argCount)
+						request := ""
+						if len(args) > 0 {
+							request = mustString(vm, args[0])
+						}
+						result, err := vm.requireModule(fn.BaseDir, request)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case *native.ParseFloat:
 					{

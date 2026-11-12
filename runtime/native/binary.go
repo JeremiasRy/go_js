@@ -31,13 +31,20 @@ func bigIntToUint64(v value.Value) uint64 {
 
 type ObjArrayBuffer struct {
 	ObjObject
-	Data []byte
+	Data   []byte
+	Shared bool
 }
 
 func NewArrayBuffer(length int) *ObjArrayBuffer {
 	buffer := &ObjArrayBuffer{Data: make([]byte, length)}
 	buffer.Members = map[string]ObjectValueEntry{}
 	buffer.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	return buffer
+}
+
+func NewSharedArrayBuffer(length int) *ObjArrayBuffer {
+	buffer := NewArrayBuffer(length)
+	buffer.Shared = true
 	return buffer
 }
 
@@ -188,6 +195,7 @@ type ObjTypedArray struct {
 	Offset      int
 	Length      int
 	Kind        uint8
+	IsBuffer    bool
 }
 
 func NewTypedArray(buffer *ObjArrayBuffer, bufferValue value.Value, offset, length int, kind uint8) *ObjTypedArray {
@@ -195,6 +203,12 @@ func NewTypedArray(buffer *ObjArrayBuffer, bufferValue value.Value, offset, leng
 	array.Members = map[string]ObjectValueEntry{}
 	array.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 	return array
+}
+
+func NewUint8ArrayFromBytes(data []byte) *ObjTypedArray {
+	buffer := NewArrayBuffer(len(data))
+	copy(buffer.Data, data)
+	return NewTypedArray(buffer, value.EncodeHandle(heap.Allocate(buffer)), 0, len(data), TYPED_UINT8)
 }
 
 func (*ObjTypedArray) Type() object.ObjType {
