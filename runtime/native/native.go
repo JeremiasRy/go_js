@@ -111,6 +111,7 @@ func (*ParseInt) ParseInteger(str string, base int) (value.Value, error) {
 func Init() {
 	createCommonHandles()
 	initObjectPrototype()
+	initErrorPrototypes()
 
 	initArrayPrototype()
 	initStringPrototype()

@@ -25,6 +25,9 @@ func NewErrorConstructor() *ErrorConstructor {
 func NewNamedErrorConstructor(name string) *ErrorConstructor {
 	ec := &ErrorConstructor{errorName: name}
 	ec.Members = map[string]ObjectValueEntry{}
+	if proto, found := ERROR_PROTOTYPES[name]; found {
+		ec.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), proto)
+	}
 	return ec
 }
 
@@ -42,12 +45,57 @@ func (*ErrorConstructor) Type() object.ObjType {
 
 func (ec *ErrorConstructor) New(params ...any) (object.Object, error) {
 	errorObject := NewNamedError(ec.errorName)
-	if len(params) > 0 {
-		if argHandle, ok := params[0].(value.Value); ok {
+	messageIndex := 0
+	if ec.errorName == "AggregateError" {
+		errors := []value.Value{}
+		if len(params) > 0 {
+			if first, ok := params[0].(value.Value); ok {
+				if first.IsObject() {
+					if obj, err := heap.GetObject(first.GetHandle()); err == nil {
+						if arr, ok := obj.(*ObjArr); ok {
+							for i := 0; i < arr.Length(); i++ {
+								errors = append(errors, arr.GetElementAt(i))
+							}
+						} else if hashable, ok := obj.(object.Hashable); ok {
+							lengthValue := hashable.GetMember(value.EncodeHandle(heap.Allocate(NewLightString("length"))))
+							if lengthValue.IsNumber() {
+								for i := 0; i < int(lengthValue.AsNumber()); i++ {
+									errors = append(errors, hashable.GetMember(IndexValue(i)))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		errorObject.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("errors"))), value.EncodeHandle(heap.Allocate(NewArrayFrom(errors))))
+		messageIndex = 1
+	}
+	if len(params) > messageIndex {
+		if argHandle, ok := params[messageIndex].(value.Value); ok {
 			if argHandle != value.UNDEFINED {
 				arg, err := heap.GetObject(argHandle.GetHandle())
+				message := ""
 				if err == nil {
-					errorObject.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(arg.String()))))
+					message = arg.String()
+				} else if argHandle.IsNumber() || argHandle.IsBoolean() {
+					message = String(argHandle)
+				} else if argHandle.IsType(value.NULL) {
+					message = "null"
+				}
+				errorObject.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(message))))
+			}
+		}
+	}
+	optionsIndex := messageIndex + 1
+	if len(params) > optionsIndex {
+		if options, ok := params[optionsIndex].(value.Value); ok && options.IsObject() {
+			if obj, err := heap.GetObject(options.GetHandle()); err == nil {
+				if hashable, ok := obj.(object.Hashable); ok {
+					causeKey := value.EncodeHandle(heap.Allocate(NewLightString("cause")))
+					if hashable.HasOwn(causeKey) {
+						errorObject.SetMember(causeKey, hashable.GetMember(causeKey))
+					}
 				}
 			}
 		}

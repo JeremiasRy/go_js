@@ -1887,11 +1887,22 @@ func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
 		if err != nil {
 			continue
 		}
-		if _, ok := methodObj.(object.Callable); !ok {
+		isCallable := false
+		if _, ok := methodObj.(object.Callable); ok {
+			isCallable = true
+		} else if methodObj.Type() == object.OBJ_NATIVE_FN {
+			isCallable = true
+		}
+		if !isCallable {
 			continue
 		}
 		foundMethod = true
-		result, err := vm.callValue(method, v, nil)
+		var result value.Value
+		if _, ok := methodObj.(object.Callable); ok {
+			result, err = vm.callValue(method, v, nil)
+		} else {
+			result, err = vm.invokeCallableWithThis(method, v, nil)
+		}
 		if err == nil {
 			if !result.IsObject() {
 				return result, nil
@@ -2200,20 +2211,11 @@ func (vm *VM) instanceOf(objValue, ctor value.Value) (bool, error) {
 	case *native.ObjClass:
 		prototype = ctorObj.Prototype
 	case *native.ErrorConstructor:
-		obj, err := heap.GetObject(objValue.GetHandle())
-		if err != nil {
-			return false, err
-		}
-		errObj, ok := obj.(*native.ObjError)
+		prototype, ok := native.ERROR_PROTOTYPES[ctorObj.ErrorName()]
 		if !ok {
 			return false, nil
 		}
-		if ctorObj.ErrorName() == "Error" {
-			return true, nil
-		}
-		nameValue := errObj.GetMember(native.KEY_NAME)
-		name, _ := vm.valueAsString(nameValue)
-		return name == ctorObj.ErrorName(), nil
+		return native.ErrorPrototypeChainContains(objValue, prototype), nil
 	}
 	if !prototype.IsObject() {
 		return false, fmt.Errorf("function has non-object prototype in instanceof check")
@@ -4826,6 +4828,38 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 						}
 						vm.push(value.UNDEFINED)
+					}
+				case *native.ErrorConstructor:
+					{
+						args := vm.popN(argCount)
+						params := make([]any, len(args))
+						for i, arg := range args {
+							params[i] = arg
+						}
+						obj, err := fn.New(params...)
+						if err != nil {
+							errValue := vm.makeError("TypeError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(obj)))
+					}
+				case *native.ErrorToString:
+					{
+						vm.popN(argCount)
+						name := ""
+						message := ""
+						if thisCtx.IsObject() {
+							if nameValue, err := vm.getMemberValue(thisCtx, native.KEY_NAME); err == nil && nameValue != value.UNDEFINED {
+								name, _ = vm.valueAsString(nameValue)
+							}
+							if messageValue, err := vm.getMemberValue(thisCtx, native.KEY_MESSAGE); err == nil && messageValue != value.UNDEFINED {
+								message, _ = vm.valueAsString(messageValue)
+							}
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.ToString(name, message)))))
 					}
 				case *native.DateMethod:
 					{
@@ -7505,6 +7539,27 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 									return value.UNDEFINED, err
 								}
 								continue
+							}
+						} else if parentError, ok := parentObj.(*native.ErrorConstructor); ok {
+							params := make([]any, len(args))
+							for i, arg := range args {
+								params[i] = arg
+							}
+							errorObject, err := parentError.New(params...)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							if errObj, ok := errorObject.(*native.ObjError); ok {
+								for key, entry := range errObj.Members {
+									if key == native.PROTOTYPE_PROPERTY_STRING {
+										continue
+									}
+									instance.Members[key] = entry
+								}
 							}
 						}
 					}
