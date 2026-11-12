@@ -4,7 +4,7 @@ Make all the tests pass in `./test`, run the full test suite with `./test.sh`.
 
 # Recommended approach
 
-Take one of the failing tests from `./test/failures` and run it with `-debug` flag:
+Take one of the failing tests from `./test/failures` and run it with `-debug` flag.
 
 `cd runtime`
 
