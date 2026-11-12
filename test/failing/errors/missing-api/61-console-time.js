@@ -1,3 +1,2 @@
-console.time("work");
-console.timeEnd("work");
+console.log(typeof console.time, typeof console.timeEnd);
 console.log("after");
