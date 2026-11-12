@@ -6844,7 +6844,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iterator := vm.peek()
 				done, err := vm.iteratorNext(iterator)
 				if err != nil {
-					errValue := vm.makeError("TypeError", err.Error())
+					errValue := vm.errorValue(err)
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 						return value.UNDEFINED, err
 					}
@@ -6859,7 +6859,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				iterator := vm.stack[f.localStart+slot]
 				done, err := vm.iteratorNext(iterator)
 				if err != nil {
-					errValue := vm.makeError("TypeError", err.Error())
+					errValue := vm.errorValue(err)
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 						return value.UNDEFINED, err
 					}
