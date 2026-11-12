@@ -580,6 +580,17 @@ func EntryModule() *ModuleRecord {
 	return entryModule
 }
 
+func ModuleRecords() []*ModuleRecord {
+	records := make([]*ModuleRecord, 0, len(moduleRecords))
+	for _, record := range moduleRecords {
+		records = append(records, record)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].Path < records[j].Path
+	})
+	return records
+}
+
 func LoadModule(specifier, parent string) (*ModuleRecord, error) {
 	modulePath := ResolveModulePath(specifier, parent)
 	record, found := moduleRecords[modulePath]

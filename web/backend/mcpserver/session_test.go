@@ -135,23 +135,112 @@ func encodedResult(output string) string {
 	return base64.StdEncoding.EncodeToString(payload)
 }
 
-func TestWebSocketRequiresExistingSession(t *testing.T) {
+func TestWebSocketCreatesSessionForClientID(t *testing.T) {
 	store := newFakeStore()
 	work := make(chan worker.HeartbeatSignal, 8)
 	manager := NewManager(store, work, time.Minute)
 	t.Cleanup(manager.Close)
 
 	server := newTestServer(t, manager)
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/" + uuid.NewString()
-	conn, response, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if conn != nil {
-		_ = conn.Close()
+	clientID := uuid.NewString()
+	conn, ready := dialSessionByID(t, server, clientID)
+	if ready.Type != MessageSessionReady {
+		t.Fatalf("expected %q, got %q", MessageSessionReady, ready.Type)
 	}
-	if err == nil {
-		t.Fatal("expected unknown session websocket to be rejected")
+	if ready.SessionID != clientID {
+		t.Fatalf("expected client session %q, got %q", clientID, ready.SessionID)
 	}
-	if response == nil || response.StatusCode != http.StatusNotFound {
-		t.Fatalf("expected 404, got %#v", response)
+	_ = conn.Close()
+}
+
+func TestCreateSessionEndpointUsesClientID(t *testing.T) {
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+
+	server := newTestServer(t, manager)
+	clientID := uuid.NewString()
+	body := strings.NewReader(`{"session_id":"` + clientID + `"}`)
+	response, err := http.Post(server.URL+"/session", "application/json", body)
+	if err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+
+	var first SessionInfo
+	if err := json.NewDecoder(response.Body).Decode(&first); err != nil {
+		t.Fatalf("decode session: %v", err)
+	}
+	if first.SessionID != clientID {
+		t.Fatalf("expected session %q, got %q", clientID, first.SessionID)
+	}
+	if first.WSPath != "/ws/"+clientID || first.MCPPath != "/session/"+clientID+"/mcp" {
+		t.Fatalf("unexpected session paths: %#v", first)
+	}
+
+	second, err := manager.EnsureSession(clientID)
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+	if second != first {
+		t.Fatalf("expected the same session to be reused, got %#v and %#v", first, second)
+	}
+}
+
+func TestMultipleTabsShareSession(t *testing.T) {
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	first, firstReady := dialSessionByID(t, server, session.SessionID)
+	if firstReady.SessionID != session.SessionID {
+		t.Fatalf("expected session %q, got %q", session.SessionID, firstReady.SessionID)
+	}
+
+	second, secondReady := dialSessionByID(t, server, session.SessionID)
+	if secondReady.SessionID != session.SessionID {
+		t.Fatalf("expected session %q, got %q", session.SessionID, secondReady.SessionID)
+	}
+
+	writeSocketMessage(t, first, socketMessage{
+		Type: MessageRunSubmit,
+		Code: "console.log(4)",
+	})
+
+	firstAccepted := readSocketMessage(t, first)
+	secondAccepted := readSocketMessage(t, second)
+	if firstAccepted.Type != MessageRunAccepted || secondAccepted.Type != MessageRunAccepted {
+		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunAccepted, firstAccepted.Type, secondAccepted.Type)
+	}
+	if firstAccepted.JobID != secondAccepted.JobID {
+		t.Fatalf("expected a shared job, got %q and %q", firstAccepted.JobID, secondAccepted.JobID)
+	}
+
+	jobID, err := uuid.Parse(firstAccepted.JobID)
+	if err != nil {
+		t.Fatalf("parse job id: %v", err)
+	}
+	raw := encodedResult("4")
+	manager.DeliverJobResult(jobID, "Success", raw)
+
+	firstResult := readSocketMessage(t, first)
+	secondResult := readSocketMessage(t, second)
+	if firstResult.Type != MessageRunResult || secondResult.Type != MessageRunResult {
+		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunResult, firstResult.Type, secondResult.Type)
+	}
+	if firstResult.JobID != jobID.String() || secondResult.JobID != jobID.String() {
+		t.Fatalf("expected both tabs to receive job %q", jobID)
 	}
 }
 
@@ -386,6 +475,100 @@ func TestMCPExecuteFlow(t *testing.T) {
 		}
 		if !strings.Contains(contents[0].Text, jobID.String()) {
 			t.Fatalf("expected job id in tool output, got %s", content)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for tool result")
+	}
+}
+
+func TestMCPExecuteBroadcastsToEveryTab(t *testing.T) {
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	first, _ := dialSessionByID(t, server, session.SessionID)
+	second, _ := dialSessionByID(t, server, session.SessionID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	mcpSession, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: server.URL + "/session/" + session.SessionID + "/mcp",
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect MCP client: %v", err)
+	}
+	t.Cleanup(func() { _ = mcpSession.Close() })
+
+	firstStatus := readSocketMessage(t, first)
+	secondStatus := readSocketMessage(t, second)
+	if firstStatus.Type != MessageMCPStatus || secondStatus.Type != MessageMCPStatus {
+		t.Fatalf("expected MCP status on both tabs, got %q and %q", firstStatus.Type, secondStatus.Type)
+	}
+
+	type callResult struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	callDone := make(chan callResult, 1)
+	go func() {
+		result, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "execute",
+			Arguments: map[string]any{"code": "2 + 2"},
+		})
+		callDone <- callResult{result: result, err: err}
+	}()
+
+	firstExecute := readSocketMessage(t, first)
+	secondExecute := readSocketMessage(t, second)
+	if firstExecute.Type != MessageExecuteRequest || secondExecute.Type != MessageExecuteRequest {
+		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageExecuteRequest, firstExecute.Type, secondExecute.Type)
+	}
+	if firstExecute.RequestID != secondExecute.RequestID || firstExecute.Code != "2 + 2" {
+		t.Fatalf("unexpected execute requests: %#v and %#v", firstExecute, secondExecute)
+	}
+
+	for _, conn := range []*websocket.Conn{first, second} {
+		writeSocketMessage(t, conn, socketMessage{
+			Type:      MessageRunSubmit,
+			RequestID: firstExecute.RequestID,
+			Code:      firstExecute.Code,
+		})
+	}
+
+	firstAccepted := readSocketMessage(t, first)
+	secondAccepted := readSocketMessage(t, second)
+	if firstAccepted.Type != MessageRunAccepted || secondAccepted.Type != MessageRunAccepted {
+		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunAccepted, firstAccepted.Type, secondAccepted.Type)
+	}
+	if firstAccepted.JobID != secondAccepted.JobID {
+		t.Fatalf("expected a shared job, got %q and %q", firstAccepted.JobID, secondAccepted.JobID)
+	}
+
+	jobID, err := uuid.Parse(firstAccepted.JobID)
+	if err != nil {
+		t.Fatalf("parse job id: %v", err)
+	}
+	manager.DeliverJobResult(jobID, "Success", encodedResult("4"))
+
+	firstResult := readSocketMessage(t, first)
+	secondResult := readSocketMessage(t, second)
+	if firstResult.Type != MessageRunResult || secondResult.Type != MessageRunResult {
+		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunResult, firstResult.Type, secondResult.Type)
+	}
+
+	select {
+	case call := <-callDone:
+		if call.err != nil {
+			t.Fatalf("CallTool failed: %v", call.err)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for tool result")

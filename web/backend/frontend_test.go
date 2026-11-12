@@ -11,10 +11,11 @@ import (
 	"time"
 )
 
-func TestFrontendHandlerInjectsSessionBootstrap(t *testing.T) {
+func TestFrontendHandlerServesIndexWithoutSessionBootstrap(t *testing.T) {
 	dir := t.TempDir()
 	indexPath := filepath.Join(dir, "index.html")
-	if err := os.WriteFile(indexPath, []byte("<!doctype html><html><head></head><body></body></html>"), 0o600); err != nil {
+	index := "<!doctype html><html><head></head><body></body></html>"
+	if err := os.WriteFile(indexPath, []byte(index), 0o600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -33,19 +34,11 @@ func TestFrontendHandlerInjectsSessionBootstrap(t *testing.T) {
 	if got := recorder.Header().Get("Cache-Control"); got != "no-store" {
 		t.Fatalf("expected no-store cache control, got %q", got)
 	}
-
-	body := recorder.Body.String()
-	if !strings.Contains(body, `id="go-js-session"`) {
-		t.Fatalf("expected session bootstrap script, got %s", body)
+	if body := recorder.Body.String(); body != index {
+		t.Fatalf("expected index to be served unchanged, got %s", body)
 	}
-	if !strings.Contains(body, `"session_id":"`) {
-		t.Fatalf("expected session id in bootstrap, got %s", body)
-	}
-	if !strings.Contains(body, `"mcp_path":"/session/`) {
-		t.Fatalf("expected MCP path in bootstrap, got %s", body)
-	}
-	if !strings.Contains(body, "</head>") {
-		t.Fatalf("expected head to remain intact, got %s", body)
+	if strings.Contains(recorder.Body.String(), "go-js-session") {
+		t.Fatal("page loads must not create or inject a server-side session")
 	}
 }
 

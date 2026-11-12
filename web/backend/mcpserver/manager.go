@@ -71,13 +71,7 @@ func (m *Manager) HandleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.mu.Lock()
-	session := m.sessions[sessionID]
-	m.mu.Unlock()
-	if session == nil {
-		http.NotFound(w, r)
-		return
-	}
+	session := m.getOrCreateSession(sessionID)
 	session.touch()
 
 	conn, err := m.upgrader.Upgrade(w, r, nil)
@@ -93,26 +87,87 @@ func (m *Manager) HandleWS(w http.ResponseWriter, r *http.Request) {
 	session.readLoop(attached)
 }
 
+type createSessionRequest struct {
+	SessionID string `json:"session_id"`
+	ClientID  string `json:"client_id"`
+}
+
 func (m *Manager) HandleCreateSession(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
 
-	info := m.CreateSession()
+	requestedID := strings.TrimSpace(r.URL.Query().Get("session_id"))
+	if requestedID == "" {
+		requestedID = strings.TrimSpace(r.URL.Query().Get("client_id"))
+	}
+	if r.Body != nil {
+		var request createSessionRequest
+		if err := json.NewDecoder(io.LimitReader(r.Body, 4096)).Decode(&request); err != nil && err != io.EOF {
+			http.Error(w, "invalid session request", http.StatusBadRequest)
+			return
+		}
+		if requestedID == "" {
+			requestedID = strings.TrimSpace(request.SessionID)
+		}
+		if requestedID == "" {
+			requestedID = strings.TrimSpace(request.ClientID)
+		}
+	}
+
+	var (
+		info SessionInfo
+		err  error
+	)
+	if requestedID == "" {
+		info = m.CreateSession()
+	} else {
+		info, err = m.EnsureSession(requestedID)
+		if err != nil {
+			http.Error(w, "invalid session id", http.StatusBadRequest)
+			return
+		}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(info)
 }
 
 func (m *Manager) CreateSession() SessionInfo {
-	sessionID := uuid.NewString()
-	session := newSession(sessionID, m, m.store, m.work)
+	info, _ := m.EnsureSession(uuid.NewString())
+	return info
+}
 
+func (m *Manager) CreateSessionWithID(sessionID string) (SessionInfo, error) {
+	return m.EnsureSession(sessionID)
+}
+
+func (m *Manager) EnsureSession(sessionID string) (SessionInfo, error) {
+	id, err := canonicalSessionID(sessionID)
+	if err != nil {
+		return SessionInfo{}, err
+	}
+
+	m.getOrCreateSession(id)
+	return sessionInfo(id), nil
+}
+
+func (m *Manager) getOrCreateSession(sessionID string) *Session {
 	m.mu.Lock()
-	m.sessions[sessionID] = session
-	m.mu.Unlock()
+	defer m.mu.Unlock()
 
+	if session := m.sessions[sessionID]; session != nil {
+		return session
+	}
+
+	session := newSession(sessionID, m, m.store, m.work)
+	m.sessions[sessionID] = session
+	return session
+}
+
+func sessionInfo(sessionID string) SessionInfo {
 	return SessionInfo{
 		SessionID: sessionID,
 		WSPath:    "/ws/" + sessionID,
@@ -127,14 +182,7 @@ func (m *Manager) HandleMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	m.mu.Lock()
-	session := m.sessions[sessionID]
-	m.mu.Unlock()
-	if session == nil {
-		http.NotFound(w, r)
-		return
-	}
-
+	session := m.getOrCreateSession(sessionID)
 	session.touch()
 	if r.Method == http.MethodPost && requestHasJSONRPCMethod(r) {
 		session.beginMCPRequest()
