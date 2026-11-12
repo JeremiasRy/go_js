@@ -477,6 +477,12 @@ func (vm *VM) acquireIterator(iteratee value.Value, iteratorType uint8) (value.V
 		}
 		return value.UNDEFINED, fmt.Errorf("%s is not iterable", native.String(iteratee))
 	}
+	if collection, ok := obj.(*native.Map); ok {
+		return value.EncodeHandle(heap.Allocate(object.NewLiveIterator(collection.Entries))), nil
+	}
+	if collection, ok := obj.(*native.Set); ok {
+		return value.EncodeHandle(heap.Allocate(object.NewLiveIterator(collection.Values))), nil
+	}
 	if native.SYMBOL_ITERATOR != 0 {
 		method, err := vm.getMemberValue(iteratee, native.SYMBOL_ITERATOR)
 		if err == nil && method != value.UNDEFINED {
@@ -1739,6 +1745,12 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	}
 	if _, ok := obj.(*native.ObjArr); ok && key == native.SYMBOL_ITERATOR {
 		return value.EncodeHandle(heap.Allocate(native.NewArrayIterator())), nil
+	}
+	if _, ok := obj.(*native.Map); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewMapEntries())), nil
+	}
+	if _, ok := obj.(*native.Set); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewSetValues())), nil
 	}
 	if _, ok := obj.(*native.LightString); ok && key == native.SYMBOL_ITERATOR {
 		return value.EncodeHandle(heap.Allocate(native.NewStringIterator())), nil
@@ -5080,7 +5092,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						result, err := vm.callArrayStaticMethod(fn, argCount)
 						if err != nil {
-							errValue := vm.makeError("TypeError", err.Error())
+							errValue := vm.errorValue(err)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
 							}

@@ -312,6 +312,44 @@ func (vm *VM) callArrayMethod(method *native.ArrayMethod, this value.Value, argC
 			return value.UNDEFINED, err
 		}
 		return value.EncodeHandle(heap.Allocate(copy)), nil
+	case native.ARRAY_COPY_WITHIN:
+		to := 0
+		from := 0
+		end := length
+		if len(args) > 0 {
+			to = normalizeIndex(vm.arrayInteger(args[0], 0), length)
+		}
+		if len(args) > 1 {
+			from = normalizeIndex(vm.arrayInteger(args[1], 0), length)
+		}
+		if len(args) > 2 && args[2] != value.UNDEFINED {
+			end = normalizeIndex(vm.arrayInteger(args[2], length), length)
+		}
+		count := min(end-from, length-to)
+		if count > 0 {
+			items := make([]value.Value, count)
+			present := make([]bool, count)
+			for i := 0; i < count; i++ {
+				present[i] = arr.HasIndex(from + i)
+				if present[i] {
+					items[i] = arr.GetElementAt(from + i)
+				}
+			}
+			for i := 0; i < count; i++ {
+				if present[i] {
+					arr.SetElementAt(to+i, items[i])
+				} else {
+					arr.DeleteIndex(to + i)
+				}
+			}
+		}
+		return this, nil
+	case native.ARRAY_KEYS:
+		return value.EncodeHandle(heap.Allocate(newArrayMethodIterator(arr, "keys"))), nil
+	case native.ARRAY_VALUES:
+		return value.EncodeHandle(heap.Allocate(newArrayMethodIterator(arr, "values"))), nil
+	case native.ARRAY_ENTRIES:
+		return value.EncodeHandle(heap.Allocate(newArrayMethodIterator(arr, "entries"))), nil
 	case native.ARRAY_WITH:
 		index := 0
 		if len(args) > 0 {
@@ -532,6 +570,37 @@ func (vm *VM) callArrayCallbackMethod(method *native.ArrayCallbackMethod, this v
 		return value.ValueFromFloat64(-1), nil
 	case native.ARRAY_SORT:
 		return this, vm.sortArray(arr, args)
+	case native.ARRAY_REDUCE_RIGHT:
+		hasInitial := len(args) > 1
+		var accumulator value.Value
+		start := length - 1
+		if hasInitial {
+			accumulator = args[1]
+		} else {
+			found := false
+			for i := length - 1; i >= 0; i-- {
+				if item, present := vm.arrayIterationElement(this, arr, i); present {
+					accumulator = item
+					start = i - 1
+					found = true
+					break
+				}
+			}
+			if !found {
+				return value.UNDEFINED, fmt.Errorf("Reduce of empty array with no initial value")
+			}
+		}
+		for i := start; i >= 0; i-- {
+			item, present := vm.arrayIterationElement(this, arr, i)
+			if !present {
+				continue
+			}
+			accumulator, err = vm.invokeCallback(callback, value.UNDEFINED, []value.Value{accumulator, item, native.IndexValue(i), this})
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+		}
+		return accumulator, nil
 	case native.ARRAY_FLAT_MAP:
 		result := []value.Value{}
 		for i := 0; i < length; i++ {
@@ -786,6 +855,38 @@ func (vm *VM) callArrayIterationMethod(kind string, this value.Value, argCount i
 	return value.UNDEFINED, nil
 }
 
+func (vm *VM) toArrayLength(v value.Value) int {
+	n, err := vm.toNumber(v)
+	if err != nil || math.IsNaN(n) || n <= 0 {
+		return 0
+	}
+	if math.IsInf(n, 1) {
+		return int(^uint(0) >> 1)
+	}
+	maxInt := int(^uint(0) >> 1)
+	if n >= float64(maxInt) {
+		return maxInt
+	}
+	return int(math.Floor(n))
+}
+
+func newArrayMethodIterator(arr *native.ObjArr, mode string) *object.Iterator {
+	return object.NewLiveIterator(func() []value.Value {
+		values := make([]value.Value, 0, arr.Length())
+		for i := 0; i < arr.Length(); i++ {
+			switch mode {
+			case "keys":
+				values = append(values, native.IndexValue(i))
+			case "values":
+				values = append(values, arrayAt(arr, i))
+			default:
+				values = append(values, value.EncodeHandle(heap.Allocate(native.NewArrayFrom([]value.Value{native.IndexValue(i), arrayAt(arr, i)}))))
+			}
+		}
+		return values
+	})
+}
+
 func (vm *VM) callArrayStaticMethod(method *native.ArrayStaticMethod, argCount int) (value.Value, error) {
 	args := vm.popN(argCount)
 	switch method.Kind {
@@ -884,11 +985,7 @@ func (vm *VM) callArrayStaticMethod(method *native.ArrayStaticMethod, argCount i
 		if err != nil {
 			return value.UNDEFINED, err
 		}
-		n, err := vm.toNumber(lengthValue)
-		if err != nil {
-			return value.UNDEFINED, err
-		}
-		length := int(n)
+		length := vm.toArrayLength(lengthValue)
 		items := make([]value.Value, length)
 		for i := 0; i < length; i++ {
 			item, err := vm.getMemberValue(source, native.IndexValue(i))
