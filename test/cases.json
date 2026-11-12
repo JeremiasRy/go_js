@@ -21,6 +21,7 @@
         { "file": "negative-scripts/module-import-assignment.js", "sourceGoal": "module", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/class-private-undeclared.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/19-parse-top-level-return.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
-        { "file": "negative-scripts/20-parse-new-target-top-level.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
+        { "file": "negative-scripts/20-parse-new-target-top-level.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/22-parse-duplicate-let.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
     ]
 }
