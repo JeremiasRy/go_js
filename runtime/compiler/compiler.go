@@ -48,6 +48,7 @@ type Variable struct {
 	type_      VariableType
 	slot       int  // for locals and globals
 	init       bool // used in for of loops
+	declared   bool
 	undeclared bool // used for undeclared variables i.e in assignments to unknown variable {e = 2}
 	fn         object.Callable
 	allocated  bool // for imported functions
@@ -458,6 +459,9 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineSetConstructor(setup, global)
 	defineQueueMicroTask(setup, global)
 	defineParseInt(setup, global)
+	for _, variable := range global.vars {
+		variable.declared = true
+	}
 
 	main := object.NewFunction(object.MAIN_FN_NAME, 0, nil)
 
@@ -601,9 +605,14 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitByte(chunk.OP_SET_MEMBER_RETURN)
 					}
 				} else {
-					variable, _ := symbolTable.findVariable(left.Name)
+					variable, owner := symbolTable.findVariable(left.Name)
 					if variable == nil {
 						emitThrow(fn, "ReferenceError", left.Name+" is not defined")
+						popReturnValue.pop()
+						return
+					}
+					if (variable.type_ == LET || variable.type_ == CONST) && !variable.declared && owner == symbolTable {
+						emitThrow(fn, "ReferenceError", "Cannot access '"+left.Name+"' before initialization")
 						popReturnValue.pop()
 						return
 					}
@@ -1152,6 +1161,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						fn.ValueChunk().EmitByte(chunk.OP_PUSH_UNDEFINED)
 					}
 
+					variable.declared = true
+
 					// for of loop i.e for (const item of arr) {}
 					if variable.type_ == FOR {
 						var op uint8
@@ -1289,7 +1300,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
 					return
 				}
-				variable, _ := symbolTable.findVariable(current.Name)
+				variable, owner := symbolTable.findVariable(current.Name)
 
 				if variable == nil {
 					msg := value.EncodeHandle(heap.Allocate(native.NewLightString(fmt.Sprintf("identifier %s is undeclared", current.Name))))
@@ -1297,6 +1308,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					err := native.NewError()
 					err.SetMember(native.KEY_MESSAGE, msg)
 
+					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
+					fn.ValueChunk().EmitByte(chunk.OP_THROW)
+					return
+				}
+
+				if (variable.type_ == LET || variable.type_ == CONST) && !variable.declared && owner == symbolTable {
+					err := native.NewError()
+					err.SetMember(native.KEY_MESSAGE, value.EncodeHandle(heap.Allocate(native.NewLightString("Cannot access '"+current.Name+"' before initialization"))))
+					err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString("ReferenceError"))))
 					fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(err)))
 					fn.ValueChunk().EmitByte(chunk.OP_THROW)
 					return
@@ -1522,6 +1542,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_FOR_OF_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current.BodyNode)
+				for _, variable := range symbolTable.block.vars {
+					variable.declared = true
+				}
 				for range symbolTable.block.vars {
 					fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
 				}
@@ -1568,6 +1591,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_FOR_IN_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current.BodyNode)
+				for _, variable := range symbolTable.block.vars {
+					variable.declared = true
+				}
 				fn.ValueChunk().EmitBytes(chunk.OP_PUSH_UNDEFINED, chunk.OP_DEFINE_LOCAL)
 				generateByteCode(current.Right, symbolTable, fn)
 

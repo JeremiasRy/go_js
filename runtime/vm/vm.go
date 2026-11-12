@@ -1835,6 +1835,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				global := c.Code[ip]
 				ip++
+				if int(global) >= globalsCount {
+					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				v := vm.getGlobal(int(global))
 
 				if v.IsObject() {
@@ -1857,6 +1864,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				global := c.Code[ip]
 				ip++
+				if int(global) >= globalsCount {
+					errValue := vm.makeError("ReferenceError", "Cannot access variable before initialization")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				v := vm.pop()
 				if v.IsObject() {
 					obj, err := heap.GetObject(v.GetHandle())

@@ -1044,7 +1044,7 @@ func (p *Parser) parseVarStatement(node *Node, kind Kind, allowMissingInitialize
 func (p *Parser) parseTryStatement(node *Node) (*Node, error) {
 	p.next(false)
 
-	blok, err := p.parseBlock(false, nil, false)
+	blok, err := p.parseBlock(true, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1076,7 +1076,7 @@ func (p *Parser) parseTryStatement(node *Node) (*Node, error) {
 		node.Handler = p.finishNode(clause, NODE_CATCH_CLAUSE)
 	}
 	if p.eat(TOKEN_FINALLY) {
-		block, err := p.parseBlock(false, nil, false)
+		block, err := p.parseBlock(true, nil, false)
 		if err != nil {
 			return nil, err
 		}
