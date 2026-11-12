@@ -1822,6 +1822,9 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if _, ok := obj.(*native.ObjString); ok && key == native.SYMBOL_ITERATOR {
 		return value.EncodeHandle(heap.Allocate(native.NewStringIterator())), nil
 	}
+	if _, ok := obj.(*native.ObjTypedArray); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewTypedArrayIterator())), nil
+	}
 	if _, ok := obj.(*object.Iterator); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "next" {
 			return value.EncodeHandle(heap.Allocate(native.NewIteratorNext())), nil
@@ -4665,6 +4668,35 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						result := native.NewArrayBuffer(end - start)
 						copy(result.Data, buffer.Data[start:end])
 						vm.push(value.EncodeHandle(heap.Allocate(result)))
+					}
+				case *native.TypedArrayIterator:
+					{
+						array, ok := vm.typedArrayFromValue(thisCtx)
+						if !ok {
+							errValue := vm.makeError("TypeError", "TypedArray iterator called on incompatible receiver")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						values := make([]value.Value, array.Length)
+						for i := 0; i < array.Length; i++ {
+							values[i] = array.Read(i)
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(object.NewLiveIterator(func() []value.Value { return values }))))
+					}
+				case *native.TypedArrayStaticMethod:
+					{
+						args := vm.popN(argCount)
+						result, err := vm.callTypedArrayStatic(fn, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
 					}
 				case *native.TypedArrayJoin:
 					{
