@@ -1475,6 +1475,12 @@ func (vm *VM) setMemberValueWithReceiver(objValue value.Value, key, v, receiver 
 			}
 		}
 	}
+	if args, ok := obj.(*native.MappedArguments); ok {
+		if i, isIndex := vm.arrayIndexFromValue(key); isIndex {
+			args.SetIndex(i, v)
+			return nil
+		}
+	}
 	if fn, ok := obj.(*object.ObjFunction); ok {
 		if keyString, ok := vm.valueAsString(key); ok {
 			if keyString == "prototype" {
@@ -1819,6 +1825,14 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if _, ok := obj.(*object.Iterator); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "next" {
 			return value.EncodeHandle(heap.Allocate(native.NewIteratorNext())), nil
+		}
+	}
+	if args, ok := obj.(*native.MappedArguments); ok {
+		if i, isIndex := vm.arrayIndexFromValue(key); isIndex {
+			return args.GetIndex(i), nil
+		}
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "length" {
+			return value.ValueFromFloat64(float64(args.Length())), nil
 		}
 	}
 	if arr, ok := obj.(*native.ObjArr); ok {
@@ -2604,7 +2618,23 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		if argCount > fn.GetArity() {
 			vm.stackTop = f.localStart + fn.GetArity()
 		}
-		arr := native.NewArrayFrom(items)
+		var arr object.Object = native.NewArrayFrom(items)
+		if objFn, ok := fn.(*object.ObjFunction); ok {
+			mappable := !objFn.Strict && !fn.HasRestParameter()
+			for _, isDefault := range objFn.DefaultParams {
+				if isDefault {
+					mappable = false
+					break
+				}
+			}
+			if mappable {
+				slots := []*value.Value{}
+				for i := 0; i < min(fn.GetArity(), argCount); i++ {
+					slots = append(slots, &vm.stack[f.localStart+i])
+				}
+				arr = native.NewMappedArguments(items, slots)
+			}
+		}
 		v := value.EncodeHandle(heap.Allocate(arr))
 		if objFn, ok := fn.(*object.ObjFunction); ok && objFn.ArgumentsHeapSlot >= 0 {
 			f.arguments = v
