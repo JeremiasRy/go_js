@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 
 	"go_js/chunk"
 	"go_js/flags"
@@ -558,18 +559,12 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
-func defineProxyConstructor(main *object.ObjFunction) {
-	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("Proxy"))))
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewProxyConstructor())))
-	main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+func defineProxyConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	defineObjectGlobal(main, symbolTable, "Proxy", native.NewProxyConstructor())
 }
 
-func defineRegExpConstructor(main *object.ObjFunction) {
-	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("RegExp"))))
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewRegExpConstructor())))
-	main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+func defineRegExpConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	defineObjectGlobal(main, symbolTable, "RegExp", native.NewRegExpConstructor())
 }
 
 func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -582,16 +577,17 @@ func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionSco
 		{"Uint8Array", native.NewTypedArrayConstructor("Uint8Array", native.TYPED_UINT8, 1)},
 		{"Int8Array", native.NewTypedArrayConstructor("Int8Array", native.TYPED_INT8, 1)},
 		{"Uint8ClampedArray", native.NewTypedArrayConstructor("Uint8ClampedArray", native.TYPED_UINT8_CLAMPED, 1)},
+		{"Uint16Array", native.NewTypedArrayConstructor("Uint16Array", native.TYPED_UINT16, 2)},
 		{"Int16Array", native.NewTypedArrayConstructor("Int16Array", native.TYPED_INT16, 2)},
+		{"Uint32Array", native.NewTypedArrayConstructor("Uint32Array", native.TYPED_UINT32, 4)},
+		{"Int32Array", native.NewTypedArrayConstructor("Int32Array", native.TYPED_INT32, 4)},
+		{"Float32Array", native.NewTypedArrayConstructor("Float32Array", native.TYPED_FLOAT32, 4)},
 		{"Float64Array", native.NewTypedArrayConstructor("Float64Array", native.TYPED_FLOAT64, 8)},
 		{"BigInt64Array", native.NewTypedArrayConstructor("BigInt64Array", native.TYPED_BIGINT64, 8)},
 		{"BigUint64Array", native.NewTypedArrayConstructor("BigUint64Array", native.TYPED_BIGUINT64, 8)},
 	}
 	for _, ctor := range constructors {
-		main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
-		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(ctor.name))))
-		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(ctor.obj)))
-		main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+		defineObjectGlobal(main, symbolTable, ctor.name, ctor.obj)
 	}
 }
 
@@ -638,6 +634,34 @@ func defineMathObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	symbolTable.addVariable(native.MATH_OBJECT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineObjectGlobal(main *object.ObjFunction, symbolTable *FunctionScope, name string, obj object.Object) {
+	symbolTable.addVariable(name, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(obj)))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineGlobalFunctions(main *object.ObjFunction, symbolTable *FunctionScope) {
+	for _, item := range []struct {
+		name string
+		kind native.GlobalFunctionKind
+	}{
+		{"isNaN", native.GLOBAL_IS_NAN},
+		{"isFinite", native.GLOBAL_IS_FINITE},
+		{"encodeURIComponent", native.GLOBAL_ENCODE_URI_COMPONENT},
+		{"decodeURIComponent", native.GLOBAL_DECODE_URI_COMPONENT},
+	} {
+		defineObjectGlobal(main, symbolTable, item.name, native.NewGlobalFunction(item.name, item.kind))
+	}
+	defineObjectGlobal(main, symbolTable, "WeakMap", native.NewWeakMapConstructor())
+	defineObjectGlobal(main, symbolTable, "WeakSet", native.NewWeakSetConstructor())
+	defineObjectGlobal(main, symbolTable, "Intl", native.NewIntlObject())
+	defineObjectGlobal(main, symbolTable, "URL", native.NewURLConstructor())
+	defineObjectGlobal(main, symbolTable, "Function", native.NewFunctionConstructor())
+	defineObjectGlobal(main, symbolTable, "setInterval", native.NewSetInterval())
+	defineObjectGlobal(main, symbolTable, "clearTimeout", native.NewClearTimeout("clearTimeout"))
+	defineObjectGlobal(main, symbolTable, "clearInterval", native.NewClearTimeout("clearInterval"))
 }
 
 func defineBooleanConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -721,12 +745,13 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineReflectObject(setup, global)
 	defineBigIntConstructor(setup, global)
 	defineBinaryConstructors(setup, global)
-	defineRegExpConstructor(setup)
-	defineProxyConstructor(setup)
+	defineRegExpConstructor(setup, global)
+	defineProxyConstructor(setup, global)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
 	defineBooleanConstructor(setup, global)
+	defineGlobalFunctions(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
 	}
@@ -877,7 +902,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if left.Type == parser.NODE_MEMBER_EXPRESSION {
 					isPrivate := left.Property != nil && left.Property.Type == parser.NODE_PRIVATE_IDENTIFIER
-					generateByteCode(left.Object, symbolTable, fn)
+					isSuper := left.Object != nil && left.Object.Type == parser.NODE_SUPER
+					if !isSuper {
+						generateByteCode(left.Object, symbolTable, fn)
+					}
 					if left.Computed {
 						generateByteCode(left.Property, symbolTable, fn)
 						fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
@@ -888,6 +916,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 						key := heap.Allocate(native.NewLightString(name))
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(key))
+					}
+					if isSuper && operator == parser.ASSIGN {
+						generateByteCode(current.Right, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_SUPER_SET_RETURN)
+						popReturnValue.pop()
+						if popReturnValue.current() {
+							fn.ValueChunk().EmitByte(chunk.OP_POP)
+						}
+						return
 					}
 
 					memberSetOp := chunk.OP_SET_MEMBER_RETURN
@@ -1138,10 +1175,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
-				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
-				newFn.Strict = module || nodeHasUseStrict(current)
-				newFn.IsArrow = true
-				newFn.Length = functionLength(current.Params)
+				newFn := newFunctionForNode(current, "ANONYMOYS_FN", len(current.Params))
+				if base := functionBase(newFn); base != nil {
+					base.Strict = module || nodeHasUseStrict(current)
+					base.IsArrow = true
+					base.Length = functionLength(current.Params)
+				}
 				setDefaultParams(newFn, current.Params)
 
 				if symbolTable.hasRestParameter {
@@ -1151,7 +1190,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if symbolTable.needsArguments {
 					newFn.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
-						newFn.ArgumentsHeapSlot = variable.slot
+						if base := functionBase(newFn); base != nil {
+							base.ArgumentsHeapSlot = variable.slot
+						}
 					}
 				}
 
@@ -1236,15 +1277,19 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
-				newFn := object.NewFunction("ANONYMOYS_FN", len(current.Params), nil)
-				newFn.Strict = module || nodeHasUseStrict(current)
-				newFn.IsMethod = nextFunctionIsMethod
-				newFn.Length = functionLength(current.Params)
+				newFn := newFunctionForNode(current, "ANONYMOYS_FN", len(current.Params))
+				if base := functionBase(newFn); base != nil {
+					base.Strict = module || nodeHasUseStrict(current)
+					base.IsMethod = nextFunctionIsMethod
+					base.Length = functionLength(current.Params)
+				}
 				setDefaultParams(newFn, current.Params)
 				if symbolTable.needsArguments {
 					newFn.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
-						newFn.ArgumentsHeapSlot = variable.slot
+						if base := functionBase(newFn); base != nil {
+							base.ArgumentsHeapSlot = variable.slot
+						}
 					}
 				}
 				if symbolTable.hasRestParameter {
@@ -1260,6 +1305,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
 				emitPatternParameters(current.Params, symbolTable, newFn)
+				emitParameterDefaults(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
 					generateByteCode(current.BodyNode, symbolTable, newFn)
@@ -1387,13 +1433,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitBytes(op, uint8(len(current.Arguments)), 0)
 				} else {
 					var calledWithSpread uint8 = 0 // false
+					hasSpread := argumentsContainSpread(current.Arguments)
+					hasRest := false
 					if callee, _ := symbolTable.findVariable(current.Callee.Name); callee != nil && callee.fn != nil {
-						if argumentsContainSpread(current.Arguments) || callee.fn.HasRestParameter() {
-							fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
-							if !callee.fn.HasRestParameter() && argumentsContainSpread(current.Arguments) {
-								calledWithSpread = 1
-							}
-						}
+						hasRest = callee.fn.HasRestParameter()
+					}
+					if hasSpread || hasRest {
+						fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
+					}
+					if hasSpread {
+						calledWithSpread = 1
 					}
 
 					for _, node := range current.Arguments {
@@ -1466,7 +1515,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_META_PROPERTY:
 			{
-				fn.ValueChunk().EmitByte(chunk.OP_NEW_TARGET)
+				if current.Meta != nil && current.Meta.Name == "import" {
+					fn.ValueChunk().EmitByte(chunk.OP_IMPORT_META)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_NEW_TARGET)
+				}
 			}
 		case parser.NODE_VARIABLE_DECLARATOR:
 			{
@@ -2496,7 +2549,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				switch current.UnaryOperator {
 				case parser.UNARY_TYPEOF:
 					if current.Argument.Type == parser.NODE_IDENTIFIER {
-						if variable, _ := symbolTable.findVariable(current.Argument.Name); variable == nil {
+						name := current.Argument.Name
+						if name == "globalThis" {
+							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("object"))))
+							return
+						}
+						if name == "NaN" || name == "Infinity" {
+							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("number"))))
+							return
+						}
+						if variable, _ := symbolTable.findVariable(name); variable == nil {
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("undefined"))))
 							return
 						}
@@ -2621,16 +2683,23 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 
 				function := current.Value.(*parser.Node)
-				method := object.NewFunction(keyName, len(function.Params), nil)
-				method.Strict = true
-				method.IsMethod = true
-				method.Length = functionLength(function.Params)
+				method := newFunctionForNode(function, keyName, len(function.Params))
+				if base := functionBase(method); base != nil {
+					base.Strict = true
+					base.IsMethod = true
+					base.Length = functionLength(function.Params)
+				}
 				setDefaultParams(method, function.Params)
 				if symbolTable.needsArguments {
 					method.SetHasArguments()
 					if variable, found := symbolTable.vars[RESERVED_ARGUMENTS]; found && variable.scope == HEAP {
-						method.ArgumentsHeapSlot = variable.slot
+						if base := functionBase(method); base != nil {
+							base.ArgumentsHeapSlot = variable.slot
+						}
 					}
+				}
+				if symbolTable.hasRestParameter {
+					method.SetHasRestParameter()
 				}
 				markParamsDeclared(function.Params, symbolTable)
 
@@ -2641,9 +2710,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitVarInitializers(symbolTable, method)
 				emitArgumentsHeap(method)
 				emitPatternParameters(function.Params, symbolTable, method)
+				emitParameterDefaults(function.Params, symbolTable, method)
 
 				if current.Kind == parser.KIND_CONSTRUCTOR {
-					method.IsDerivedConstructor = currentClassDerived
+					if base := functionBase(method); base != nil {
+						base.IsDerivedConstructor = currentClassDerived
+					}
 					if !currentClassDerived {
 						method.ValueChunk().EmitByte(chunk.OP_INIT_INSTANCE_FIELDS)
 					}
@@ -3330,6 +3402,26 @@ func needsFallthroughReturn(fn *parser.Node) bool {
 	return last.Type != parser.NODE_RETURN_STATEMENT && last.Type != parser.NODE_THROW_STATEMENT
 }
 
+func newFunctionForNode(node *parser.Node, name string, arity int) object.Callable {
+	if node != nil && node.IsAsync && node.IsGenerator {
+		return native.NewAsyncGenerator(name, arity, nil)
+	}
+	if node != nil && node.IsAsync {
+		return native.NewAsyncFunction(name, arity, nil)
+	}
+	if node != nil && node.IsGenerator {
+		return native.NewGenerator(name, arity, nil)
+	}
+	return object.NewFunction(name, arity, nil)
+}
+
+func functionBase(fn object.Callable) *object.ObjFunction {
+	if base, ok := fn.(interface{ FunctionBase() *object.ObjFunction }); ok {
+		return base.FunctionBase()
+	}
+	return nil
+}
+
 func functionLength(params []*parser.Node) int {
 	length := 0
 	for _, param := range params {
@@ -3342,7 +3434,7 @@ func functionLength(params []*parser.Node) int {
 }
 
 func setDefaultParams(fn object.Callable, params []*parser.Node) {
-	if objFn, ok := fn.(*object.ObjFunction); ok {
+	if objFn := functionBase(fn); objFn != nil {
 		flags := make([]bool, len(params))
 		for i, param := range params {
 			if param != nil && param.Type == parser.NODE_ASSIGNMENT_PATTERN {
@@ -3530,6 +3622,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_DUP2)
 						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 						if valueNode, ok := property.Value.(*parser.Node); ok {
 							assign(valueNode)
 						}
@@ -3545,6 +3638,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 							fn.ValueChunk().WriteConstant(key)
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 						if valueNode, ok := property.Value.(*parser.Node); ok {
 							assign(valueNode)
 						}
@@ -3966,4 +4060,33 @@ func calleeIsPromiseFunction(current *parser.Node) bool {
 		}
 	}
 	return false
+}
+
+func CompileDynamicFunction(params []string, body string) (object.Callable, error) {
+	source := "var __gojs_dynamic_function__ = function(" + strings.Join(params, ",") + ") {\n" + body + "\n};"
+	ast, err := parser.GetAst([]byte(source), &parser.Options{SourceType: "script"}, 0)
+	if err != nil {
+		return nil, err
+	}
+	if ast == nil || len(ast.Body) == 0 || len(ast.Body[0].Declarations) == 0 {
+		return nil, fmt.Errorf("invalid dynamic function")
+	}
+	function := ast.Body[0].Declarations[0].Initializer
+	prePass(function, global)
+	holder := object.NewFunction("__dynamic_holder__", 0, nil)
+	generateByteCode(function, global, holder)
+	constants := holder.ValueChunk().Constants
+	for i := len(constants) - 1; i >= 0; i-- {
+		if !constants[i].IsObject() {
+			continue
+		}
+		obj, err := heap.GetObject(constants[i].GetHandle())
+		if err != nil {
+			continue
+		}
+		if fn, ok := obj.(object.Callable); ok {
+			return fn, nil
+		}
+	}
+	return nil, fmt.Errorf("failed to compile dynamic function")
 }

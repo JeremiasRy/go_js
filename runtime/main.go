@@ -98,8 +98,12 @@ func main() {
 	main, err := compiler.Compile(ast)
 
 	if err != nil {
-		if _, ok := err.(*compiler.ModuleLinkError); ok {
-			diagnostic.Fatal("link", "SyntaxError", err)
+		if linkErr, ok := err.(*compiler.ModuleLinkError); ok {
+			class := linkErr.Class
+			if class == "" {
+				class = "SyntaxError"
+			}
+			diagnostic.Fatal("link", class, err)
 		}
 		diagnostic.Fatal("compile", "Error", err)
 	}

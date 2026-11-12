@@ -13,6 +13,7 @@ type testCase struct {
 	SourceGoal string `json:"sourceGoal"`
 	Phase      string `json:"phase,omitempty"`
 	Error      string `json:"error,omitempty"`
+	Timeout    bool   `json:"timeout,omitempty"`
 }
 
 func (test testCase) label() string {
@@ -81,10 +82,14 @@ func loadCases(root string) ([]testCase, time.Duration, error) {
 
 	seenNegative := map[string]bool{}
 	for _, test := range config.Negative {
-		if !validSourceGoal(test.SourceGoal) || test.Error == "" {
+		if !validSourceGoal(test.SourceGoal) {
 			return nil, 0, fmt.Errorf("invalid negative-test metadata for %s", test.File)
 		}
-		if test.Phase != "parse" && test.Phase != "link" && test.Phase != "runtime" {
+		if test.Timeout {
+			if test.Error != "" || test.Phase != "" {
+				return nil, 0, fmt.Errorf("timeout test cannot declare an error for %s", test.File)
+			}
+		} else if test.Error == "" || (test.Phase != "parse" && test.Phase != "link" && test.Phase != "runtime") {
 			return nil, 0, fmt.Errorf("invalid failure phase %q for %s", test.Phase, test.File)
 		}
 		if filepath.Dir(test.File) != "negative-scripts" || filepath.Ext(test.File) != ".js" || seenNegative[test.File] {

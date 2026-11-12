@@ -7,6 +7,7 @@ import (
 
 	"go_js/heap"
 	"go_js/native"
+	"go_js/object"
 	"go_js/value"
 )
 
@@ -23,7 +24,9 @@ func (vm *VM) symbolMethod(target value.Value, symbol value.Value) (value.Value,
 		return value.UNDEFINED, false
 	}
 	if _, ok := obj.(interface{ ValueChunk() *value.ValueChunk }); !ok {
-		return value.UNDEFINED, false
+		if obj.Type() != object.OBJ_NATIVE_FN {
+			return value.UNDEFINED, false
+		}
 	}
 	return method, true
 }
@@ -84,7 +87,7 @@ func (vm *VM) stringMatch(owner string, args []value.Value) (value.Value, error)
 	}
 	results := []value.Value{}
 	start := 0
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(re, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err
@@ -170,6 +173,10 @@ func (vm *VM) stringMatchAll(owner string, args []value.Value) (value.Value, err
 	if !ok || !strings.Contains(re.Flags, "g") {
 		return value.UNDEFINED, &JSException{Name: "TypeError", Message: "String.prototype.matchAll called with a non-global RegExp argument"}
 	}
+	return vm.regexpMatchAll(re, owner)
+}
+
+func (vm *VM) regexpMatchAll(re *native.ObjRegExp, owner string) (value.Value, error) {
 	clone, err := vm.compileRegExp(re.Pattern, re.Flags)
 	if err != nil {
 		return value.UNDEFINED, err
@@ -278,7 +285,7 @@ func (vm *VM) stringReplaceRegex(owner string, re *native.ObjRegExp, replacement
 	var builder strings.Builder
 	cursor := 0
 	start := 0
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(re, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err
@@ -341,7 +348,7 @@ func (vm *VM) stringSplitRegex(owner string, re *native.ObjRegExp, limit int) (v
 	}
 	lastEnd := 0
 	start := 0
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(re, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err
@@ -376,4 +383,40 @@ func (vm *VM) stringSplitRegex(owner string, re *native.ObjRegExp, limit int) (v
 	}
 	add(value.EncodeHandle(heap.Allocate(native.NewLightString(native.UTF16Slice(owner, lastEnd, native.UTF16Length(owner))))))
 	return value.EncodeHandle(heap.Allocate(native.NewArrayFrom(items))), nil
+}
+
+func (vm *VM) regexpSymbolMatch(re *native.ObjRegExp, owner string) (value.Value, error) {
+	text := newRegexpText(owner, re.Unicode)
+	if !strings.Contains(re.Flags, "g") {
+		match, err := vm.regexpFind(re, text, 0, false)
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		return vm.regexpResult(re, text, match), nil
+	}
+	results := []value.Value{}
+	start := 0
+	for start < native.UTF16Length(owner) {
+		match, err := vm.regexpFind(re, text, start, false)
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		if match == nil {
+			break
+		}
+		results = append(results, text.groupValue(&match.Group))
+		end := text.utf16Index(match.Index + match.Length)
+		if match.Length == 0 {
+			end = advanceStringIndex(owner, end, re.Unicode)
+		}
+		if end <= start {
+			end = start + 1
+		}
+		start = end
+	}
+	re.LastIndex = 0
+	if len(results) == 0 {
+		return value.NULL, nil
+	}
+	return value.EncodeHandle(heap.Allocate(native.NewArrayFrom(results))), nil
 }

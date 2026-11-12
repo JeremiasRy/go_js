@@ -4,6 +4,8 @@ import (
 	"go_js/native"
 	"go_js/value"
 	"math"
+	"math/bits"
+	"math/rand"
 )
 
 func (vm *VM) callMathMethod(method *native.MathMethod, argCount int) (value.Value, error) {
@@ -86,6 +88,65 @@ func (vm *VM) callMathMethod(method *native.MathMethod, argCount int) (value.Val
 		return value.ValueFromFloat64(math.Pow(base, exponent)), nil
 	case native.MATH_SQRT:
 		return value.ValueFromFloat64(math.Sqrt(number(0))), nil
+	case native.MATH_ATAN2:
+		return value.ValueFromFloat64(math.Atan2(number(0), number(1))), nil
+	case native.MATH_HYPOT:
+		result := 0.0
+		hasNaN := false
+		for i := range args {
+			n := math.Abs(number(i))
+			if math.IsInf(n, 1) {
+				return value.ValueFromFloat64(math.Inf(1)), nil
+			}
+			if math.IsNaN(n) {
+				hasNaN = true
+			}
+			result += n * n
+		}
+		if hasNaN {
+			return value.STANDARD_NAN, nil
+		}
+		return value.ValueFromFloat64(math.Sqrt(result)), nil
+	case native.MATH_CBRT:
+		return value.ValueFromFloat64(math.Cbrt(number(0))), nil
+	case native.MATH_LOG2:
+		return value.ValueFromFloat64(math.Log2(number(0))), nil
+	case native.MATH_LOG10:
+		return value.ValueFromFloat64(math.Log10(number(0))), nil
+	case native.MATH_LOG1P:
+		return value.ValueFromFloat64(math.Log1p(number(0))), nil
+	case native.MATH_EXPM1:
+		return value.ValueFromFloat64(math.Expm1(number(0))), nil
+	case native.MATH_SINH:
+		return value.ValueFromFloat64(math.Sinh(number(0))), nil
+	case native.MATH_COSH:
+		return value.ValueFromFloat64(math.Cosh(number(0))), nil
+	case native.MATH_TANH:
+		return value.ValueFromFloat64(math.Tanh(number(0))), nil
+	case native.MATH_ASINH:
+		return value.ValueFromFloat64(math.Asinh(number(0))), nil
+	case native.MATH_ACOSH:
+		return value.ValueFromFloat64(math.Acosh(number(0))), nil
+	case native.MATH_ATANH:
+		return value.ValueFromFloat64(math.Atanh(number(0))), nil
+	case native.MATH_IMUL:
+		a := int32(toUint32(number(0)))
+		b := int32(toUint32(number(1)))
+		return value.ValueFromFloat64(float64(a * b)), nil
+	case native.MATH_CLZ32:
+		n := toUint32(number(0))
+		return value.ValueFromFloat64(float64(bits.LeadingZeros32(n))), nil
+	case native.MATH_FROUND:
+		return value.ValueFromFloat64(float64(float32(number(0)))), nil
+	case native.MATH_RANDOM:
+		return value.ValueFromFloat64(rand.Float64()), nil
 	}
 	return value.UNDEFINED, nil
+}
+
+func toUint32(n float64) uint32 {
+	if math.IsNaN(n) || math.IsInf(n, 0) || n == 0 {
+		return 0
+	}
+	return uint32(int64(math.Trunc(n)))
 }

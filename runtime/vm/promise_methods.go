@@ -49,6 +49,18 @@ func (vm *VM) collectPromiseInput(source value.Value) ([]value.Value, error) {
 	return items, nil
 }
 
+func (vm *VM) observePromiseValue(item value.Value, fulfilled func(value.Value), rejected func(value.Value), roots ...value.Value) {
+	if p, ok := vm.promiseFromValue(item); ok {
+		vm.addPromiseObserver(p, fulfilled, rejected, roots...)
+		return
+	}
+	p := native.NewPromise()
+	pValue := value.EncodeHandle(heap.Allocate(p))
+	allRoots := append(append([]value.Value{}, roots...), item, pValue)
+	vm.addPromiseObserver(p, fulfilled, rejected, allRoots...)
+	vm.resolvePromise(p, item)
+}
+
 var errNotIterable = &JSException{Name: "TypeError", Message: "Value is not iterable"}
 
 func (vm *VM) callPromiseAll(argCount int, thisCtx value.Value) (value.Value, error) {
@@ -121,23 +133,15 @@ func (vm *VM) callPromiseAll(argCount int, thisCtx value.Value) (value.Value, er
 	roots := append([]value.Value{resultValue}, items...)
 	for i, item := range items {
 		index := i
-		if p, ok := vm.promiseFromValue(item); ok {
-			vm.addPromiseObserver(p, func(v value.Value) {
-				results[index] = v
-				remaining--
-				if remaining == 0 {
-					vm.resolvePromise(result, vm.promiseArray(results))
-				}
-			}, func(reason value.Value) {
-				vm.rejectPromise(result, reason)
-			}, roots...)
-		} else {
-			results[index] = item
+		vm.observePromiseValue(item, func(v value.Value) {
+			results[index] = v
 			remaining--
 			if remaining == 0 {
 				vm.resolvePromise(result, vm.promiseArray(results))
 			}
-		}
+		}, func(reason value.Value) {
+			vm.rejectPromise(result, reason)
+		}, roots...)
 	}
 	return resultValue, nil
 }
@@ -178,11 +182,7 @@ func (vm *VM) callPromiseAllSettled(argCount int) (value.Value, error) {
 				vm.resolvePromise(result, vm.promiseArray(results))
 			}
 		}
-		if p, ok := vm.promiseFromValue(item); ok {
-			vm.addPromiseObserver(p, func(v value.Value) { settle(v, "fulfilled") }, func(reason value.Value) { settle(reason, "rejected") }, roots...)
-		} else {
-			settle(item, "fulfilled")
-		}
+		vm.observePromiseValue(item, func(v value.Value) { settle(v, "fulfilled") }, func(reason value.Value) { settle(reason, "rejected") }, roots...)
 	}
 	return resultValue, nil
 }
@@ -203,28 +203,17 @@ func (vm *VM) callPromiseRace(argCount int) (value.Value, error) {
 	settled := false
 	roots := append([]value.Value{resultValue}, items...)
 	for _, item := range items {
-		if p, ok := vm.promiseFromValue(item); ok {
-			vm.addPromiseObserver(p, func(v value.Value) {
-				if !settled {
-					settled = true
-					vm.resolvePromise(result, v)
-				}
-			}, func(reason value.Value) {
-				if !settled {
-					settled = true
-					vm.rejectPromise(result, reason)
-				}
-			}, roots...)
-		} else {
-			item := item
-			callbackRoots := []value.Value{resultValue, item}
-			vm.enqueueNativeCallback(callbackRoots, func() {
-				if !settled {
-					settled = true
-					vm.resolvePromise(result, item)
-				}
-			})
-		}
+		vm.observePromiseValue(item, func(v value.Value) {
+			if !settled {
+				settled = true
+				vm.resolvePromise(result, v)
+			}
+		}, func(reason value.Value) {
+			if !settled {
+				settled = true
+				vm.rejectPromise(result, reason)
+			}
+		}, roots...)
 	}
 	return resultValue, nil
 }
@@ -252,29 +241,18 @@ func (vm *VM) callPromiseAny(argCount int) (value.Value, error) {
 	roots := append([]value.Value{resultValue}, items...)
 	for i, item := range items {
 		index := i
-		if p, ok := vm.promiseFromValue(item); ok {
-			vm.addPromiseObserver(p, func(v value.Value) {
-				if !settled {
-					settled = true
-					vm.resolvePromise(result, v)
-				}
-			}, func(reason value.Value) {
-				reasons[index] = reason
-				remaining--
-				if remaining == 0 && !settled {
-					vm.rejectPromise(result, vm.makeAggregateError(reasons))
-				}
-			}, roots...)
-		} else {
-			item := item
-			callbackRoots := []value.Value{resultValue, item}
-			vm.enqueueNativeCallback(callbackRoots, func() {
-				if !settled {
-					settled = true
-					vm.resolvePromise(result, item)
-				}
-			})
-		}
+		vm.observePromiseValue(item, func(v value.Value) {
+			if !settled {
+				settled = true
+				vm.resolvePromise(result, v)
+			}
+		}, func(reason value.Value) {
+			reasons[index] = reason
+			remaining--
+			if remaining == 0 && !settled {
+				vm.rejectPromise(result, vm.makeAggregateError(reasons))
+			}
+		}, roots...)
 	}
 	return resultValue, nil
 }

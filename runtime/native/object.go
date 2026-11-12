@@ -4,6 +4,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"math"
 	"sort"
 	"strconv"
 )
@@ -525,8 +526,53 @@ func (*ObjectDefineProperty) Define(target, key, descriptor value.Value) value.V
 	if !ok {
 		return value.UNDEFINED
 	}
+	if arr, isArray := obj.(*ObjArr); isArray && keyString == "length" {
+		getField := func(name string) (value.Value, bool) {
+			k := value.EncodeHandle(heap.Allocate(NewLightString(name)))
+			if !desc.HasOwn(k) {
+				return value.UNDEFINED, false
+			}
+			return desc.GetMember(k), true
+		}
+		valueField, hasValue := getField("value")
+		writableField, hasWritable := getField("writable")
+		configurableField, hasConfigurable := getField("configurable")
+		if hasConfigurable && truthy(configurableField) {
+			return value.UNDEFINED
+		}
+		lengthEntry, _ := arr.GetOwnEntry(value.EncodeHandle(heap.Allocate(NewLightString("length"))))
+		if hasValue {
+			n := math.NaN()
+			if valueField.IsNumber() {
+				n = valueField.AsNumber()
+			}
+			if math.IsNaN(n) || n < 0 || math.Trunc(n) != n || n >= 4294967296 {
+				return value.UNDEFINED
+			}
+			if !lengthEntry.Writable() && int(n) != arr.Length() {
+				return value.UNDEFINED
+			}
+			arr.SetLength(int(n))
+		}
+		lengthEntry, _ = arr.GetOwnEntry(value.EncodeHandle(heap.Allocate(NewLightString("length"))))
+		if hasWritable {
+			if truthy(writableField) && !lengthEntry.Writable() {
+				return value.UNDEFINED
+			}
+			lengthEntry.nonWritable = !truthy(writableField)
+		}
+		lengthEntry.nonEnumerable = true
+		lengthEntry.nonConfigurable = true
+		if arr, ok := obj.(*ObjArr); ok {
+			arr.Members[objectKeyStringMust(value.EncodeHandle(heap.Allocate(NewLightString("length"))))] = lengthEntry
+		}
+		return target
+	}
 	entry, found := o.Members[keyString]
 	if !found {
+		if !o.Extensible() {
+			return value.UNDEFINED
+		}
 		entry.init = o.nextInit()
 		entry.nonWritable = true
 		entry.nonEnumerable = true
@@ -611,6 +657,44 @@ func (*ObjectGetOwnPropertyDescriptor) Descriptor(target, key value.Value) value
 	if err != nil {
 		return value.UNDEFINED
 	}
+	if fn, ok := obj.(*object.ObjFunction); ok {
+		keyString, ok := objectKeyString(key)
+		if !ok {
+			return value.UNDEFINED
+		}
+		desc := NewObjectHash()
+		switch keyString {
+		case "prototype":
+			if fn.IsArrow || fn.IsMethod {
+				return value.UNDEFINED
+			}
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), EnsureFunctionPrototype(fn, target))
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.TRUE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.FALSE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		case "name":
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), value.EncodeHandle(heap.Allocate(NewLightString(fn.Name))))
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.TRUE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		case "length":
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), value.ValueFromFloat64(float64(fn.Length)))
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.TRUE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		}
+		if prop, found := fn.Props[keyString]; found {
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), prop)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.TRUE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.TRUE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.TRUE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		}
+		return value.UNDEFINED
+	}
 	o, ok := objectAsObjObject(obj)
 	if !ok {
 		return value.UNDEFINED
@@ -690,7 +774,30 @@ func (*HasOwnProperty) HasOwn(obj value.Value, prop value.Value) bool {
 	if err != nil {
 		return false
 	}
-	return o.(object.Hashable).HasOwn(prop)
+	if fn, ok := o.(*object.ObjFunction); ok {
+		key, ok := objectKeyString(prop)
+		if !ok {
+			return false
+		}
+		switch key {
+		case "prototype":
+			if fn.IsArrow || fn.IsMethod {
+				return false
+			}
+			EnsureFunctionPrototype(fn, obj)
+			return true
+		case "name", "length":
+			return true
+		}
+		if _, found := fn.Props[key]; found {
+			return true
+		}
+		return false
+	}
+	if hashable, ok := o.(object.Hashable); ok {
+		return hashable.HasOwn(prop)
+	}
+	return false
 }
 
 func (ts *ToString) ToString(obj object.Object) string {
@@ -838,6 +945,18 @@ func (*ObjectValues) Values(o value.Value) []value.Value {
 		}
 
 		switch obj := obj.(type) {
+		case *LightString:
+			r := []value.Value{}
+			for _, unit := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(UTF16FromUnits([]uint16{unit})))))
+			}
+			return r
+		case *ObjString:
+			r := []value.Value{}
+			for _, unit := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(UTF16FromUnits([]uint16{unit})))))
+			}
+			return r
 		case *ObjObject:
 			{
 				r := []value.Value{}
@@ -898,6 +1017,18 @@ func (*ObjectKeys) Keys(o value.Value) []value.Value {
 		}
 
 		switch obj := obj.(type) {
+		case *LightString:
+			r := []value.Value{}
+			for i := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(strconv.Itoa(i)))))
+			}
+			return r
+		case *ObjString:
+			r := []value.Value{}
+			for i := range UTF16Units(obj.String()) {
+				r = append(r, value.EncodeHandle(heap.Allocate(NewLightString(strconv.Itoa(i)))))
+			}
+			return r
 		case *ObjObject:
 			{
 				r := []value.Value{}
@@ -962,4 +1093,70 @@ func OwnPropertyKeys(target value.Value) []value.Value {
 		result = append(result, value.EncodeHandle(heap.Allocate(NewLightString(item.Key))))
 	}
 	return result
+}
+
+type IsPrototypeOf struct {
+	ObjNativeFn
+}
+
+func NewIsPrototypeOf() *IsPrototypeOf {
+	i := &IsPrototypeOf{}
+	i.name = "isPrototypeOf"
+	return i
+}
+
+type PropertyIsEnumerable struct {
+	ObjNativeFn
+}
+
+func NewPropertyIsEnumerable() *PropertyIsEnumerable {
+	p := &PropertyIsEnumerable{}
+	p.name = "propertyIsEnumerable"
+	return p
+}
+
+func ObjectToStringTag(v value.Value) string {
+	if v.IsObject() {
+		obj, err := heap.GetObject(v.GetHandle())
+		if err == nil {
+			switch obj.(type) {
+			case *ObjArr:
+				return "[object Array]"
+			case *ObjRegExp:
+				return "[object RegExp]"
+			case *DateObject:
+				return "[object Date]"
+			case *ObjError:
+				return "[object Error]"
+			case *Map:
+				return "[object Map]"
+			case *Set:
+				return "[object Set]"
+			case *ObjPromise:
+				return "[object Promise]"
+			case *object.ObjFunction, *ObjAsyncFunction, *ObjGenerator, *ObjBoundFunction, *ObjNativeFn:
+				return "[object Function]"
+			case *ObjSymbol:
+				return "[object Symbol]"
+			case *LightString, *ObjString, *ObjStringBuilder:
+				return "[object String]"
+			case *BoxedPrimitive:
+				return ObjectToStringTag(obj.(*BoxedPrimitive).Primitive)
+			}
+		}
+		return "[object Object]"
+	}
+	if v == value.UNDEFINED {
+		return "[object Undefined]"
+	}
+	if v == value.NULL {
+		return "[object Null]"
+	}
+	if v.IsBoolean() {
+		return "[object Boolean]"
+	}
+	if v.IsNumber() {
+		return "[object Number]"
+	}
+	return "[object Object]"
 }

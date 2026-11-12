@@ -34,6 +34,7 @@ func NewDateConstructor() *DateConstructor {
 	dc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("parse"))), value.EncodeHandle(heap.Allocate(NewDateStaticMethod("parse", DATE_STATIC_PARSE))))
 	dc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("UTC"))), value.EncodeHandle(heap.Allocate(NewDateStaticMethod("UTC", DATE_STATIC_UTC))))
 	dc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_DATE)
+	dc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("length"))), value.ValueFromFloat64(7))
 	return dc
 }
 
@@ -169,6 +170,26 @@ const (
 	DATE_TO_ISO_STRING
 	DATE_TO_STRING
 	DATE_TO_JSON
+	DATE_GET_FULL_YEAR
+	DATE_GET_MONTH
+	DATE_GET_DATE
+	DATE_GET_DAY
+	DATE_GET_HOURS
+	DATE_GET_MINUTES
+	DATE_GET_SECONDS
+	DATE_GET_MILLISECONDS
+	DATE_GET_TIMEZONE_OFFSET
+	DATE_SET_FULL_YEAR
+	DATE_SET_MONTH
+	DATE_SET_DATE
+	DATE_SET_HOURS
+	DATE_SET_MINUTES
+	DATE_SET_SECONDS
+	DATE_SET_MILLISECONDS
+	DATE_TO_UTC_STRING
+	DATE_TO_DATE_STRING
+	DATE_TO_TIME_STRING
+	DATE_TO_LOCALE_STRING
 )
 
 type DateMethod struct {
@@ -197,6 +218,9 @@ type DateStaticMethod struct {
 func NewDateStaticMethod(name string, kind DateStaticKind) *DateStaticMethod {
 	m := &DateStaticMethod{Kind: kind}
 	m.name = name
+	if kind == DATE_STATIC_UTC {
+		m.Arity = 7
+	}
 	return m
 }
 
@@ -228,6 +252,26 @@ func InitDatePrototype() {
 		{"toISOString", DATE_TO_ISO_STRING},
 		{"toString", DATE_TO_STRING},
 		{"toJSON", DATE_TO_JSON},
+		{"getFullYear", DATE_GET_FULL_YEAR},
+		{"getMonth", DATE_GET_MONTH},
+		{"getDate", DATE_GET_DATE},
+		{"getDay", DATE_GET_DAY},
+		{"getHours", DATE_GET_HOURS},
+		{"getMinutes", DATE_GET_MINUTES},
+		{"getSeconds", DATE_GET_SECONDS},
+		{"getMilliseconds", DATE_GET_MILLISECONDS},
+		{"getTimezoneOffset", DATE_GET_TIMEZONE_OFFSET},
+		{"setFullYear", DATE_SET_FULL_YEAR},
+		{"setMonth", DATE_SET_MONTH},
+		{"setDate", DATE_SET_DATE},
+		{"setHours", DATE_SET_HOURS},
+		{"setMinutes", DATE_SET_MINUTES},
+		{"setSeconds", DATE_SET_SECONDS},
+		{"setMilliseconds", DATE_SET_MILLISECONDS},
+		{"toUTCString", DATE_TO_UTC_STRING},
+		{"toDateString", DATE_TO_DATE_STRING},
+		{"toTimeString", DATE_TO_TIME_STRING},
+		{"toLocaleString", DATE_TO_LOCALE_STRING},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))

@@ -97,6 +97,10 @@ const (
 	TYPED_FLOAT64
 	TYPED_BIGINT64
 	TYPED_BIGUINT64
+	TYPED_UINT16
+	TYPED_INT32
+	TYPED_UINT32
+	TYPED_FLOAT32
 )
 
 type ObjTypedArray struct {
@@ -133,8 +137,10 @@ func (a *ObjTypedArray) ElementSize() int {
 	switch a.Kind {
 	case TYPED_UINT8, TYPED_INT8, TYPED_UINT8_CLAMPED:
 		return 1
-	case TYPED_INT16:
+	case TYPED_INT16, TYPED_UINT16:
 		return 2
+	case TYPED_INT32, TYPED_UINT32, TYPED_FLOAT32:
+		return 4
 	case TYPED_FLOAT64, TYPED_BIGINT64, TYPED_BIGUINT64:
 		return 8
 	}
@@ -157,6 +163,18 @@ func (a *ObjTypedArray) Read(index int) value.Value {
 	case TYPED_INT16:
 		v := uint16(data[offset]) | uint16(data[offset+1])<<8
 		return value.ValueFromFloat64(float64(int16(v)))
+	case TYPED_UINT16:
+		v := uint16(data[offset]) | uint16(data[offset+1])<<8
+		return value.ValueFromFloat64(float64(v))
+	case TYPED_INT32:
+		v := uint32(data[offset]) | uint32(data[offset+1])<<8 | uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
+		return value.ValueFromFloat64(float64(int32(v)))
+	case TYPED_UINT32:
+		v := uint32(data[offset]) | uint32(data[offset+1])<<8 | uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
+		return value.ValueFromFloat64(float64(v))
+	case TYPED_FLOAT32:
+		v := uint32(data[offset]) | uint32(data[offset+1])<<8 | uint32(data[offset+2])<<16 | uint32(data[offset+3])<<24
+		return value.ValueFromFloat64(float64(math.Float32frombits(v)))
 	case TYPED_FLOAT64:
 		bits := uint64(0)
 		for i := 0; i < 8; i++ {
@@ -201,6 +219,25 @@ func (a *ObjTypedArray) Write(index int, v value.Value) {
 		u := uint16(int64(v.AsNumber()))
 		data[offset] = byte(u)
 		data[offset+1] = byte(u >> 8)
+	case TYPED_UINT16:
+		u := uint16(int64(v.AsNumber()))
+		data[offset] = byte(u)
+		data[offset+1] = byte(u >> 8)
+	case TYPED_INT32:
+		u := uint32(int32(int64(v.AsNumber())))
+		for i := 0; i < 4; i++ {
+			data[offset+i] = byte(u >> (8 * i))
+		}
+	case TYPED_UINT32:
+		u := uint32(int64(v.AsNumber()))
+		for i := 0; i < 4; i++ {
+			data[offset+i] = byte(u >> (8 * i))
+		}
+	case TYPED_FLOAT32:
+		u := math.Float32bits(float32(v.AsNumber()))
+		for i := 0; i < 4; i++ {
+			data[offset+i] = byte(u >> (8 * i))
+		}
 	case TYPED_FLOAT64:
 		bits := math.Float64bits(v.AsNumber())
 		for i := 0; i < 8; i++ {
@@ -225,6 +262,8 @@ func NewTypedArrayConstructor(name string, kind uint8, elementSize int) *TypedAr
 	ctor.Members = map[string]ObjectValueEntry{}
 	ctor.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 	ctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("BYTES_PER_ELEMENT"))), value.ValueFromFloat64(float64(elementSize)))
+	ctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("from"))), value.EncodeHandle(heap.Allocate(NewTypedArrayStaticMethod("from", TYPED_ARRAY_STATIC_FROM, ctor))))
+	ctor.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("of"))), value.EncodeHandle(heap.Allocate(NewTypedArrayStaticMethod("of", TYPED_ARRAY_STATIC_OF, ctor))))
 	return ctor
 }
 
@@ -353,4 +392,33 @@ func NewDataViewMethod(kind string) *DataViewMethod {
 	fn := &DataViewMethod{Kind: kind}
 	fn.name = kind
 	return fn
+}
+
+type TypedArrayIterator struct {
+	ObjNativeFn
+}
+
+func NewTypedArrayIterator() *TypedArrayIterator {
+	i := &TypedArrayIterator{}
+	i.name = "iterator"
+	return i
+}
+
+type TypedArrayStaticKind int
+
+const (
+	TYPED_ARRAY_STATIC_FROM TypedArrayStaticKind = iota
+	TYPED_ARRAY_STATIC_OF
+)
+
+type TypedArrayStaticMethod struct {
+	ObjNativeFn
+	Kind        TypedArrayStaticKind
+	Constructor *TypedArrayConstructor
+}
+
+func NewTypedArrayStaticMethod(name string, kind TypedArrayStaticKind, ctor *TypedArrayConstructor) *TypedArrayStaticMethod {
+	m := &TypedArrayStaticMethod{Kind: kind, Constructor: ctor}
+	m.name = name
+	return m
 }

@@ -234,6 +234,9 @@ func (vm *VM) callStringMethod(method *native.StringMethod, this value.Value, ar
 			if len(args) > 1 {
 				replacement = args[1]
 			}
+			if re, ok := vm.regexpFromValue(search); ok && all && !strings.Contains(re.Flags, "g") {
+				return value.UNDEFINED, &JSException{Name: "TypeError", Message: "String.prototype.replaceAll called with a non-global RegExp argument"}
+			}
 			if hook, ok := vm.symbolMethod(search, native.SYMBOL_REPLACE); ok {
 				return vm.callValue(hook, search, []value.Value{value.EncodeHandle(heap.Allocate(native.NewLightString(owner))), replacement})
 			}
@@ -242,6 +245,43 @@ func (vm *VM) callStringMethod(method *native.StringMethod, this value.Value, ar
 			}
 		}
 		return vm.stringReplace(owner, args, all)
+	case native.STRING_AT:
+		index := 0
+		if len(args) > 0 {
+			index = toIndex(args[0], 0)
+		}
+		if index < 0 {
+			index += length
+		}
+		if index < 0 || index >= length {
+			return value.UNDEFINED, nil
+		}
+		return newString(native.UTF16Slice(owner, index, index+1)), nil
+	case native.STRING_SUBSTR:
+		start := 0
+		if len(args) > 0 {
+			start = toIndex(args[0], 0)
+		}
+		if start < 0 {
+			start = max(length+start, 0)
+		}
+		start = min(start, length)
+		count := length - start
+		if len(args) > 1 && args[1] != value.UNDEFINED {
+			count = max(toIndex(args[1], 0), 0)
+		}
+		return newString(native.UTF16Slice(owner, start, min(start+count, length))), nil
+	case native.STRING_CONCAT:
+		var builder strings.Builder
+		builder.WriteString(owner)
+		for i := range args {
+			builder.WriteString(argString(i))
+		}
+		return newString(builder.String()), nil
+	case native.STRING_LOCALE_COMPARE:
+		other := argString(0)
+		result := strings.Compare(owner, other)
+		return value.ValueFromFloat64(float64(result)), nil
 	case native.STRING_SPLIT:
 		if len(args) > 0 {
 			separator := args[0]
@@ -421,6 +461,44 @@ func (vm *VM) callStringStaticMethod(method *native.StringStaticMethod, argCount
 			}
 			units = append(units, uint16(int64(n)))
 		}
+	case native.STRING_RAW:
+		if len(args) == 0 {
+			return value.UNDEFINED, fmt.Errorf("String.raw requires a template object")
+		}
+		raw, err := vm.getMemberValue(args[0], value.EncodeHandle(heap.Allocate(native.NewLightString("raw"))))
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		lengthValue, err := vm.getMemberValue(raw, value.EncodeHandle(heap.Allocate(native.NewLightString("length"))))
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		length, err := vm.toNumber(lengthValue)
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		var builder strings.Builder
+		for i := 0; i < int(length); i++ {
+			item, err := vm.getMemberValue(raw, value.ValueFromFloat64(float64(i)))
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			text, err := vm.toStringValue(item)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			part, _ := vm.valueAsString(text)
+			builder.WriteString(part)
+			if i+1 < int(length) && i+1 < len(args) {
+				sub, err := vm.toStringValue(args[i+1])
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				subText, _ := vm.valueAsString(sub)
+				builder.WriteString(subText)
+			}
+		}
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(builder.String()))), nil
 	}
 	return value.EncodeHandle(heap.Allocate(native.NewLightString(native.UTF16FromUnits(units)))), nil
 }

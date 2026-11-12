@@ -10,7 +10,8 @@
         "module-cycles.js": ["module"],
         "module-evaluation-once.js": ["module"],
         "module-dynamic-import.js": ["module"],
-        "module-top-level-await.js": ["module"]
+        "module-top-level-await.js": ["module"],
+        "31-module-meta-null.js": ["module"]
     },
     "negative": [
         { "file": "negative-scripts/duplicate-lexical-binding.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
@@ -19,6 +20,30 @@
         { "file": "negative-scripts/uncaught-type-error.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/module-missing-export.js", "sourceGoal": "module", "phase": "link", "error": "SyntaxError" },
         { "file": "negative-scripts/module-import-assignment.js", "sourceGoal": "module", "phase": "runtime", "error": "TypeError" },
-        { "file": "negative-scripts/class-private-undeclared.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
+        { "file": "negative-scripts/class-private-undeclared.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/19-parse-top-level-return.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/20-parse-new-target-top-level.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/22-parse-duplicate-let.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/23-parse-const-without-initializer.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/24-parse-nullish-mixing.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/25-parse-optional-chain-assignment.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/26-import-missing-module.js", "sourceGoal": "module", "phase": "link", "error": "Error" },
+        { "file": "negative-scripts/27-import-missing-relative-module.js", "sourceGoal": "module", "phase": "link", "error": "Error" },
+        { "file": "negative-scripts/28-parse-yield-outside-generator.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/29-parse-await-in-non-async.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/30-parse-break-outside-loop.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/02-recursion-unbounded-segv.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
+        { "file": "negative-scripts/15-tostring-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
+        { "file": "negative-scripts/16-getter-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
+        { "file": "negative-scripts/17-proxy-get-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
+        { "file": "negative-scripts/70-json-circular.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/71-json-bigint.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/73-array-reduce-empty.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/06-settimeout-string-handler.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/07-settimeout-non-function.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/72-json-invalid.js", "sourceGoal": "script", "phase": "runtime", "error": "SyntaxError" },
+        { "file": "negative-scripts/19-infinite-loop.js", "sourceGoal": "script", "timeout": true },
+        { "file": "negative-scripts/20-unresolved-top-level-await.js", "sourceGoal": "module", "timeout": true },
+        { "file": "negative-scripts/21-redos-regex.js", "sourceGoal": "script", "timeout": true }
     ]
 }

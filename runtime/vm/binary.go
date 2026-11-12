@@ -81,8 +81,10 @@ func (vm *VM) constructArrayBuffer(args []value.Value) (value.Value, error) {
 func (vm *VM) constructTypedArray(ctor *native.TypedArrayConstructor, args []value.Value) (value.Value, error) {
 	elementSize := 1
 	switch ctor.Kind {
-	case native.TYPED_INT16:
+	case native.TYPED_INT16, native.TYPED_UINT16:
 		elementSize = 2
+	case native.TYPED_INT32, native.TYPED_UINT32, native.TYPED_FLOAT32:
+		elementSize = 4
 	case native.TYPED_FLOAT64, native.TYPED_BIGINT64, native.TYPED_BIGUINT64:
 		elementSize = 8
 	}
@@ -319,7 +321,7 @@ func (vm *VM) getDataViewMember(view *native.ObjDataView, key value.Value) (valu
 		return value.ValueFromFloat64(float64(view.Offset)), true
 	case "byteLength":
 		return value.ValueFromFloat64(float64(view.Length)), true
-	case "getUint8", "getUint16", "getUint32", "getInt8", "getInt16", "getFloat32", "getFloat64", "getBigInt64", "getBigUint64", "setUint8", "setUint16", "setUint32", "setInt8", "setInt16", "setFloat32", "setFloat64", "setBigInt64", "setBigUint64":
+	case "getUint8", "getUint16", "getUint32", "getInt8", "getInt16", "getInt32", "getFloat32", "getFloat64", "getBigInt64", "getBigUint64", "setUint8", "setUint16", "setUint32", "setInt8", "setInt16", "setInt32", "setFloat32", "setFloat64", "setBigInt64", "setBigUint64":
 		return value.EncodeHandle(heap.Allocate(native.NewDataViewMethod(keyString))), true
 	}
 	return value.UNDEFINED, false
@@ -393,6 +395,8 @@ func (vm *VM) dataViewOperation(view *native.ObjDataView, kind string, args []va
 			return value.ValueFromFloat64(float64(int16(readUint(2)))), nil
 		case containsSuffix(kind, "Uint32"):
 			return value.ValueFromFloat64(float64(uint32(readUint(4)))), nil
+		case containsSuffix(kind, "Int32"):
+			return value.ValueFromFloat64(float64(int32(readUint(4)))), nil
 		case containsSuffix(kind, "Float32"):
 			return value.ValueFromFloat64(float64(math.Float32frombits(uint32(readUint(4))))), nil
 		case containsSuffix(kind, "Float64"):
@@ -423,6 +427,9 @@ func (vm *VM) dataViewOperation(view *native.ObjDataView, kind string, args []va
 	case containsSuffix(kind, "Uint32"):
 		n, _ := vm.toNumber(valueArg)
 		writeUint(4, uint64(uint32(int64(n))))
+	case containsSuffix(kind, "Int32"):
+		n, _ := vm.toNumber(valueArg)
+		writeUint(4, uint64(uint32(int32(int64(n)))))
 	case containsSuffix(kind, "Float32"):
 		n, _ := vm.toNumber(valueArg)
 		writeUint(4, uint64(math.Float32bits(float32(n))))
@@ -440,4 +447,31 @@ func (vm *VM) dataViewOperation(view *native.ObjDataView, kind string, args []va
 
 func containsSuffix(s, suffix string) bool {
 	return len(s) >= len(suffix) && s[len(s)-len(suffix):] == suffix
+}
+
+func (vm *VM) callTypedArrayStatic(method *native.TypedArrayStaticMethod, args []value.Value) (value.Value, error) {
+	items := []value.Value{}
+	if method.Kind == native.TYPED_ARRAY_STATIC_OF {
+		items = args
+	} else {
+		if len(args) == 0 {
+			return value.UNDEFINED, &JSException{Name: "TypeError", Message: "TypedArray.from requires an array-like object"}
+		}
+		collected, err := vm.collectArrayLike(args[0])
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		items = collected
+		if len(args) > 1 && args[1] != value.UNDEFINED {
+			for i, item := range items {
+				mapped, err := vm.invokeCallback(args[1], value.UNDEFINED, []value.Value{item, native.IndexValue(i)})
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				items[i] = mapped
+			}
+		}
+	}
+	arrayValue := value.EncodeHandle(heap.Allocate(native.NewArrayFrom(items)))
+	return vm.constructTypedArray(method.Constructor, []value.Value{arrayValue, value.UNDEFINED})
 }

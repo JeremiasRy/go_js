@@ -138,3 +138,7 @@ func (obj *ObjFunction) HasArguments() bool {
 func (obj *ObjFunction) SetHasArguments() {
 	obj.arguments = true
 }
+
+func (fn *ObjFunction) FunctionBase() *ObjFunction {
+	return fn
+}

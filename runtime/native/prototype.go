@@ -72,6 +72,8 @@ func initObjectPrototype() {
 	p.SetMember(KEY_TOSTRING, handle)
 	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(heap.Allocate(NewHasOwnProperty())))
 	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("valueOf"))), value.EncodeHandle(heap.Allocate(NewObjectValueOf())))
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isPrototypeOf"))), value.EncodeHandle(heap.Allocate(NewIsPrototypeOf())))
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("propertyIsEnumerable"))), value.EncodeHandle(heap.Allocate(NewPropertyIsEnumerable())))
 
 	PROTOTYPE_OBJECT = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -134,6 +136,10 @@ func initArrayPrototype() {
 		{"toReversed", ARRAY_TO_REVERSED},
 		{"toSpliced", ARRAY_TO_SPLICED},
 		{"with", ARRAY_WITH},
+		{"copyWithin", ARRAY_COPY_WITHIN},
+		{"keys", ARRAY_KEYS},
+		{"values", ARRAY_VALUES},
+		{"entries", ARRAY_ENTRIES},
 	}
 	for _, method := range arrayMethods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
@@ -153,6 +159,7 @@ func initArrayPrototype() {
 		{"findLastIndex", ARRAY_FIND_LAST_INDEX_CB},
 		{"sort", ARRAY_SORT},
 		{"flatMap", ARRAY_FLAT_MAP},
+		{"reduceRight", ARRAY_REDUCE_RIGHT},
 	}
 	for _, method := range callbackMethods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))

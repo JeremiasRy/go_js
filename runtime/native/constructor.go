@@ -2,10 +2,12 @@ package native
 
 import (
 	"fmt"
+	"go_js/eventloop"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"math"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +27,9 @@ func NewErrorConstructor() *ErrorConstructor {
 func NewNamedErrorConstructor(name string) *ErrorConstructor {
 	ec := &ErrorConstructor{errorName: name}
 	ec.Members = map[string]ObjectValueEntry{}
+	if proto, found := ERROR_PROTOTYPES[name]; found {
+		ec.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), proto)
+	}
 	return ec
 }
 
@@ -42,12 +47,57 @@ func (*ErrorConstructor) Type() object.ObjType {
 
 func (ec *ErrorConstructor) New(params ...any) (object.Object, error) {
 	errorObject := NewNamedError(ec.errorName)
-	if len(params) > 0 {
-		if argHandle, ok := params[0].(value.Value); ok {
+	messageIndex := 0
+	if ec.errorName == "AggregateError" {
+		errors := []value.Value{}
+		if len(params) > 0 {
+			if first, ok := params[0].(value.Value); ok {
+				if first.IsObject() {
+					if obj, err := heap.GetObject(first.GetHandle()); err == nil {
+						if arr, ok := obj.(*ObjArr); ok {
+							for i := 0; i < arr.Length(); i++ {
+								errors = append(errors, arr.GetElementAt(i))
+							}
+						} else if hashable, ok := obj.(object.Hashable); ok {
+							lengthValue := hashable.GetMember(value.EncodeHandle(heap.Allocate(NewLightString("length"))))
+							if lengthValue.IsNumber() {
+								for i := 0; i < int(lengthValue.AsNumber()); i++ {
+									errors = append(errors, hashable.GetMember(IndexValue(i)))
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		errorObject.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("errors"))), value.EncodeHandle(heap.Allocate(NewArrayFrom(errors))))
+		messageIndex = 1
+	}
+	if len(params) > messageIndex {
+		if argHandle, ok := params[messageIndex].(value.Value); ok {
 			if argHandle != value.UNDEFINED {
 				arg, err := heap.GetObject(argHandle.GetHandle())
+				message := ""
 				if err == nil {
-					errorObject.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(arg.String()))))
+					message = arg.String()
+				} else if argHandle.IsNumber() || argHandle.IsBoolean() {
+					message = String(argHandle)
+				} else if argHandle.IsType(value.NULL) {
+					message = "null"
+				}
+				errorObject.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(message))))
+			}
+		}
+	}
+	optionsIndex := messageIndex + 1
+	if len(params) > optionsIndex {
+		if options, ok := params[optionsIndex].(value.Value); ok && options.IsObject() {
+			if obj, err := heap.GetObject(options.GetHandle()); err == nil {
+				if hashable, ok := obj.(object.Hashable); ok {
+					causeKey := value.EncodeHandle(heap.Allocate(NewLightString("cause")))
+					if hashable.HasOwn(causeKey) {
+						errorObject.SetMember(causeKey, hashable.GetMember(causeKey))
+					}
 				}
 			}
 		}
@@ -202,16 +252,24 @@ type SetTimeout struct {
 	time     int
 	callback object.Callback
 	rootKey  uintptr
+	cancel   *atomic.Bool
+	interval bool
 }
 
 func NewSetTimeout() *SetTimeout {
-	setTimeout := &SetTimeout{}
+	setTimeout := &SetTimeout{cancel: &atomic.Bool{}}
 	setTimeout.name = "setTimeout"
 
 	return setTimeout
 }
 
-func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
+func NewSetInterval() *SetTimeout {
+	interval := &SetTimeout{cancel: &atomic.Bool{}, interval: true}
+	interval.name = "setInterval"
+	return interval
+}
+
+func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value) {
 	st.time = ms
 	st.callback = object.Callback{
 		Fn:      fn,
@@ -219,11 +277,19 @@ func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
 	}
 }
 
+func (st *SetTimeout) Cancel() {
+	st.cancel.Store(true)
+}
+
 func (st *SetTimeout) SetRootKey(key uintptr) {
 	st.rootKey = key
 }
 
 func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	if st.cancel.Load() {
+		done()
+		return
+	}
 	callback := st.callback
 	callback.RootKey = st.rootKey
 	message := &object.JobChannelMessage{
@@ -231,15 +297,31 @@ func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done 
 		Callback: callback,
 		Done:     done,
 	}
-	if st.time == 0 {
+	if st.time == 0 && !st.interval {
 		callbackChannel <- message
 		return
 	}
-	tick := time.NewTicker((time.Duration(st.time) * time.Millisecond))
-
+	delay := time.Duration(st.time) * time.Millisecond
+	if delay <= 0 {
+		delay = time.Millisecond
+	}
+	tick := time.NewTicker(delay)
+	defer tick.Stop()
 	for range tick.C {
+		if st.cancel.Load() {
+			done()
+			return
+		}
+		if st.interval {
+			message.Done = func() {
+				done()
+				if !st.cancel.Load() {
+					eventloop.Dispatch(st.Clone())
+				}
+			}
+		}
 		callbackChannel <- message
-		break
+		return
 	}
 }
 
@@ -267,26 +349,52 @@ func (*MapConstructor) Type() object.ObjType {
 func (*MapConstructor) New(params ...any) (object.Object, error) {
 	m := NewMap()
 	if len(params) > 0 {
-		if v, ok := params[0].(value.Value); ok && v.IsObject() {
-			if obj, err := heap.GetObject(v.GetHandle()); err == nil {
-				if arr, ok := obj.(*ObjArr); ok {
-					setter := &MapSet{}
-					for i := 0; i < arr.Length(); i++ {
-						entryValue := arr.GetElementAt(i)
-						if !entryValue.IsObject() {
-							return nil, fmt.Errorf("Iterator value is not an entry object")
-						}
-						entryObj, err := heap.GetObject(entryValue.GetHandle())
-						if err != nil {
-							return nil, err
-						}
-						entry, ok := entryObj.(*ObjArr)
-						if !ok || entry.Length() < 2 {
-							return nil, fmt.Errorf("Iterator value is not an entry object")
-						}
-						setter.Set(m, entry.GetElementAt(0), entry.GetElementAt(1))
+		if v, ok := params[0].(value.Value); ok {
+			if v == value.UNDEFINED || v == value.NULL {
+				return m, nil
+			}
+			if !v.IsObject() {
+				return nil, fmt.Errorf("%s is not iterable", String(v))
+			}
+			obj, err := heap.GetObject(v.GetHandle())
+			if err != nil {
+				return nil, err
+			}
+			setter := &MapSet{}
+			addEntry := func(entryValue value.Value) error {
+				if !entryValue.IsObject() {
+					return fmt.Errorf("Iterator value is not an entry object")
+				}
+				entryObj, err := heap.GetObject(entryValue.GetHandle())
+				if err != nil {
+					return err
+				}
+				entry, ok := entryObj.(*ObjArr)
+				if !ok || entry.Length() < 2 {
+					return fmt.Errorf("Iterator value is not an entry object")
+				}
+				setter.Set(m, entry.GetElementAt(0), entry.GetElementAt(1))
+				return nil
+			}
+			switch source := obj.(type) {
+			case *ObjArr:
+				for i := 0; i < source.Length(); i++ {
+					if err := addEntry(source.GetElementAt(i)); err != nil {
+						return nil, err
 					}
 				}
+			case *Map:
+				for _, entry := range source.orderedEntries() {
+					setter.Set(m, entry.Key, entry.Value)
+				}
+			case *Set:
+				for _, item := range source.order {
+					if err := addEntry(item); err != nil {
+						return nil, err
+					}
+				}
+			default:
+				return nil, fmt.Errorf("%s is not iterable", String(v))
 			}
 		}
 	}
@@ -314,23 +422,36 @@ func (*SetConstructor) New(params ...any) (object.Object, error) {
 	adder := &SetAdd{}
 	if len(params) > 0 {
 		if v, ok := params[0].(value.Value); ok {
+			if v == value.UNDEFINED || v == value.NULL {
+				return s, nil
+			}
 			if str, ok := ObjectStringValue(v); ok {
 				for _, r := range []rune(str) {
 					adder.Add(s, value.EncodeHandle(heap.Allocate(NewLightString(string(r)))))
 				}
 			} else if v.IsObject() {
-				if obj, err := heap.GetObject(v.GetHandle()); err == nil {
-					switch source := obj.(type) {
-					case *ObjArr:
-						for i := 0; i < source.Length(); i++ {
-							adder.Add(s, source.GetElementAt(i))
-						}
-					case *Set:
-						for _, item := range source.order {
-							adder.Add(s, item)
-						}
-					}
+				obj, err := heap.GetObject(v.GetHandle())
+				if err != nil {
+					return nil, err
 				}
+				switch source := obj.(type) {
+				case *ObjArr:
+					for i := 0; i < source.Length(); i++ {
+						adder.Add(s, source.GetElementAt(i))
+					}
+				case *Set:
+					for _, item := range source.order {
+						adder.Add(s, item)
+					}
+				case *Map:
+					for _, item := range source.ValuesList() {
+						adder.Add(s, item)
+					}
+				default:
+					return nil, fmt.Errorf("%s is not iterable", String(v))
+				}
+			} else {
+				return nil, fmt.Errorf("%s is not iterable", String(v))
 			}
 		}
 	}

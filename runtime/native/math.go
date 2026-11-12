@@ -20,6 +20,23 @@ const (
 	MATH_MAX
 	MATH_POW
 	MATH_SQRT
+	MATH_ATAN2
+	MATH_HYPOT
+	MATH_CBRT
+	MATH_LOG2
+	MATH_LOG10
+	MATH_LOG1P
+	MATH_EXPM1
+	MATH_SINH
+	MATH_COSH
+	MATH_TANH
+	MATH_ASINH
+	MATH_ACOSH
+	MATH_ATANH
+	MATH_IMUL
+	MATH_CLZ32
+	MATH_FROUND
+	MATH_RANDOM
 )
 
 type MathMethod struct {
@@ -49,6 +66,23 @@ func NewMathObject() *ObjObject {
 		{"max", MATH_MAX},
 		{"pow", MATH_POW},
 		{"sqrt", MATH_SQRT},
+		{"atan2", MATH_ATAN2},
+		{"hypot", MATH_HYPOT},
+		{"cbrt", MATH_CBRT},
+		{"log2", MATH_LOG2},
+		{"log10", MATH_LOG10},
+		{"log1p", MATH_LOG1P},
+		{"expm1", MATH_EXPM1},
+		{"sinh", MATH_SINH},
+		{"cosh", MATH_COSH},
+		{"tanh", MATH_TANH},
+		{"asinh", MATH_ASINH},
+		{"acosh", MATH_ACOSH},
+		{"atanh", MATH_ATANH},
+		{"imul", MATH_IMUL},
+		{"clz32", MATH_CLZ32},
+		{"fround", MATH_FROUND},
+		{"random", MATH_RANDOM},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
