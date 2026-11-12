@@ -307,7 +307,7 @@ var TokenContexts = map[TokenContextType]*TokenContext{
 	BRACKET_TEMPLATE:              newTokContext("${", false, false, false, nil, BRACKET_TEMPLATE),
 	PAREN_STATEMENT:               newTokContext("(", false, false, false, nil, PAREN_STATEMENT),
 	PAREN_EXPRESSION:              newTokContext("(", true, false, false, nil, PAREN_EXPRESSION),
-	QUOTE_TEMPLATE:                newTokContext("`", true, true, false, func(p *Parser) { p.tryReadTemplateToken() }, QUOTE_TEMPLATE),
+	QUOTE_TEMPLATE:                newTokContext("`", true, true, false, func(p *Parser) error { return p.tryReadTemplateToken() }, QUOTE_TEMPLATE),
 	FUNCTION_STATEMENT:            newTokContext("function", false, false, false, nil, FUNCTION_STATEMENT),
 	FUNCTION_EXPRESSION:           newTokContext("function", true, false, false, nil, FUNCTION_EXPRESSION),
 	FUNCTION_EXPRESSION_GENERATOR: newTokContext("function", true, false, true, nil, FUNCTION_EXPRESSION_GENERATOR),
@@ -318,12 +318,12 @@ type TokenContext struct {
 	Token         string
 	IsExpr        bool
 	PreserveSpace bool
-	Override      func(*Parser)
+	Override      func(*Parser) error
 	Generator     bool
 	Identifier    TokenContextType
 }
 
-func newTokContext(token string, isExpr, preserveSpace, generator bool, override func(*Parser), identifier TokenContextType) *TokenContext {
+func newTokContext(token string, isExpr, preserveSpace, generator bool, override func(*Parser) error, identifier TokenContextType) *TokenContext {
 	return &TokenContext{
 		Token:         token,
 		IsExpr:        isExpr,
@@ -351,13 +351,17 @@ func (p *Parser) next(ignoreEscapeSequenceInKeyword bool) error {
 	p.LastTokEndLoc = p.startLoc
 	p.LastTokStartLoc = p.startLoc
 	p.nextToken()
-	return nil
+	return p.tokenError
 }
 
 func (p *Parser) nextToken() {
 	context := p.currentContext()
 	if context == nil || !context.PreserveSpace {
-		p.skipSpace()
+		if err := p.skipSpace(); err != nil {
+			p.tokenError = err
+			p.finishToken(tokenTypes[TOKEN_EOF], nil)
+			return
+		}
 	}
 
 	p.start = p.pos
@@ -371,12 +375,23 @@ func (p *Parser) nextToken() {
 	}
 
 	if context.Override != nil {
-		context.Override(p)
+		if err := context.Override(p); err != nil {
+			p.tokenError = err
+			p.finishToken(tokenTypes[TOKEN_EOF], nil)
+		}
 		return
 	} else {
 		ch, size, _ := p.fullCharCodeAtPos()
 		p.readToken(ch, size)
 	}
+}
+
+func (p *Parser) peekByte(offset int) byte {
+	i := p.pos + offset
+	if i < 0 || i >= len(p.input) {
+		return 0
+	}
+	return p.input[i]
 }
 
 func (p *Parser) fullCharCodeAtPos() (code rune, size int, err error) {
@@ -406,11 +421,16 @@ func (p *Parser) fullCharCodeAtPos() (code rune, size int, err error) {
 }
 
 func (p *Parser) readToken(code rune, size int) {
+	var err error
 	if IsIdentifierStart(code, p.getEcmaVersion() >= 6) || code == 92 {
-		p.readWord()
-		return
+		err = p.readWord()
+	} else {
+		err = p.getTokenFromCode(code, size)
 	}
-	p.getTokenFromCode(code, size)
+	if err != nil {
+		p.tokenError = err
+		p.finishToken(tokenTypes[TOKEN_EOF], nil)
+	}
 }
 
 func (p *Parser) finishToken(Type *TokenType, value any) {
@@ -484,7 +504,7 @@ func (p *Parser) getTokenFromCode(code rune, size int) error {
 		return nil
 
 	case 48: // '0'
-		next := p.input[p.pos+1]
+		next := p.peekByte(1)
 		if next == 120 || next == 88 { // 'x', 'X'
 			return p.readRadixNumber(16) // hex number
 
@@ -556,9 +576,9 @@ func (p *Parser) finishOp(token *TokenType, size int) {
 func (p *Parser) readToken_question() {
 	ecmaVersion := p.options.ecmaVersion.(int)
 	if ecmaVersion >= 11 {
-		next := p.input[p.pos+1]
+		next := p.peekByte(1)
 		if next == 46 {
-			next2 := p.input[p.pos+2]
+			next2 := p.peekByte(2)
 			if next2 < 48 || next2 > 57 {
 				p.finishOp(tokenTypes[TOKEN_QUESTIONDOT], 2)
 				return
@@ -566,7 +586,7 @@ func (p *Parser) readToken_question() {
 		}
 		if next == 63 {
 			if ecmaVersion >= 12 {
-				next2 := p.input[p.pos+2]
+				next2 := p.peekByte(2)
 				if next2 == 61 {
 					p.finishOp(tokenTypes[TOKEN_ASSIGN], 3)
 					return
@@ -580,7 +600,7 @@ func (p *Parser) readToken_question() {
 }
 
 func (p *Parser) readToken_eq_excl(code rune) {
-	next := p.input[p.pos+1]
+	next := p.peekByte(1)
 
 	if code == 61 && next == 62 && p.getEcmaVersion() >= 6 {
 		p.pos += 2
@@ -589,7 +609,7 @@ func (p *Parser) readToken_eq_excl(code rune) {
 	}
 	if next == 61 {
 		size := 2
-		if p.input[p.pos+2] == 61 {
+		if p.peekByte(2) == 61 {
 			size = 3 // === or !==
 		}
 		p.finishOp(tokenTypes[TOKEN_EQUALITY], size)
@@ -610,27 +630,30 @@ func (p *Parser) readToken_eq_excl(code rune) {
 }
 
 func (p *Parser) readToken_lt_gt(code rune) {
-	next := rune(p.input[p.pos+1])
+	next := rune(p.peekByte(1))
 	size := 1
 	if next == code {
-		if code == 62 && p.input[p.pos+2] == 62 {
+		if code == 62 && p.peekByte(2) == 62 {
 			size = 3
 		} else {
 			size = 2
 		}
 
-		if p.input[p.pos+size] == 61 {
+		if p.peekByte(size) == 61 {
 			p.finishOp(tokenTypes[TOKEN_ASSIGN], size+1)
 			return
 		}
 		p.finishOp(tokenTypes[TOKEN_BITSHIFT], size)
 		return
 	}
-	if next == 33 && code == 60 && !p.InModule && p.input[p.pos+2] == 45 &&
-		p.input[p.pos+3] == 45 {
+	if next == 33 && code == 60 && !p.InModule && p.peekByte(2) == 45 &&
+		p.peekByte(3) == 45 {
 		// `<!--`, an XML-style comment that should be interpreted as a line comment
 		p.skipLineComment(4)
-		p.skipSpace()
+		if err := p.skipSpace(); err != nil {
+			p.tokenError = err
+			return
+		}
 		p.nextToken()
 		return
 	}
@@ -641,13 +664,16 @@ func (p *Parser) readToken_lt_gt(code rune) {
 }
 
 func (p *Parser) readToken_plus_min(code rune) {
-	next := rune(p.input[p.pos+1])
+	next := rune(p.peekByte(1))
 	if next == code {
-		if next == 45 && !p.InModule && p.input[p.pos+2] == 62 &&
+		if next == 45 && !p.InModule && p.peekByte(2) == 62 &&
 			(p.LastTokEnd == 0 || lineBreak.Match([]byte(p.input[p.LastTokEnd:p.pos]))) {
 			// A `-->` line comment
 			p.skipLineComment(3)
-			p.skipSpace()
+			if err := p.skipSpace(); err != nil {
+				p.tokenError = err
+				return
+			}
 			p.nextToken()
 			return
 		}
@@ -662,11 +688,12 @@ func (p *Parser) readToken_plus_min(code rune) {
 }
 
 func (p *Parser) skipLineComment(startSkip int) {
-	ch := p.input[p.pos+startSkip]
 	p.pos = p.pos + startSkip
-	for p.pos < len(p.input) && !isNewLine(rune(ch)) {
+	if p.pos > len(p.input) {
+		p.pos = len(p.input)
+	}
+	for p.pos < len(p.input) && !isNewLine(rune(p.input[p.pos])) {
 		p.pos = p.pos + 1
-		ch = p.input[p.pos]
 	}
 
 	if p.options.OnComment != nil {
@@ -679,7 +706,7 @@ func (p *Parser) skipLineComment(startSkip int) {
 }
 
 func (p *Parser) readToken_caret() {
-	next := p.input[p.pos+1]
+	next := p.peekByte(1)
 	if next == 61 {
 		p.finishOp(tokenTypes[TOKEN_ASSIGN], 2)
 		return
@@ -688,10 +715,10 @@ func (p *Parser) readToken_caret() {
 }
 
 func (p *Parser) readToken_pipe_amp(code rune) {
-	next := rune(p.input[p.pos+1])
+	next := rune(p.peekByte(1))
 	if next == code {
 		if p.getEcmaVersion() >= 12 {
-			next2 := p.input[p.pos+2]
+			next2 := p.peekByte(2)
 			if next2 == 61 {
 				p.finishOp(tokenTypes[TOKEN_ASSIGN], 3)
 				return
@@ -721,7 +748,7 @@ func (p *Parser) readToken_pipe_amp(code rune) {
 }
 
 func (p *Parser) readToken_mult_modulo_exp(code rune) {
-	next := p.input[p.pos+1]
+	next := p.peekByte(1)
 	size := 1
 
 	var tokenType *TokenType
@@ -736,7 +763,7 @@ func (p *Parser) readToken_mult_modulo_exp(code rune) {
 	if p.getEcmaVersion() >= 7 && code == 42 && next == 42 {
 		size = size + 1
 		tokenType = tokenTypes[TOKEN_STAR]
-		next = p.input[p.pos+2]
+		next = p.peekByte(2)
 	}
 
 	if next == 61 {
@@ -748,7 +775,7 @@ func (p *Parser) readToken_mult_modulo_exp(code rune) {
 }
 
 func (p *Parser) readToken_slash() error {
-	next := p.input[p.pos+1]
+	next := p.peekByte(1)
 	if p.ExprAllowed {
 		p.pos = p.pos + 1
 		return p.readRegexp()
@@ -849,7 +876,10 @@ func (p *Parser) readString(quote rune) error {
 		}
 		if ch == 92 { // '\'
 			out = append(out, p.input[chunkStart:p.pos]...)
-			escapedChar, _ := p.readEscapedChar(false)
+			escapedChar, err := p.readEscapedChar(false)
+			if err != nil {
+				return err
+			}
 			out = append(out, []byte(escapedChar)...)
 			chunkStart = p.pos
 		} else if ch == 0x2028 || ch == 0x2029 {
@@ -916,6 +946,9 @@ func (p *Parser) readNumber(startsWithDot bool) error {
 	}
 	if (next == 69 || next == 101) && !octal { // 'eE'
 		p.pos = p.pos + 1
+		if p.pos >= len(p.input) {
+			return p.raise(start, "Invalid number")
+		}
 		next = int(p.input[p.pos])
 		if next == 43 || next == 45 { // '+-'
 			p.pos = p.pos + 1
@@ -938,14 +971,12 @@ func (p *Parser) readNumber(startsWithDot bool) error {
 }
 
 func stringToNumber(b []byte, octal bool) float64 {
-	/*
-			This is missing and I don't have patience to do it
-			  if (isLegacyOctalNumericLiteral) {
-		    return parseInt(str, 8)
-		  }
-	*/
-
 	numToConvert := strings.Replace(string(b), "_", "", -1)
+	if octal {
+		if num, err := strconv.ParseUint(numToConvert, 8, 64); err == nil {
+			return float64(num)
+		}
+	}
 	num, _ := strconv.ParseFloat(numToConvert, 64)
 	return num
 }
@@ -961,7 +992,7 @@ func (p *Parser) readRadixNumber(radix int) error {
 		return p.raise(p.start+2, string("Expected number in radix ")+strconv.Itoa(radix))
 	}
 	ch, _, _ := p.fullCharCodeAtPos()
-	if p.getEcmaVersion() >= 11 && p.input[p.pos] == 110 {
+	if p.getEcmaVersion() >= 11 && p.pos < len(p.input) && p.input[p.pos] == 110 {
 		val = stringToBigInt(p.input[start:p.pos])
 		p.pos = p.pos + 1
 	} else if IsIdentifierStart(ch, false) {
@@ -997,7 +1028,7 @@ func (p *Parser) tryReadTemplateToken() error {
 	err := p.readTmplToken()
 
 	if err != nil {
-		p.readInvalidTemplateToken()
+		err = p.readInvalidTemplateToken()
 	}
 
 	p.InTemplateElement = false
@@ -1056,7 +1087,7 @@ func (p *Parser) readTmplToken() error {
 			return p.raise(p.start, "Unterminated template")
 		}
 		ch := p.input[p.pos]
-		if ch == 96 || ch == 36 && p.input[p.pos+1] == 123 { // '`', '${'
+		if ch == 96 || ch == 36 && p.peekByte(1) == 123 { // '`', '${'
 			if p.pos == p.start && p.Type.identifier == TOKEN_TEMPLATE || p.Type.identifier == TOKEN_INVALIDTEMPLATE {
 				if ch == 36 {
 					p.pos += 2
@@ -1076,7 +1107,10 @@ func (p *Parser) readTmplToken() error {
 
 		if ch == 92 { // '\'
 			out = append(out, p.input[chunkStart:p.pos]...)
-			escaped, _ := p.readEscapedChar(true)
+			escaped, err := p.readEscapedChar(true)
+			if err != nil {
+				return err
+			}
 			out = append(out, []byte(escaped)...)
 			chunkStart = p.pos
 		} else if isNewLine(rune(ch)) {
@@ -1237,13 +1271,16 @@ func (p *Parser) readWord1() (string, error) {
 			word = p.input[chunkStart:p.pos]
 			escStart := p.pos
 			p.pos = p.pos + size
-			if p.input[p.pos] != 117 { // "u"
+			if p.pos >= len(p.input) || p.input[p.pos] != 117 { // "u"
 
 				return "", p.invalidStringToken(p.pos, "Expecting Unicode escape sequence \\uXXXX")
 			}
 
 			p.pos = p.pos + 1
-			esc, _ := p.readCodePoint()
+			esc, err := p.readCodePoint()
+			if err != nil {
+				return "", err
+			}
 
 			if first {
 				if !IsIdentifierStart(rune(esc), astral) {
@@ -1330,7 +1367,7 @@ func (p *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiteral 
 	// `maybeLegacyOctalNumericLiteral` is true if it doesn't have prefix (0x,0o,0b)
 	// and isn't fraction part nor exponent part. In that case, if the first digit
 	// is zero then disallow separators.
-	isLegacyOctalNumericLiteral := maybeLegacyOctalNumericLiteral && p.input[p.pos] == 48
+	isLegacyOctalNumericLiteral := maybeLegacyOctalNumericLiteral && p.pos < len(p.input) && p.input[p.pos] == 48
 
 	start, total, lastCode := p.pos, 0, 0
 	e := 0
@@ -1394,12 +1431,12 @@ func (p *Parser) readInt(radix int, length *int, maybeLegacyOctalNumericLiteral 
 }
 
 func (p *Parser) readToken_dot() error {
-	next := p.input[p.pos+1]
+	next := p.peekByte(1)
 	if next >= 48 && next <= 57 {
 		return p.readNumber(true)
 	}
 
-	next2 := p.input[p.pos+2]
+	next2 := p.peekByte(2)
 	if p.getEcmaVersion() >= 6 && next == 46 && next2 == 46 { // 46 = dot '.'
 		p.pos += 3
 		p.finishToken(tokenTypes[TOKEN_ELLIPSIS], nil)

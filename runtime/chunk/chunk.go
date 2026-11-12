@@ -156,6 +156,11 @@ const (
 	OP_GET_HEAP_VAR_RAW
 	OP_UPDATE
 	OP_NEW_REGEXP
+	OP_ENTER_WITH
+	OP_EXIT_WITH
+	OP_WITH_GET
+	OP_WITH_SET
+	OP_DUP_CLASS
 )
 
 var OpNames = map[uint8]string{
@@ -314,4 +319,9 @@ var OpNames = map[uint8]string{
 	OP_GET_HEAP_VAR_RAW:                 "OP_GET_HEAP_VAR_RAW",
 	OP_UPDATE:                           "OP_UPDATE",
 	OP_NEW_REGEXP:                       "OP_NEW_REGEXP",
+	OP_ENTER_WITH:                       "OP_ENTER_WITH",
+	OP_EXIT_WITH:                        "OP_EXIT_WITH",
+	OP_WITH_GET:                         "OP_WITH_GET",
+	OP_WITH_SET:                         "OP_WITH_SET",
+	OP_DUP_CLASS:                        "OP_DUP_CLASS",
 }

@@ -4,7 +4,7 @@ import (
 	"regexp"
 )
 
-var literal = regexp.MustCompile(`^(?:'((?:\\[^]|[^'\\])*?)'|\"((?:\\[^]|[^"\\])*?)")`)
+var literal = regexp.MustCompile(`^(?:'((?:\\[\s\S]|[^'\\])*?)'|\"((?:\\[\s\S]|[^"\\])*?)")`)
 
 func (p *Parser) eat(token Token) bool {
 	if p.Type.identifier == token {

@@ -305,6 +305,8 @@ func (vm *VM) getTypedArrayMember(array *native.ObjTypedArray, key value.Value) 
 		return value.EncodeHandle(heap.Allocate(native.NewTypedArraySort())), true
 	case "map":
 		return value.EncodeHandle(heap.Allocate(native.NewTypedArrayMap())), true
+	case "toBase64":
+		return value.EncodeHandle(heap.Allocate(native.NewTypedArrayToBase64())), true
 	}
 	return value.UNDEFINED, false
 }

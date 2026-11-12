@@ -148,8 +148,8 @@ func (s *jsonStringifier) serialize(key string, holder value.Value, indent strin
 				toJSON := hashable.GetMember(jsonKey("toJSON"))
 				if toJSON.IsObject() {
 					if toJSONObj, err := heap.GetObject(toJSON.GetHandle()); err == nil {
-						if _, ok := toJSONObj.(object.Callable); ok {
-							val, err = s.vm.invokeCallback(toJSON, val, []value.Value{jsonKey(key)})
+						if _, ok := toJSONObj.(object.Callable); ok || toJSONObj.Type() == object.OBJ_NATIVE_FN {
+							val, err = s.vm.invokeCallableWithThis(toJSON, val, []value.Value{jsonKey(key)})
 							if err != nil {
 								return "", err
 							}
@@ -232,44 +232,69 @@ func (s *jsonStringifier) serialize(key string, holder value.Value, indent strin
 			return "[" + strings.Join(items, ",") + "]", nil
 		}
 		return "[\n" + nextIndent + strings.Join(items, ",\n"+nextIndent) + "\n" + indent + "]", nil
-	case *native.ObjObject:
+	case *native.BoxedPrimitive:
+		primitive := obj.Primitive
+		if primitive.IsBoolean() {
+			if primitive == value.TRUE {
+				return "true", nil
+			}
+			return "false", nil
+		}
+		if primitive.IsNumber() {
+			n := primitive.AsNumber()
+			if math.IsNaN(n) || math.IsInf(n, 0) {
+				return "null", nil
+			}
+			return nativeNumberString(n), nil
+		}
+		if str, ok := s.vm.valueAsString(primitive); ok {
+			return s.quote(str), nil
+		}
+		return "", nil
+	case *native.ObjTypedArray:
+		keys := make([]string, 0, obj.Length)
+		for i := 0; i < obj.Length; i++ {
+			keys = append(keys, strconv.Itoa(i))
+		}
+		return s.serializeObjectKeys(val, keys, nextIndent, indent)
+	default:
+		base, ok := native.ObjectAsObj(val)
+		if !ok {
+			return "", nil
+		}
 		keys := []string{}
 		if len(s.propertyList) > 0 {
 			keys = s.propertyList
 		} else {
-			for _, item := range orderedEntriesForVM(obj) {
-				if len(item.Key) > 0 && item.Key[0] == 0 {
-					continue
-				}
-				if item.Entry.Enumerable() {
-					keys = append(keys, item.Key)
-				}
-			}
+			keys = native.ObjectEnumerableKeys(base)
 		}
-		parts := []string{}
-		for _, key := range keys {
-			item, err := s.serialize(key, val, nextIndent)
-			if err != nil {
-				return "", err
-			}
-			if item == "" {
-				continue
-			}
-			if s.space == "" {
-				parts = append(parts, s.quote(key)+":"+item)
-			} else {
-				parts = append(parts, s.quote(key)+": "+item)
-			}
+		return s.serializeObjectKeys(val, keys, nextIndent, indent)
+	}
+}
+
+func (s *jsonStringifier) serializeObjectKeys(val value.Value, keys []string, nextIndent, indent string) (string, error) {
+	parts := []string{}
+	for _, key := range keys {
+		item, err := s.serialize(key, val, nextIndent)
+		if err != nil {
+			return "", err
 		}
-		if len(parts) == 0 {
-			return "{}", nil
+		if item == "" {
+			continue
 		}
 		if s.space == "" {
-			return "{" + strings.Join(parts, ",") + "}", nil
+			parts = append(parts, s.quote(key)+":"+item)
+		} else {
+			parts = append(parts, s.quote(key)+": "+item)
 		}
-		return "{\n" + nextIndent + strings.Join(parts, ",\n"+nextIndent) + "\n" + indent + "}", nil
 	}
-	return "", nil
+	if len(parts) == 0 {
+		return "{}", nil
+	}
+	if s.space == "" {
+		return "{" + strings.Join(parts, ",") + "}", nil
+	}
+	return "{\n" + nextIndent + strings.Join(parts, ",\n"+nextIndent) + "\n" + indent + "}", nil
 }
 
 func (vm *VM) callJSONStringify(argCount int) (value.Value, error) {

@@ -54,7 +54,7 @@ type WeakMap struct {
 func NewWeakMap() *WeakMap {
 	m := NewMap()
 	m.Members = map[string]ObjectValueEntry{}
-	m.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	m.SetMember(KEY_PROTO, PROTOTYPE_MAP)
 	return &WeakMap{Map: *m}
 }
 
@@ -68,7 +68,7 @@ type WeakSet struct {
 func NewWeakSet() *WeakSet {
 	s := NewSet()
 	s.Members = map[string]ObjectValueEntry{}
-	s.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	s.SetMember(KEY_PROTO, PROTOTYPE_SET)
 	return &WeakSet{Set: *s}
 }
 
@@ -189,6 +189,7 @@ func NewIntlNumberFormatMethod() *IntlNumberFormatMethod {
 
 type URLObject struct {
 	ObjObject
+	Parsed *url.URL
 }
 
 type URLSearchParamsGet struct {
@@ -196,8 +197,58 @@ type URLSearchParamsGet struct {
 	Values url.Values
 }
 
+type URLSearchParamsMethodKind int
+
+const (
+	URL_SEARCH_PARAMS_GET URLSearchParamsMethodKind = iota
+	URL_SEARCH_PARAMS_GET_ALL
+	URL_SEARCH_PARAMS_HAS
+	URL_SEARCH_PARAMS_SET
+	URL_SEARCH_PARAMS_APPEND
+	URL_SEARCH_PARAMS_DELETE
+	URL_SEARCH_PARAMS_TO_STRING
+)
+
+type URLSearchParamsMethod struct {
+	ObjNativeFn
+	Kind URLSearchParamsMethodKind
+}
+
+type URLSearchParamsObject struct {
+	ObjObject
+	Values url.Values
+}
+
+type URLStaticMethodKind int
+
+const (
+	URL_CAN_PARSE URLStaticMethodKind = iota
+)
+
+type URLStaticMethod struct {
+	ObjNativeFn
+	Kind URLStaticMethodKind
+}
+
+type URLToString struct {
+	ObjNativeFn
+}
+
+func NewURLToString() *URLToString {
+	fn := &URLToString{}
+	fn.name = "toString"
+	return fn
+}
+
 func NewURLConstructor() *URLConstructor {
 	c := &URLConstructor{}
+	c.Members = map[string]ObjectValueEntry{}
+	c.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("canParse"))), value.EncodeHandle(heap.Allocate(&URLStaticMethod{Kind: URL_CAN_PARSE})))
+	return c
+}
+
+func NewURLSearchParamsConstructor() *URLSearchParamsConstructor {
+	c := &URLSearchParamsConstructor{}
 	c.Members = map[string]ObjectValueEntry{}
 	return c
 }
@@ -209,6 +260,199 @@ type URLConstructor struct {
 func (*URLConstructor) Type() object.ObjType { return object.OBJ_NATIVE_FN }
 func (*URLConstructor) String() string       { return "function URL" }
 
+func stringArgument(v value.Value) string {
+	if text, ok := ObjectStringValue(v); ok {
+		return text
+	}
+	return String(v)
+}
+
+func ParseURL(text, base string) (*url.URL, error) {
+	if base == "" {
+		parsed, err := url.Parse(text)
+		if err != nil {
+			return nil, err
+		}
+		if parsed.Scheme == "" {
+			return nil, fmt.Errorf("Invalid URL")
+		}
+		return parsed, nil
+	}
+	baseURL, err := url.Parse(base)
+	if err != nil {
+		return nil, err
+	}
+	return baseURL.Parse(text)
+}
+
+func (u *URLObject) Href() string {
+	if u.Parsed == nil {
+		return ""
+	}
+	return u.Parsed.String()
+}
+
+func (u *URLObject) Origin() string {
+	if u.Parsed == nil || u.Parsed.Scheme == "" || u.Parsed.Host == "" {
+		return "null"
+	}
+	return u.Parsed.Scheme + "://" + u.Parsed.Host
+}
+
+func (u *URLObject) Pathname() string {
+	if u.Parsed == nil {
+		return ""
+	}
+	path := u.Parsed.EscapedPath()
+	if path == "" {
+		return "/"
+	}
+	return path
+}
+
+func (u *URLObject) Search() string {
+	if u.Parsed == nil || u.Parsed.RawQuery == "" {
+		return ""
+	}
+	return "?" + u.Parsed.RawQuery
+}
+
+func (u *URLObject) Hash() string {
+	if u.Parsed == nil || u.Parsed.Fragment == "" {
+		return ""
+	}
+	return "#" + u.Parsed.Fragment
+}
+
+func (u *URLObject) Username() string {
+	if u.Parsed == nil || u.Parsed.User == nil {
+		return ""
+	}
+	return u.Parsed.User.Username()
+}
+
+func (u *URLObject) Password() string {
+	if u.Parsed == nil || u.Parsed.User == nil {
+		return ""
+	}
+	password, _ := u.Parsed.User.Password()
+	return password
+}
+
+func (u *URLObject) Protocol() string {
+	if u.Parsed == nil || u.Parsed.Scheme == "" {
+		return ""
+	}
+	return u.Parsed.Scheme + ":"
+}
+
+func (u *URLObject) Hostname() string {
+	if u.Parsed == nil {
+		return ""
+	}
+	return u.Parsed.Hostname()
+}
+
+func (u *URLObject) Host() string {
+	if u.Parsed == nil {
+		return ""
+	}
+	return u.Parsed.Host
+}
+
+func (u *URLObject) Port() string {
+	if u.Parsed == nil {
+		return ""
+	}
+	return u.Parsed.Port()
+}
+
+func (u *URLObject) SearchParams() *URLSearchParamsObject {
+	values := url.Values{}
+	if u.Parsed != nil {
+		values = u.Parsed.Query()
+	}
+	params := &URLSearchParamsObject{Values: values}
+	params.Members = map[string]ObjectValueEntry{}
+	params.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	for _, item := range []struct {
+		name string
+		kind URLSearchParamsMethodKind
+	}{
+		{"get", URL_SEARCH_PARAMS_GET},
+		{"getAll", URL_SEARCH_PARAMS_GET_ALL},
+		{"has", URL_SEARCH_PARAMS_HAS},
+		{"set", URL_SEARCH_PARAMS_SET},
+		{"append", URL_SEARCH_PARAMS_APPEND},
+		{"delete", URL_SEARCH_PARAMS_DELETE},
+		{"toString", URL_SEARCH_PARAMS_TO_STRING},
+	} {
+		method := &URLSearchParamsMethod{Kind: item.kind}
+		method.name = item.name
+		params.SetMember(value.EncodeHandle(heap.Allocate(NewLightString(item.name))), value.EncodeHandle(heap.Allocate(method)))
+	}
+	return params
+}
+
+func (u *URLObject) SetProperty(name string, v value.Value) bool {
+	if u.Parsed == nil {
+		return false
+	}
+	text := stringArgument(v)
+	switch name {
+	case "href":
+		parsed, err := ParseURL(text, "")
+		if err != nil {
+			return true
+		}
+		u.Parsed = parsed
+	case "protocol":
+		u.Parsed.Scheme = strings.TrimSuffix(text, ":")
+	case "username":
+		u.setUser(text, u.Password())
+	case "password":
+		u.setUser(u.Username(), text)
+	case "hostname":
+		port := u.Parsed.Port()
+		if port != "" {
+			u.Parsed.Host = text + ":" + port
+		} else {
+			u.Parsed.Host = text
+		}
+	case "host":
+		u.Parsed.Host = text
+	case "port":
+		host := u.Parsed.Hostname()
+		if text == "" {
+			u.Parsed.Host = host
+		} else {
+			u.Parsed.Host = host + ":" + text
+		}
+	case "pathname":
+		u.Parsed.Path = text
+		u.Parsed.RawPath = ""
+	case "search":
+		u.Parsed.RawQuery = strings.TrimPrefix(text, "?")
+	case "hash":
+		u.Parsed.Fragment = strings.TrimPrefix(text, "#")
+	default:
+		return false
+	}
+	return true
+}
+
+func (u *URLObject) setUser(username, password string) {
+	if username == "" && password == "" {
+		u.Parsed.User = nil
+		return
+	}
+	if password == "" {
+		u.Parsed.User = url.User(username)
+		return
+	}
+	u.Parsed.User = url.UserPassword(username, password)
+}
+
 func (*URLConstructor) New(params ...any) (object.Object, error) {
 	if len(params) == 0 {
 		return nil, fmt.Errorf("URL requires a value")
@@ -217,24 +461,72 @@ func (*URLConstructor) New(params ...any) (object.Object, error) {
 	if !ok {
 		return nil, fmt.Errorf("URL requires a string")
 	}
-	text, ok := ObjectStringValue(input)
-	if !ok {
-		text = String(input)
+	base := ""
+	if len(params) > 1 {
+		if baseValue, ok := params[1].(value.Value); ok {
+			base = stringArgument(baseValue)
+		}
 	}
-	parsed, err := url.Parse(text)
+	parsed, err := ParseURL(stringArgument(input), base)
 	if err != nil {
 		return nil, err
 	}
-	o := NewObjectHash()
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("href"))), value.EncodeHandle(heap.Allocate(NewLightString(parsed.String()))))
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("protocol"))), value.EncodeHandle(heap.Allocate(NewLightString(parsed.Scheme+":"))))
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("hostname"))), value.EncodeHandle(heap.Allocate(NewLightString(parsed.Hostname()))))
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("host"))), value.EncodeHandle(heap.Allocate(NewLightString(parsed.Host))))
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("pathname"))), value.EncodeHandle(heap.Allocate(NewLightString(parsed.Path))))
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("search"))), value.EncodeHandle(heap.Allocate(NewLightString(parsed.RawQuery))))
-	searchParams := NewObjectHash()
-	searchParams.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("get"))), value.EncodeHandle(heap.Allocate(&URLSearchParamsGet{Values: parsed.Query()})))
-	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("searchParams"))), value.EncodeHandle(heap.Allocate(searchParams)))
+	o := &URLObject{Parsed: parsed}
+	o.Members = map[string]ObjectValueEntry{}
+	o.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	toString := value.EncodeHandle(heap.Allocate(NewURLToString()))
+	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("toString"))), toString)
+	o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("toJSON"))), toString)
+	return o, nil
+}
+
+type URLSearchParamsConstructor struct {
+	ObjObject
+}
+
+func (*URLSearchParamsConstructor) Type() object.ObjType { return object.OBJ_NATIVE_FN }
+func (*URLSearchParamsConstructor) String() string       { return "function URLSearchParams" }
+
+func (*URLSearchParamsConstructor) New(params ...any) (object.Object, error) {
+	values := url.Values{}
+	if len(params) > 0 {
+		if source, ok := params[0].(value.Value); ok && source != value.UNDEFINED && source != value.NULL {
+			if text, ok := ObjectStringValue(source); ok {
+				values = url.Values{}
+				parsed, err := url.ParseQuery(strings.TrimPrefix(text, "?"))
+				if err == nil {
+					values = parsed
+				}
+			} else if source.IsObject() {
+				if obj, err := heap.GetObject(source.GetHandle()); err == nil {
+					if other, ok := obj.(*URLSearchParamsObject); ok {
+						for key, entries := range other.Values {
+							values[key] = append([]string{}, entries...)
+						}
+					}
+				}
+			}
+		}
+	}
+	o := &URLSearchParamsObject{Values: values}
+	o.Members = map[string]ObjectValueEntry{}
+	o.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	for _, item := range []struct {
+		name string
+		kind URLSearchParamsMethodKind
+	}{
+		{"get", URL_SEARCH_PARAMS_GET},
+		{"getAll", URL_SEARCH_PARAMS_GET_ALL},
+		{"has", URL_SEARCH_PARAMS_HAS},
+		{"set", URL_SEARCH_PARAMS_SET},
+		{"append", URL_SEARCH_PARAMS_APPEND},
+		{"delete", URL_SEARCH_PARAMS_DELETE},
+		{"toString", URL_SEARCH_PARAMS_TO_STRING},
+	} {
+		method := &URLSearchParamsMethod{Kind: item.kind}
+		method.name = item.name
+		o.SetMember(value.EncodeHandle(heap.Allocate(NewLightString(item.name))), value.EncodeHandle(heap.Allocate(method)))
+	}
 	return o, nil
 }
 

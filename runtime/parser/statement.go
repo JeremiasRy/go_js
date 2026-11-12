@@ -1020,7 +1020,7 @@ func (p *Parser) parseEmptyStatement(node *Node) (*Node, error) {
 
 func (p *Parser) parseWithStatement(node *Node) (*Node, error) {
 	if p.Strict {
-		p.raise(p.start, "'with' in strict mode")
+		return nil, p.raise(p.start, "'with' in strict mode")
 	}
 	p.next(false)
 	parenthesizedExpr, err := p.parseParenExpression()

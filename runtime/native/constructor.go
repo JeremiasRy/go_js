@@ -24,12 +24,23 @@ func NewErrorConstructor() *ErrorConstructor {
 	return NewNamedErrorConstructor("Error")
 }
 
+type ErrorIsError struct {
+	ObjNativeFn
+}
+
+func NewErrorIsError() *ErrorIsError {
+	fn := &ErrorIsError{}
+	fn.name = "isError"
+	return fn
+}
+
 func NewNamedErrorConstructor(name string) *ErrorConstructor {
 	ec := &ErrorConstructor{errorName: name}
 	ec.Members = map[string]ObjectValueEntry{}
 	if proto, found := ERROR_PROTOTYPES[name]; found {
 		ec.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), proto)
 	}
+	ec.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isError"))), value.EncodeHandle(heap.Allocate(NewErrorIsError())))
 	return ec
 }
 
@@ -156,6 +167,16 @@ func NewGlobalObject() *ObjObject {
 	return obj
 }
 
+type ArrayFromAsync struct {
+	ObjNativeFn
+}
+
+func NewArrayFromAsync() *ArrayFromAsync {
+	fn := &ArrayFromAsync{}
+	fn.name = "fromAsync"
+	return fn
+}
+
 type ArrayConstructor struct {
 	ObjObject
 }
@@ -167,6 +188,7 @@ func NewArrayConstructor() *ArrayConstructor {
 	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isArray"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("isArray", ARRAY_STATIC_IS_ARRAY))))
 	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("of"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("of", ARRAY_STATIC_OF))))
 	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("from"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("from", ARRAY_STATIC_FROM))))
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("fromAsync"))), value.EncodeHandle(heap.Allocate(NewArrayFromAsync())))
 	return a
 }
 
@@ -251,6 +273,7 @@ type SetTimeout struct {
 	ObjNativeFn
 	time     int
 	callback object.Callback
+	args     []value.Value
 	rootKey  uintptr
 	cancel   *atomic.Bool
 	interval bool
@@ -269,8 +292,10 @@ func NewSetInterval() *SetTimeout {
 	return interval
 }
 
-func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value) {
+func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value, args []value.Value) {
 	st.time = ms
+	st.args = append([]value.Value{}, args...)
+	st.cancel = &atomic.Bool{}
 	st.callback = object.Callback{
 		Fn:      fn,
 		ThisCtx: this,
@@ -292,6 +317,7 @@ func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done 
 	}
 	callback := st.callback
 	callback.RootKey = st.rootKey
+	callback.Stack = append([]value.Value{}, st.args...)
 	message := &object.JobChannelMessage{
 		Job:      nil,
 		Callback: callback,
@@ -334,8 +360,23 @@ type MapConstructor struct {
 	ObjObject
 }
 
+type MapGroupBy struct {
+	ObjNativeFn
+}
+
+func NewMapGroupBy() *MapGroupBy {
+	fn := &MapGroupBy{}
+	fn.name = "groupBy"
+	return fn
+}
+
 func NewMapConstructor() *MapConstructor {
-	return &MapConstructor{}
+	m := &MapConstructor{}
+	m.Members = map[string]ObjectValueEntry{}
+	m.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	m.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_MAP)
+	m.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("groupBy"))), value.EncodeHandle(heap.Allocate(NewMapGroupBy())))
+	return m
 }
 
 func (*MapConstructor) String() string {
@@ -406,7 +447,11 @@ type SetConstructor struct {
 }
 
 func NewSetConstructor() *SetConstructor {
-	return &SetConstructor{}
+	s := &SetConstructor{}
+	s.Members = map[string]ObjectValueEntry{}
+	s.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
+	s.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_SET)
+	return s
 }
 
 func (*SetConstructor) String() string {

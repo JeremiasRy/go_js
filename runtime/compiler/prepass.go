@@ -363,6 +363,11 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				prePass(node, symbolTable)
 			}
 		}
+	case parser.NODE_WITH_STATEMENT:
+		{
+			prePass(current.Object, symbolTable)
+			prePass(current.BodyNode, symbolTable)
+		}
 	case parser.NODE_TRY_STATEMENT:
 		{
 			prePass(current.Block, symbolTable)

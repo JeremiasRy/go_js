@@ -857,6 +857,16 @@ func (obj *ObjObject) SetMember(k, v value.Value) {
 	obj.Members[key] = obj.NewValueEntry(v)
 }
 
+func (obj *ObjObject) SetNonEnumerableMember(k, v value.Value) {
+	key, ok := objectKeyString(k)
+	if !ok {
+		return
+	}
+	entry := obj.NewValueEntry(v)
+	entry.nonEnumerable = true
+	obj.Members[key] = entry
+}
+
 func (obj *ObjObject) DefineNonConfigurableMember(k, v value.Value) {
 	key, ok := objectKeyString(k)
 	if !ok {

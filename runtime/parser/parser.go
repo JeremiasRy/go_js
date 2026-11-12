@@ -58,6 +58,7 @@ type Parser struct {
 	PrivateNameStack         []*PrivateName
 	InTemplateElement        bool
 	InClassStaticBlock       bool
+	tokenError               error
 }
 
 func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
@@ -156,7 +157,7 @@ func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 	p.UndefinedExports = map[string]*Node{}
 
 	// If enabled, skip leading hashbang line.
-	if p.pos == 0 && options.AllowHashBang && string(p.input[0:2]) == "#!" {
+	if p.pos == 0 && options.AllowHashBang && len(p.input) >= 2 && string(p.input[0:2]) == "#!" {
 		p.skipLineComment(2)
 	}
 
@@ -174,8 +175,14 @@ func GetAst(input []byte, options *Options, startPos int) (*Node, error) {
 	p.initAllUpdateContext()
 
 	p.nextToken()
+	if p.tokenError != nil {
+		return nil, p.tokenError
+	}
 	node, err := p.parseTopLevel(p.startNode())
 
+	if p.tokenError != nil {
+		return nil, p.tokenError
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -266,7 +273,7 @@ Loop:
 		case 32, 160: // ' '
 			p.pos = p.pos + size
 		case 13:
-			if p.input[p.pos+size] == 10 {
+			if p.pos+size < len(p.input) && p.input[p.pos+size] == 10 {
 				p.pos = p.pos + size
 			}
 			fallthrough
@@ -277,9 +284,14 @@ Loop:
 				p.LineStart = p.pos
 			}
 		case 47: // '/'
+			if p.pos+1 >= len(p.input) {
+				break Loop
+			}
 			switch p.input[p.pos+1] {
 			case 42: // '*'
-				p.skipBlockComment()
+				if err := p.skipBlockComment(); err != nil {
+					return err
+				}
 			case 47:
 				p.skipLineComment(2)
 			default:

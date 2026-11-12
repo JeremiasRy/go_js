@@ -27,6 +27,8 @@ var (
 	SYMBOL_SEARCH               value.Value
 	SYMBOL_SPLIT                value.Value
 	SYMBOL_MATCH_ALL            value.Value
+	SYMBOL_DISPOSE              value.Value
+	SYMBOL_ASYNC_DISPOSE        value.Value
 )
 
 type ObjSymbol struct {
@@ -64,7 +66,7 @@ func NewSymbolConstructor() *SymbolConstructor {
 	sc.Members = map[string]ObjectValueEntry{}
 	sc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("for"))), value.EncodeHandle(heap.Allocate(NewSymbolFor())))
 	sc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("keyFor"))), value.EncodeHandle(heap.Allocate(NewSymbolKeyFor())))
-	for _, name := range []string{"iterator", "asyncIterator", "hasInstance", "species", "isConcatSpreadable", "toPrimitive", "toStringTag", "match", "replace", "search", "split", "matchAll"} {
+	for _, name := range []string{"iterator", "asyncIterator", "hasInstance", "species", "isConcatSpreadable", "toPrimitive", "toStringTag", "match", "replace", "search", "split", "matchAll", "dispose", "asyncDispose"} {
 		symbol := NewSymbol(name)
 		symbol.WellKnown = name
 		handle := value.EncodeHandle(heap.Allocate(symbol))
@@ -96,6 +98,10 @@ func NewSymbolConstructor() *SymbolConstructor {
 			SYMBOL_SPLIT = handle
 		case "matchAll":
 			SYMBOL_MATCH_ALL = handle
+		case "dispose":
+			SYMBOL_DISPOSE = handle
+		case "asyncDispose":
+			SYMBOL_ASYNC_DISPOSE = handle
 		}
 	}
 	return sc

@@ -1,6 +1,7 @@
 package vm
 
 import (
+	"go_js/compiler"
 	"go_js/native"
 	"go_js/value"
 	"math"
@@ -140,6 +141,34 @@ func (vm *VM) callMathMethod(method *native.MathMethod, argCount int) (value.Val
 		return value.ValueFromFloat64(float64(float32(number(0)))), nil
 	case native.MATH_RANDOM:
 		return value.ValueFromFloat64(rand.Float64()), nil
+	case native.MATH_SUM_PRECISE:
+		if len(args) == 0 {
+			return value.ValueFromFloat64(0), nil
+		}
+		iterator, err := vm.acquireIterator(args[0], compiler.ITERATOR_FOR_OF)
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		sum := 0.0
+		for {
+			done, err := vm.iteratorNext(iterator)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			if done {
+				break
+			}
+			item, err := vm.iteratorCurrent(iterator)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			n, err := vm.toNumber(item)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			sum += n
+		}
+		return value.ValueFromFloat64(sum), nil
 	}
 	return value.UNDEFINED, nil
 }

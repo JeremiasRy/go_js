@@ -282,6 +282,37 @@ func (vm *VM) callStringMethod(method *native.StringMethod, this value.Value, ar
 		other := argString(0)
 		result := strings.Compare(owner, other)
 		return value.ValueFromFloat64(float64(result)), nil
+	case native.STRING_IS_WELL_FORMED:
+		units := native.UTF16Units(owner)
+		for i := 0; i < len(units); i++ {
+			if units[i] >= 0xD800 && units[i] <= 0xDBFF {
+				if i+1 >= len(units) || units[i+1] < 0xDC00 || units[i+1] > 0xDFFF {
+					return value.FALSE, nil
+				}
+				i++
+			} else if units[i] >= 0xDC00 && units[i] <= 0xDFFF {
+				return value.FALSE, nil
+			}
+		}
+		return value.TRUE, nil
+	case native.STRING_TO_WELL_FORMED:
+		units := native.UTF16Units(owner)
+		result := make([]uint16, 0, len(units))
+		for i := 0; i < len(units); i++ {
+			if units[i] >= 0xD800 && units[i] <= 0xDBFF {
+				if i+1 < len(units) && units[i+1] >= 0xDC00 && units[i+1] <= 0xDFFF {
+					result = append(result, units[i], units[i+1])
+					i++
+				} else {
+					result = append(result, 0xFFFD)
+				}
+			} else if units[i] >= 0xDC00 && units[i] <= 0xDFFF {
+				result = append(result, 0xFFFD)
+			} else {
+				result = append(result, units[i])
+			}
+		}
+		return newString(native.UTF16FromUnits(result)), nil
 	case native.STRING_SPLIT:
 		if len(args) > 0 {
 			separator := args[0]
