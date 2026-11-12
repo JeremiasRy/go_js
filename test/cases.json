@@ -24,6 +24,7 @@
         { "file": "negative-scripts/20-parse-new-target-top-level.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/22-parse-duplicate-let.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/23-parse-const-without-initializer.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
-        { "file": "negative-scripts/24-parse-nullish-mixing.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
+        { "file": "negative-scripts/24-parse-nullish-mixing.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/25-parse-optional-chain-assignment.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
     ]
 }
