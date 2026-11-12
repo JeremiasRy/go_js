@@ -1,10 +1,10 @@
 # Goal
 
-Make all the tests pass in `./test`, run the full test suite with `./test.sh`. It'll blurp out a bunch of text and tells you which tests have passed and what haven't.
+Make all the tests pass in `./test`, run the full test suite with `./test.sh`.
 
 # Recommended approach
 
-Take one of the failing tests and run it with `-debug` flag:
+Take one of the failing tests from `./test/failures` and run it with `-debug` flag.
 
 `cd runtime`
 
@@ -14,8 +14,8 @@ youll get the AST, Bytecode and execution stqack, should help with debugging.
 
 # Workflow
 
-Make a commit once you have fixed a test case, i.e. 1 commit per fixed test case, write a short description on what was fixed.
+Make a commit once you have fixed a test case, i.e. 1 commit per fixed test case, write a short description on what was fixed. The commit should contain the implementation and moving the possible test `.js` file from failures to the passing test suite.
 
 # Comments
 
-Donot write comments to source code, only if absolutely necessary
+Do not write comments to source code, only if absolutely necessary
