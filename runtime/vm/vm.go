@@ -1398,7 +1398,10 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 	}
 	callable, ok := obj.(object.Callable)
 	if !ok {
-		return value.UNDEFINED, fmt.Errorf("value is not callable")
+		if obj.Type() != object.OBJ_NATIVE_FN {
+			return value.UNDEFINED, fmt.Errorf("value is not callable")
+		}
+		return vm.invokeCallableWithThis(fn, this, args)
 	}
 	runner := NewVM(false, vm.output)
 	for _, arg := range args {
@@ -1661,6 +1664,18 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if re, ok := obj.(*native.ObjRegExp); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "lastIndex" {
 			return value.ValueFromFloat64(float64(re.LastIndex)), nil
+		}
+		switch key {
+		case native.SYMBOL_MATCH:
+			return value.EncodeHandle(heap.Allocate(native.NewRegExpSymbolMethod("match", native.REGEXP_SYMBOL_MATCH))), nil
+		case native.SYMBOL_REPLACE:
+			return value.EncodeHandle(heap.Allocate(native.NewRegExpSymbolMethod("replace", native.REGEXP_SYMBOL_REPLACE))), nil
+		case native.SYMBOL_SEARCH:
+			return value.EncodeHandle(heap.Allocate(native.NewRegExpSymbolMethod("search", native.REGEXP_SYMBOL_SEARCH))), nil
+		case native.SYMBOL_SPLIT:
+			return value.EncodeHandle(heap.Allocate(native.NewRegExpSymbolMethod("split", native.REGEXP_SYMBOL_SPLIT))), nil
+		case native.SYMBOL_MATCH_ALL:
+			return value.EncodeHandle(heap.Allocate(native.NewRegExpSymbolMethod("matchAll", native.REGEXP_SYMBOL_MATCH_ALL))), nil
 		}
 	}
 	if namespace, ok := obj.(*native.ObjModuleNamespace); ok {
@@ -4716,6 +4731,73 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						args := vm.popN(argCount)
 						view, _ := vm.dataViewFromValue(thisCtx)
 						result, err := vm.callDataViewMethod(view, fn, args)
+						if err != nil {
+							errValue := vm.errorValue(err)
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(result)
+					}
+				case *native.RegExpToString:
+					{
+						vm.popN(argCount)
+						text := "/(?:)/"
+						if re, ok := vm.regexpFromValue(thisCtx); ok {
+							text = re.String()
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(text))))
+					}
+				case *native.RegExpSymbolMethod:
+					{
+						args := vm.popN(argCount)
+						re, ok := vm.regexpFromValue(thisCtx)
+						if !ok {
+							errValue := vm.makeError("TypeError", "RegExp method called on incompatible receiver")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						owner := ""
+						if len(args) > 0 {
+							owner = mustString(vm, args[0])
+						}
+						var result value.Value
+						var err error
+						switch fn.Kind {
+						case native.REGEXP_SYMBOL_MATCH:
+							result, err = vm.regexpSymbolMatch(re, owner)
+						case native.REGEXP_SYMBOL_REPLACE:
+							replacement := value.UNDEFINED
+							if len(args) > 1 {
+								replacement = args[1]
+							}
+							result, err = vm.stringReplaceRegex(owner, re, replacement, strings.Contains(re.Flags, "g"))
+						case native.REGEXP_SYMBOL_SEARCH:
+							match, findErr := vm.regexpFind(re, newRegexpText(owner, re.Unicode), 0, false)
+							err = findErr
+							if match == nil {
+								result = value.ValueFromFloat64(-1)
+							} else {
+								result = value.ValueFromFloat64(float64(newRegexpText(owner, re.Unicode).utf16Index(match.Index)))
+							}
+						case native.REGEXP_SYMBOL_SPLIT:
+							limit := -1
+							if len(args) > 1 && args[1] != value.UNDEFINED {
+								n, _ := vm.toNumber(args[1])
+								if !math.IsNaN(n) {
+									limit = int(math.Trunc(n))
+									if limit < 0 {
+										limit = -1
+									}
+								}
+							}
+							result, err = vm.stringSplitRegex(owner, re, limit)
+						case native.REGEXP_SYMBOL_MATCH_ALL:
+							result, err = vm.stringMatchAll(owner, []value.Value{thisCtx})
+						}
 						if err != nil {
 							errValue := vm.errorValue(err)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {

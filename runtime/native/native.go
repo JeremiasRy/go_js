@@ -116,6 +116,7 @@ func Init() {
 	createCommonHandles()
 	initObjectPrototype()
 	initErrorPrototypes()
+	initRegExpPrototype()
 
 	initArrayPrototype()
 	initStringPrototype()

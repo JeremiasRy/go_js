@@ -357,7 +357,10 @@ func (vm *VM) callRegExpMethod(re *native.ObjRegExp, kind string, argCount int) 
 	sticky := strings.Contains(re.Flags, "y")
 	if global || sticky {
 		start = re.LastIndex
-		if start < 0 || start > native.UTF16Length(textString) {
+		if start < 0 {
+			start = 0
+			re.LastIndex = 0
+		} else if start > native.UTF16Length(textString) {
 			re.LastIndex = 0
 			if kind == "test" {
 				return value.FALSE, nil
