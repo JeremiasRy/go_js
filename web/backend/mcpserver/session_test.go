@@ -9,6 +9,7 @@ import (
 	"go_js_demo/worker"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -28,12 +29,13 @@ func newFakeStore() *fakeStore {
 	return &fakeStore{jobs: make(map[uuid.UUID]db.UserScriptJob)}
 }
 
-func (f *fakeStore) InsertNewJob(src string, _ context.Context) (uuid.UUID, error) {
+func (f *fakeStore) InsertNewJob(sessionID string, src string, _ context.Context) (uuid.UUID, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	job := db.UserScriptJob{
 		JobId:     uuid.New(),
+		SessionID: sessionID,
 		Src:       src,
 		JobStatus: db.JobPending,
 		CreatedAt: time.Now(),
@@ -58,12 +60,41 @@ func (f *fakeStore) UpdateJob(status db.JobStatus, result string, jobID uuid.UUI
 	return nil
 }
 
+func (f *fakeStore) GetJobsBySessionID(sessionID string, _ context.Context) ([]db.UserScriptJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	jobs := make([]db.UserScriptJob, 0)
+	for _, job := range f.jobs {
+		if job.SessionID == sessionID {
+			jobs = append(jobs, job)
+		}
+	}
+	sort.Slice(jobs, func(i, j int) bool {
+		return jobs[i].CreatedAt.After(jobs[j].CreatedAt)
+	})
+	return jobs, nil
+}
+
+func (f *fakeStore) GetRandomJob(_ context.Context) (*db.UserScriptJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	for _, job := range f.jobs {
+		jobCopy := job
+		return &jobCopy, nil
+	}
+	return nil, db.ErrNoJobs
+}
+
 func newTestServer(t *testing.T, manager *Manager) *httptest.Server {
 	t.Helper()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /session", manager.HandleCreateSession)
 	mux.HandleFunc("GET /ws/{session_id}", manager.HandleWS)
+	mux.HandleFunc("GET /session/{session_id}/jobs", manager.HandleSessionJobs)
+	mux.HandleFunc("GET /scripts/random", manager.HandleRandomJob)
 	mux.HandleFunc("/session/{session_id}/mcp", manager.HandleMCP)
 
 	server := httptest.NewServer(mux)
@@ -191,6 +222,113 @@ func TestCreateSessionEndpointUsesClientID(t *testing.T) {
 	}
 }
 
+func TestSessionJobsListsOnlyClientScripts(t *testing.T) {
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+
+	server := newTestServer(t, manager)
+	clientID := uuid.NewString()
+	otherClientID := uuid.NewString()
+	ctx := context.Background()
+
+	if _, err := store.InsertNewJob(clientID, "console.log(1)", ctx); err != nil {
+		t.Fatalf("insert first job: %v", err)
+	}
+	if _, err := store.InsertNewJob(clientID, "console.log(2)", ctx); err != nil {
+		t.Fatalf("insert second job: %v", err)
+	}
+	if _, err := store.InsertNewJob(otherClientID, "console.log(3)", ctx); err != nil {
+		t.Fatalf("insert other job: %v", err)
+	}
+
+	response, err := http.Get(server.URL + "/session/" + clientID + "/jobs")
+	if err != nil {
+		t.Fatalf("list scripts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+
+	var jobs []scriptSummary
+	if err := json.NewDecoder(response.Body).Decode(&jobs); err != nil {
+		t.Fatalf("decode scripts: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 scripts, got %d", len(jobs))
+	}
+	for _, job := range jobs {
+		if job.SessionID != clientID {
+			t.Fatalf("expected scripts for %q, got %q", clientID, job.SessionID)
+		}
+		if strings.Contains(job.Src, "console.log(3)") {
+			t.Fatal("listed a script from another client")
+		}
+	}
+}
+
+func TestSessionJobsRejectsInvalidSessionID(t *testing.T) {
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+
+	server := newTestServer(t, manager)
+	response, err := http.Get(server.URL + "/session/not-a-session/jobs")
+	if err != nil {
+		t.Fatalf("list scripts: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", response.StatusCode)
+	}
+}
+
+func TestRandomJobReturnsStoredScript(t *testing.T) {
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+
+	server := newTestServer(t, manager)
+
+	empty, err := http.Get(server.URL + "/scripts/random")
+	if err != nil {
+		t.Fatalf("get random script: %v", err)
+	}
+	defer empty.Body.Close()
+	if empty.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 when no scripts exist, got %d", empty.StatusCode)
+	}
+
+	sessionID := uuid.NewString()
+	if _, err := store.InsertNewJob(sessionID, "console.log('random')", context.Background()); err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+
+	response, err := http.Get(server.URL + "/scripts/random")
+	if err != nil {
+		t.Fatalf("get random script: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+
+	var job scriptSummary
+	if err := json.NewDecoder(response.Body).Decode(&job); err != nil {
+		t.Fatalf("decode random script: %v", err)
+	}
+	if job.Src != "console.log('random')" {
+		t.Fatalf("unexpected random script: %q", job.Src)
+	}
+	if job.JobStatus != db.JobPending {
+		t.Fatalf("expected pending status, got %q", job.JobStatus)
+	}
+}
+
 func TestMultipleTabsShareSession(t *testing.T) {
 	store := newFakeStore()
 	work := make(chan worker.HeartbeatSignal, 8)
@@ -251,7 +389,7 @@ func TestWebSocketRunFlow(t *testing.T) {
 	t.Cleanup(manager.Close)
 
 	server := newTestServer(t, manager)
-	conn, _ := dialSession(t, server, manager)
+	conn, sessionID := dialSession(t, server, manager)
 
 	clientID := uuid.NewString()
 	writeSocketMessage(t, conn, socketMessage{
@@ -275,6 +413,16 @@ func TestWebSocketRunFlow(t *testing.T) {
 	jobID, err := uuid.Parse(accepted.JobID)
 	if err != nil {
 		t.Fatalf("parse job id: %v", err)
+	}
+
+	store.mu.Lock()
+	job, ok := store.jobs[jobID]
+	store.mu.Unlock()
+	if !ok {
+		t.Fatalf("job %s was not stored", jobID)
+	}
+	if job.SessionID != sessionID {
+		t.Fatalf("expected job session %q, got %q", sessionID, job.SessionID)
 	}
 
 	raw := encodedResult("2")

@@ -97,8 +97,13 @@ last browser tab disconnects. Session and in-flight job state are kept in memory
 restarting the backend invalidates active sessions, but the stable client id
 recreates the same MCP URL on the next page load.
 
-For frontend development, the SvelteKit dev server proxies `/ws` and `/session`
-to port `8000`, so the same browser-origin URLs work in development and
+Every job is stored with its client session id. The sidebar lists the scripts
+submitted by the current client, and clicking one loads it back into the editor.
+The "Give me a random script" button fetches any stored script from the database,
+regardless of which client wrote it.
+
+For frontend development, the SvelteKit dev server proxies `/ws`, `/session`, and
+`/scripts` to port `8000`, so the same browser-origin URLs work in development and
 production.
 
 ## Test runner 

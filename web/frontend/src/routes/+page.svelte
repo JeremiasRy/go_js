@@ -18,12 +18,15 @@
         HighlightStatus,
         PageStatus,
         InterpretResult,
+        JobStatus,
+        ScriptJob,
         SetHighlightStatusParams,
     } from "../types";
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
     import Code from "./Code.svelte";
     import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
+    import { fetchRandomScript, fetchSessionScripts } from "$lib/scriptsApi";
     import {
         connectAgentSocket,
         type AgentSocket,
@@ -50,6 +53,16 @@
     let copyState = $state<"idle" | "copied" | "failed">("idle");
     let socket: AgentSocket | null = null;
     let runTimeout: ReturnType<typeof setTimeout> | null = null;
+    let sessionId = $state<string | null>(null);
+    let scripts = $state<ScriptJob[]>([]);
+    let scriptsLoading = $state(false);
+    let scriptsError = $state<string | null>(null);
+    let selectedScriptId = $state<string | null>(null);
+    let randomLoading = $state(false);
+    let scriptsRequest = 0;
+    let isBusy = $derived(
+        pageState === "submitting" || pageState === "running",
+    );
     let showResults = $derived(
         pageState === "done" &&
             interpretResult !== null &&
@@ -188,6 +201,8 @@
         }
 
         mcpUrl = resolveUrl(bootstrap.mcp_path);
+        sessionId = bootstrap.session_id;
+        void loadSessionScripts();
         socket = connectAgentSocket({
             websocketPath: bootstrap.ws_path,
             onMessage: handleServerMessage,
@@ -320,6 +335,111 @@
         }, 120_000);
     }
 
+    async function loadSessionScripts() {
+        const id = sessionId;
+        if (id === null) {
+            return;
+        }
+
+        const request = ++scriptsRequest;
+        scriptsLoading = true;
+        try {
+            const nextScripts = await fetchSessionScripts(id);
+            if (request !== scriptsRequest) {
+                return;
+            }
+            scripts = nextScripts;
+            scriptsError = null;
+        } catch (error) {
+            if (request !== scriptsRequest) {
+                return;
+            }
+            console.error(error);
+            scriptsError = "Could not load your scripts.";
+        } finally {
+            if (request === scriptsRequest) {
+                scriptsLoading = false;
+            }
+        }
+    }
+
+    async function loadRandomScript() {
+        if (isBusy || randomLoading) {
+            return;
+        }
+
+        randomLoading = true;
+        try {
+            const script = await fetchRandomScript();
+            if (script === null) {
+                scriptsError = "No scripts in the database yet.";
+                return;
+            }
+            applyScript(script);
+            scriptsError = null;
+        } catch (error) {
+            console.error(error);
+            scriptsError = "Could not fetch a random script.";
+        } finally {
+            randomLoading = false;
+        }
+    }
+
+    function applyScript(script: ScriptJob) {
+        if (view === undefined || isBusy) {
+            return;
+        }
+
+        resetPage();
+        view.dispatch({
+            changes: {
+                from: 0,
+                to: view.state.doc.length,
+                insert: script.src,
+            },
+        });
+        selectedScriptId = script.job_id;
+        view.focus();
+    }
+
+    function scriptPreview(src: string): string {
+        const line = src.split("\n").find((value) => value.trim() !== "");
+        return (line ?? "Empty script").trim().slice(0, 90);
+    }
+
+    function formatScriptTime(value: string): string {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+
+        return date.toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    }
+
+    function statusDotClass(status: JobStatus): string {
+        switch (status) {
+            case "Success":
+                return "bg-emerald-500";
+            case "Failed":
+                return "bg-red-500";
+            case "Processing":
+                return "bg-amber-400";
+            default:
+                return "bg-slate-400";
+        }
+    }
+
+    function scriptButtonClass(jobId: string): string {
+        return selectedScriptId === jobId
+            ? "border-[#00ADD8] bg-cyan-50"
+            : "border-slate-200 bg-white hover:bg-slate-50";
+    }
+
     function handleRunAccepted(message: {
         request_id: string;
         job_id: string;
@@ -336,7 +456,9 @@
 
         activeRequestId = message.request_id;
         jobId = message.job_id;
+        selectedScriptId = message.job_id;
         pageState = "running";
+        void loadSessionScripts();
     }
 
     function handleRunResult(message: {
@@ -357,6 +479,7 @@
         clearRunTimeout();
         activeRequestId = null;
         jobId = null;
+        void loadSessionScripts();
 
         if (message.job_status === "Success") {
             try {
@@ -628,7 +751,100 @@
         </span>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-row">
+    <div class="flex-1 min-h-0 flex flex-row gap-3">
+        <aside
+            class="w-64 shrink-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+            aria-label="Your scripts"
+        >
+            <div
+                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2"
+            >
+                <span>Your scripts</span>
+                <button
+                    type="button"
+                    onclick={() => void loadSessionScripts()}
+                    disabled={scriptsLoading || sessionId === null}
+                    class="text-xs font-medium text-[#00758D] hover:text-[#00ADD8] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                    {scriptsLoading ? "Loading…" : "Refresh"}
+                </button>
+            </div>
+
+            <div class="p-3 border-b border-slate-100 shrink-0">
+                <button
+                    type="button"
+                    onclick={() => void loadRandomScript()}
+                    disabled={isBusy || randomLoading}
+                    class="w-full bg-[#00ADD8] hover:bg-[#00758D] text-white px-3 py-2 rounded-lg transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                    {randomLoading
+                        ? "Finding a script…"
+                        : "🎲 Give me a random script"}
+                </button>
+            </div>
+
+            {#if scriptsError}
+                <div
+                    class="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+                    role="status"
+                >
+                    {scriptsError}
+                </div>
+            {/if}
+
+            <div class="flex-1 min-h-0 overflow-y-auto p-2">
+                {#if scripts.length === 0}
+                    <p class="px-2 py-3 text-xs text-slate-500">
+                        {scriptsLoading
+                            ? "Loading scripts…"
+                            : "No scripts yet. Submit one and it will show up here."}
+                    </p>
+                {:else}
+                    <ul class="flex flex-col gap-1">
+                        {#each scripts as script (script.job_id)}
+                            <li>
+                                <button
+                                    type="button"
+                                    onclick={() => applyScript(script)}
+                                    disabled={isBusy}
+                                    class="w-full text-left rounded-lg border px-3 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer {scriptButtonClass(
+                                        script.job_id,
+                                    )}"
+                                >
+                                    <span
+                                        class="flex items-center gap-1.5 text-[11px] font-medium text-slate-500"
+                                    >
+                                        <span
+                                            class="h-1.5 w-1.5 rounded-full {statusDotClass(
+                                                script.job_status,
+                                            )}"
+                                        ></span>
+                                        {script.job_status}
+                                        <span class="ml-auto font-normal">
+                                            {formatScriptTime(
+                                                script.created_at,
+                                            )}
+                                        </span>
+                                    </span>
+                                    <span
+                                        class="mt-1 block truncate font-mono text-xs text-slate-700"
+                                    >
+                                        {scriptPreview(script.src)}
+                                    </span>
+                                    <span
+                                        class="mt-1 block font-mono text-[10px] text-slate-400"
+                                    >
+                                        {script.job_id.slice(0, 8)}
+                                    </span>
+                                </button>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
+            </div>
+        </aside>
+
+        <div class="flex-1 min-w-0 flex flex-row">
         <div
             class="basis-0 min-w-0"
             style:flex-grow={1 - reveal.current}
@@ -762,5 +978,6 @@
             style:flex-grow={1 - reveal.current}
             aria-hidden="true"
         ></div>
+        </div>
     </div>
 </div>

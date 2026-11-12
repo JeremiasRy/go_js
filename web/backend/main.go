@@ -104,6 +104,8 @@ func main() {
 	mux.Handle("/", newFrontendHandler(mgr, static, "./static/index.html"))
 	mux.HandleFunc("POST /session", mgr.HandleCreateSession)
 	mux.HandleFunc("GET /ws/{session_id}", mgr.HandleWS)
+	mux.HandleFunc("GET /session/{session_id}/jobs", mgr.HandleSessionJobs)
+	mux.HandleFunc("GET /scripts/random", mgr.HandleRandomJob)
 	mux.HandleFunc("/session/{session_id}/mcp", mgr.HandleMCP)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

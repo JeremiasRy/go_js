@@ -12,6 +12,10 @@ export default defineConfig({
 				target: backend,
 				changeOrigin: false
 			},
+			'/scripts': {
+				target: backend,
+				changeOrigin: false
+			},
 			'/ws': {
 				target: 'ws://localhost:8000',
 				ws: true,
