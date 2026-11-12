@@ -126,7 +126,7 @@ func (vm *VM) callNumberFormatMethod(method *native.NumberFormatMethod, this val
 		if math.IsNaN(n) || math.IsInf(n, 0) {
 			return value.EncodeHandle(heap.Allocate(native.NewLightString(nativeNumberString(n)))), nil
 		}
-		return value.EncodeHandle(heap.Allocate(native.NewLightString(strconv.FormatFloat(n, 'g', precision, 64)))), nil
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(formatPrecision(n, precision)))), nil
 	case native.NUMBER_TO_EXPONENTIAL:
 		digits := -1
 		if len(args) > 0 && args[0] != value.UNDEFINED {
@@ -184,7 +184,44 @@ func nativeNumberString(n float64) string {
 	if abs >= 1e-6 && abs < 1e21 {
 		return strconv.FormatFloat(n, 'f', -1, 64)
 	}
-	return strings.ReplaceAll(strconv.FormatFloat(n, 'e', -1, 64), "e+0", "e+")
+	return normalizeNumberExponent(strconv.FormatFloat(n, 'e', -1, 64))
+}
+
+func normalizeNumberExponent(text string) string {
+	index := strings.IndexByte(text, 'e')
+	if index < 0 {
+		return text
+	}
+	mantissa := text[:index]
+	exponent := text[index+1:]
+	sign := ""
+	if len(exponent) > 0 && (exponent[0] == '+' || exponent[0] == '-') {
+		sign = string(exponent[0])
+		exponent = exponent[1:]
+	}
+	exponent = strings.TrimLeft(exponent, "0")
+	if exponent == "" {
+		exponent = "0"
+	}
+	return mantissa + "e" + sign + exponent
+}
+
+func formatPrecision(n float64, precision int) string {
+	if n == 0 {
+		if precision == 1 {
+			return "0"
+		}
+		return "0." + strings.Repeat("0", precision-1)
+	}
+	exponent := int(math.Floor(math.Log10(math.Abs(n))))
+	if exponent < -6 || exponent >= precision {
+		return normalizeNumberExponent(strconv.FormatFloat(n, 'e', precision-1, 64))
+	}
+	decimals := precision - exponent - 1
+	if decimals < 0 {
+		decimals = 0
+	}
+	return strconv.FormatFloat(n, 'f', decimals, 64)
 }
 
 func nativeParseNumberString(s string) (float64, error) {

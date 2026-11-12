@@ -28,7 +28,26 @@ func nativeNumberString(n float64) string {
 	if abs >= 1e-6 && abs < 1e21 {
 		return strconv.FormatFloat(n, 'f', -1, 64)
 	}
-	return strconv.FormatFloat(n, 'e', -1, 64)
+	return normalizeExponent(strconv.FormatFloat(n, 'e', -1, 64))
+}
+
+func normalizeExponent(text string) string {
+	index := strings.IndexByte(text, 'e')
+	if index < 0 {
+		return text
+	}
+	mantissa := text[:index]
+	exponent := text[index+1:]
+	sign := ""
+	if len(exponent) > 0 && (exponent[0] == '+' || exponent[0] == '-') {
+		sign = string(exponent[0])
+		exponent = exponent[1:]
+	}
+	exponent = strings.TrimLeft(exponent, "0")
+	if exponent == "" {
+		exponent = "0"
+	}
+	return mantissa + "e" + sign + exponent
 }
 
 type ObjNativeFn struct {

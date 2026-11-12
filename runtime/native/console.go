@@ -5,6 +5,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -178,6 +179,16 @@ func NewLog() *Log {
 	return log
 }
 
+func consoleLogString(v value.Value) string {
+	if v.IsNumber() {
+		n := v.AsNumber()
+		if n == 0 && math.Signbit(n) {
+			return "-0"
+		}
+	}
+	return String(v)
+}
+
 func (*Log) Log(values []value.Value, sb *strings.Builder) {
 	for i, v := range values {
 		notLast := i < len(values)-1
@@ -187,9 +198,9 @@ func (*Log) Log(values []value.Value, sb *strings.Builder) {
 		}
 
 		if sb != nil {
-			fmt.Fprintf(sb, "%v%s", String(v), pad)
+			fmt.Fprintf(sb, "%v%s", consoleLogString(v), pad)
 		} else {
-			fmt.Printf("%v%s", String(v), pad)
+			fmt.Printf("%v%s", consoleLogString(v), pad)
 		}
 	}
 	if sb != nil {
