@@ -34,6 +34,7 @@
         { "file": "negative-scripts/02-recursion-unbounded-segv.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
         { "file": "negative-scripts/15-tostring-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
         { "file": "negative-scripts/16-getter-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
-        { "file": "negative-scripts/17-proxy-get-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" }
+        { "file": "negative-scripts/17-proxy-get-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
+        { "file": "negative-scripts/70-json-circular.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" }
     ]
 }
