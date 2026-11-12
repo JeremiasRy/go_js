@@ -234,6 +234,9 @@ func (vm *VM) callStringMethod(method *native.StringMethod, this value.Value, ar
 			if len(args) > 1 {
 				replacement = args[1]
 			}
+			if re, ok := vm.regexpFromValue(search); ok && all && !strings.Contains(re.Flags, "g") {
+				return value.UNDEFINED, &JSException{Name: "TypeError", Message: "String.prototype.replaceAll called with a non-global RegExp argument"}
+			}
 			if hook, ok := vm.symbolMethod(search, native.SYMBOL_REPLACE); ok {
 				return vm.callValue(hook, search, []value.Value{value.EncodeHandle(heap.Allocate(native.NewLightString(owner))), replacement})
 			}

@@ -25,7 +25,7 @@ import (
 	"unsafe"
 )
 
-const STACK_MAX = 1 << 18
+const STACK_INITIAL = 1024
 const FRAMES_MAX = 1024
 const IS_HOT_PATH = 4096
 
@@ -118,7 +118,7 @@ type VM struct {
 
 func NewVM(main bool, output *strings.Builder) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
-	stack := make([]value.Value, STACK_MAX)
+	stack := make([]value.Value, STACK_INITIAL)
 
 	return &VM{
 		output:         output,
@@ -139,7 +139,19 @@ func (vm *VM) currentFrame() CallFrame {
 	return vm.frames[vm.frameCount-1]
 }
 
+func (vm *VM) ensureStack(size int) {
+	if size <= len(vm.stack) {
+		return
+	}
+	grown := make([]value.Value, size)
+	copy(grown, vm.stack)
+	vm.stack = grown
+}
+
 func (vm *VM) push(v value.Value) {
+	if vm.stackTop >= len(vm.stack) {
+		vm.ensureStack(len(vm.stack) * 2)
+	}
 	vm.stack[vm.stackTop] = v
 	vm.stackTop++
 }
@@ -1747,12 +1759,6 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 		}
 		return vm.getMemberValue(native.PROTOTYPE_OBJECT, key)
 	}
-	if _, ok := obj.(*native.ObjAsyncFunction); ok {
-		return vm.getMemberValue(native.PROTOTYPE_OBJECT, key)
-	}
-	if _, ok := obj.(*native.ObjGenerator); ok {
-		return vm.getMemberValue(native.PROTOTYPE_OBJECT, key)
-	}
 	if class, ok := obj.(*native.ObjClass); ok {
 		if keyString, ok := vm.valueAsString(key); ok {
 			if keyString == "prototype" {
@@ -2538,7 +2544,7 @@ func (vm *VM) throwValue(v value.Value, f *CallFrame, c *value.ValueChunk, ip *i
 }
 
 func (vm *VM) makeError(name, message string) value.Value {
-	err := native.NewError()
+	err := native.NewNamedError(name)
 	err.SetMember(native.KEY_MESSAGE, value.EncodeHandle(heap.Allocate(native.NewLightString(message))))
 	err.SetMember(native.KEY_NAME, value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
 	return value.EncodeHandle(heap.Allocate(err))
@@ -2634,7 +2640,7 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 		}
 		var arr object.Object = native.NewArrayFrom(items)
 		if objFn, ok := fn.(*object.ObjFunction); ok {
-			mappable := !objFn.Strict && !fn.HasRestParameter()
+			mappable := !objFn.Strict && !fn.HasRestParameter() && objFn.ArgumentsHeapSlot < 0
 			for _, isDefault := range objFn.DefaultParams {
 				if isDefault {
 					mappable = false
@@ -4148,8 +4154,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if v.IsObject() {
 					v = cloneFunctionValue(v, f.heapScope)
 				}
-				vm.stack[vm.stackTop] = v
-				vm.stackTop++
+				vm.push(v)
 			}
 		case chunk.OP_DEFINE_LOCAL_SLOT:
 			{
@@ -4164,6 +4169,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					v = cloneFunctionValue(v, f.heapScope)
 				}
 				target := f.localStart + slot
+				vm.ensureStack(target + 1)
 				for vm.stackTop <= target {
 					vm.stack[vm.stackTop] = value.UNDEFINED
 					vm.stackTop++
@@ -4215,6 +4221,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 					}
 				}
+				vm.ensureStack(f.localStart + slot + 1)
 				vm.stack[f.localStart+slot] = v
 			}
 		case chunk.OP_CREATE_OBJECT:
@@ -4297,6 +4304,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 
+				if keyString, ok := vm.valueAsString(k); ok && keyString == "__proto__" {
+					if hashObj, err := heap.GetObject(hash.GetHandle()); err == nil {
+						if hashable, ok := hashObj.(object.Hashable); ok {
+							hashable.SetMember(k, v)
+							continue
+						}
+					}
+				}
 				if err := vm.setMemberValue(hash, k, v); err != nil {
 					errValue := vm.makeError("TypeError", err.Error())
 					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
@@ -4486,6 +4501,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							promise := native.NewPromise()
 							fn.SetPromise(promise)
 							base := vm.stackTop - argCount
+							vm.ensureStack(vm.stackTop + 1)
 							copy(vm.stack[base+1:vm.stackTop+1], vm.stack[base:vm.stackTop])
 							vm.stack[base] = value.EncodeHandle(heap.Allocate(promise))
 							vm.stackTop++
@@ -4898,7 +4914,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 							result, err = vm.stringSplitRegex(owner, re, limit)
 						case native.REGEXP_SYMBOL_MATCH_ALL:
-							result, err = vm.stringMatchAll(owner, []value.Value{thisCtx})
+							if !strings.Contains(re.Flags, "g") {
+								err = &JSException{Name: "TypeError", Message: "String.prototype.matchAll called with a non-global RegExp argument"}
+							} else {
+								result, err = vm.regexpMatchAll(re, owner)
+							}
 						}
 						if err != nil {
 							errValue := vm.errorValue(err)
@@ -5373,7 +5393,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						result, err := vm.callArrayStaticMethod(fn, argCount)
 						if err != nil {
-							errValue := vm.errorValue(err)
+							name := "TypeError"
+							message := err.Error()
+							if jsErr, ok := err.(*JSException); ok {
+								name = jsErr.Name
+								message = jsErr.Message
+							}
+							errValue := vm.makeError(name, message)
 							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
 								return value.UNDEFINED, err
 							}

@@ -173,6 +173,10 @@ func (vm *VM) stringMatchAll(owner string, args []value.Value) (value.Value, err
 	if !ok || !strings.Contains(re.Flags, "g") {
 		return value.UNDEFINED, &JSException{Name: "TypeError", Message: "String.prototype.matchAll called with a non-global RegExp argument"}
 	}
+	return vm.regexpMatchAll(re, owner)
+}
+
+func (vm *VM) regexpMatchAll(re *native.ObjRegExp, owner string) (value.Value, error) {
 	clone, err := vm.compileRegExp(re.Pattern, re.Flags)
 	if err != nil {
 		return value.UNDEFINED, err
@@ -180,7 +184,7 @@ func (vm *VM) stringMatchAll(owner string, args []value.Value) (value.Value, err
 	text := newRegexpText(owner, clone.Unicode)
 	results := []value.Value{}
 	start := re.LastIndex
-	for start < native.UTF16Length(owner) {
+	for start <= native.UTF16Length(owner) {
 		match, err := vm.regexpFind(clone, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err

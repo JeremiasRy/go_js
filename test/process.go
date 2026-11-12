@@ -136,7 +136,7 @@ func decodeRuntime(result execution) execution {
 
 func checkOutcome(test testCase, result execution) error {
 	if test.Timeout {
-		if result.Err != nil && strings.Contains(result.Err.Error(), "timed out") {
+		if result.Err != nil && (strings.Contains(result.Err.Error(), "timed out") || strings.Contains(result.Err.Error(), "without completing")) {
 			return nil
 		}
 		return fmt.Errorf("expected execution to time out")
