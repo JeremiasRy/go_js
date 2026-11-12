@@ -476,11 +476,20 @@ func (vm *VM) invokeCallback(fn value.Value, this value.Value, args []value.Valu
 	if !ok {
 		return value.UNDEFINED, fmt.Errorf("callback is not a function")
 	}
+	callThis := this
+	if fnObj, ok := callable.(interface{ FunctionBase() *object.ObjFunction }); ok {
+		base := fnObj.FunctionBase()
+		if vm.main && scriptMode && !base.Strict && callThis == value.UNDEFINED && !base.IsArrow {
+			callThis = vm.ensureGlobalObject()
+		}
+	} else if fnObj, ok := callable.(*object.ObjFunction); ok && vm.main && scriptMode && !fnObj.Strict && callThis == value.UNDEFINED && !fnObj.IsArrow {
+		callThis = vm.ensureGlobalObject()
+	}
 	runner := NewVM(false, vm.output)
 	for _, arg := range args {
 		runner.push(arg)
 	}
-	f, c := runner.Call(callable, nil, this, len(args), false)
+	f, c := runner.Call(callable, nil, callThis, len(args), false)
 	return runner.run(f, c)
 }
 

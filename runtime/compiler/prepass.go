@@ -113,7 +113,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		for _, node := range current.BodyNode.Body {
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
 				name := node.Identifier.Name
-				arity := len(node.Arguments)
+				arity := len(node.Params)
 
 				var fn object.Callable
 				if node.IsAsync && node.IsGenerator {
@@ -153,7 +153,7 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			for _, node := range current.BodyNode.Body {
 				if node.Type == parser.NODE_FUNCTION_DECLARATION {
 					name := node.Identifier.Name
-					arity := len(node.Arguments)
+					arity := len(node.Params)
 					var fn object.Callable
 
 					if node.IsAsync && node.IsGenerator {

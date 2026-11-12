@@ -6451,8 +6451,17 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				for _, arg := range args {
 					vm.push(arg)
 				}
+				callThis := thisCtx
+				if fnObj, ok := fn.(interface{ FunctionBase() *object.ObjFunction }); ok {
+					base := fnObj.FunctionBase()
+					if vm.main && scriptMode && !base.Strict && callThis == value.UNDEFINED && !base.IsArrow {
+						callThis = vm.ensureGlobalObject()
+					}
+				} else if fnObj, ok := fn.(*object.ObjFunction); ok && vm.main && scriptMode && !fnObj.Strict && callThis == value.UNDEFINED {
+					callThis = vm.ensureGlobalObject()
+				}
 				calledWithSpread := spread == 1
-				f, c = vm.Call(fn, &ip, thisCtx, argCount, calledWithSpread)
+				f, c = vm.Call(fn, &ip, callThis, argCount, calledWithSpread)
 			}
 		case chunk.OP_RETURN:
 			{
