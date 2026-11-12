@@ -981,7 +981,7 @@ func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget 
 	if prototype.IsObject() {
 		instance.SetPrototypeValue(prototype)
 	}
-	instanceValue := value.EncodeHandle(heap.Allocate(instance))
+	instanceValue := heap.EncodeObject(instance)
 	runner := NewVM(false, vm.output)
 	for _, arg := range args {
 		runner.push(arg)
@@ -1009,7 +1009,7 @@ func (vm *VM) installPrivateMembers(instance *native.Instance, class *native.Obj
 			}
 		}
 	}
-	instanceValue := value.EncodeHandle(heap.Allocate(instance))
+	instanceValue := heap.EncodeObject(instance)
 	for _, member := range class.PrivateMembers() {
 		memberValue := member.Value
 		if memberValue.IsObject() {
@@ -1029,7 +1029,7 @@ func (vm *VM) installPrivateMembers(instance *native.Instance, class *native.Obj
 }
 
 func (vm *VM) initializeInstanceFields(instance *native.Instance, class *native.ObjClass) error {
-	instanceValue := value.EncodeHandle(heap.Allocate(instance))
+	instanceValue := heap.EncodeObject(instance)
 	instance.SetInitialized(true)
 	for _, member := range class.InstanceFields() {
 		result, err := vm.callValue(member.Value, instanceValue, nil)
@@ -6969,7 +6969,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						args := vm.popN(int(argCount))
 						instance := ctor.NewInstance()
-						instanceValue := value.EncodeHandle(heap.Allocate(instance))
+						instanceValue := heap.EncodeObject(instance)
 						constructor, found := vm.classConstructor(ctor)
 						if !found {
 							if err := vm.initializeDefaultInstance(instance, ctor); err != nil {

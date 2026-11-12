@@ -454,3 +454,12 @@ func StoreCallbackRoot(key uintptr, values ...value.Value) {
 func ClearCallbackRoot(key uintptr) {
 	delete(a.callbackRoots, key)
 }
+
+func EncodeObject(obj object.Object) value.Value {
+	for handle, ptr := range a.handleLayer {
+		if a.objects[ptr] == obj {
+			return value.EncodeHandle(handle)
+		}
+	}
+	return value.EncodeHandle(a.allocate(obj))
+}
