@@ -208,7 +208,14 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 							objFn.Strict = module || nodeHasUseStrict(node)
 						}
 					}
-					symbolTable.addVariable(name, FUNCTION, false, fn)
+					if !strictContext {
+						savedBlock := symbolTable.block
+						symbolTable.block = nil
+						symbolTable.addVariable(name, FUNCTION, false, fn)
+						symbolTable.block = savedBlock
+					} else {
+						symbolTable.addVariable(name, FUNCTION, false, fn)
+					}
 				}
 			}
 			for _, node := range current.Body {

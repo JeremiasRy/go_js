@@ -999,6 +999,20 @@ func (p *Parser) parseExpressionStatement(node *Node, expr *Node) (*Node, error)
 	return p.finishNode(node, NODE_EXPRESSION_STATEMENT), nil
 }
 
+func (p *Parser) statementBlock(node *Node) *Node {
+	if node == nil || node.Type == NODE_BLOCK_STATEMENT {
+		return node
+	}
+	block := p.startNodeAt(node.Start, nil)
+	block.Body = []*Node{node}
+	block.Type = NODE_BLOCK_STATEMENT
+	block.End = node.End
+	if node.Location != nil {
+		block.Location = node.Location
+	}
+	return block
+}
+
 func (p *Parser) parseEmptyStatement(node *Node) (*Node, error) {
 	p.next(false)
 	return p.finishNode(node, NODE_EMPTY_STATEMENT), nil
@@ -1038,7 +1052,7 @@ func (p *Parser) parseWhileStatement(node *Node) (*Node, error) {
 		return nil, err
 	}
 
-	node.BodyNode = stmt
+	node.BodyNode = p.statementBlock(stmt)
 	p.Labels = p.Labels[:len(p.Labels)-1]
 
 	return p.finishNode(node, NODE_WHILE_STATEMENT), nil
@@ -1321,14 +1335,14 @@ func (p *Parser) parseIfStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.Consequent = statement
+	node.Consequent = p.statementBlock(statement)
 
 	if p.eat(TOKEN_ELSE) {
 		alternate, err := p.parseStatement("if", false, nil)
 		if err != nil {
 			return nil, err
 		}
-		node.Alternate = alternate
+		node.Alternate = p.statementBlock(alternate)
 	}
 
 	return p.finishNode(node, NODE_IF_STATEMENT), nil
@@ -1561,7 +1575,7 @@ func (p *Parser) parseFor(node *Node, init *Node) (*Node, error) {
 		return nil, err
 	}
 
-	node.BodyNode = stmt
+	node.BodyNode = p.statementBlock(stmt)
 	p.exitScope()
 	p.Labels = p.Labels[:len(p.Labels)-1]
 	return p.finishNode(node, NODE_FOR_STATEMENT), nil
@@ -1598,7 +1612,7 @@ func (p *Parser) parseForIn(node *Node, init *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.BodyNode = stmt
+	node.BodyNode = p.statementBlock(stmt)
 	p.exitScope()
 	p.Labels = p.Labels[:len(p.Labels)-1]
 
@@ -1689,7 +1703,7 @@ func (p *Parser) parseDoStatement(node *Node) (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
-	node.BodyNode = doStatement
+	node.BodyNode = p.statementBlock(doStatement)
 	p.Labels = p.Labels[:len(p.Labels)-1]
 	err = p.expect(TOKEN_WHILE)
 
