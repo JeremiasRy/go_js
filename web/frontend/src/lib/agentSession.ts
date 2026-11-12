@@ -1,4 +1,4 @@
-const SESSION_BOOTSTRAP_ELEMENT_ID = "go-js-session";
+import { createClientId } from "./clientIdentity";
 
 export type SessionBootstrap = {
     session_id: string;
@@ -6,30 +6,17 @@ export type SessionBootstrap = {
     mcp_path: string;
 };
 
-export function readSessionBootstrap(): SessionBootstrap | null {
-    const element = document.getElementById(SESSION_BOOTSTRAP_ELEMENT_ID);
-    if (element === null || element.textContent === null) {
+export function createSessionBootstrap(): SessionBootstrap | null {
+    const sessionID = createClientId();
+    if (sessionID === null) {
         return null;
     }
 
-    try {
-        const data = JSON.parse(element.textContent) as Partial<SessionBootstrap>;
-        if (
-            typeof data.session_id !== "string" ||
-            typeof data.ws_path !== "string" ||
-            typeof data.mcp_path !== "string"
-        ) {
-            return null;
-        }
-
-        return {
-            session_id: data.session_id,
-            ws_path: data.ws_path,
-            mcp_path: data.mcp_path,
-        };
-    } catch {
-        return null;
-    }
+    return {
+        session_id: sessionID,
+        ws_path: `/ws/${sessionID}`,
+        mcp_path: `/session/${sessionID}/mcp`,
+    };
 }
 
 export function resolveUrl(path: string): string {

@@ -23,7 +23,7 @@
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
     import Code from "./Code.svelte";
-    import { readSessionBootstrap, resolveUrl } from "$lib/agentSession";
+    import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
     import {
         connectAgentSocket,
         type AgentSocket,
@@ -178,7 +178,7 @@
     });
 
     onMount(() => {
-        const bootstrap = readSessionBootstrap();
+        const bootstrap = createSessionBootstrap();
         if (bootstrap === null) {
             serverStatus = "disconnected";
             runError =
@@ -488,7 +488,7 @@
         return sendRun(view.state.doc.toString(), requestId);
     }
 
-    function sendRun(code: string, requestId?: string): boolean {
+    function sendRun(code: string, requestId: string | undefined = undefined): boolean {
         if (
             activeRequestId !== null ||
             pageState === "submitting" ||

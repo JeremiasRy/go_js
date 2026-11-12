@@ -43,13 +43,14 @@ type Session struct {
 	work  chan<- worker.HeartbeatSignal
 	mcp   http.Handler
 
-	mu         sync.Mutex
-	conn       *wsConn
-	active     *activeRun
-	pendingMCP *pendingRun
-	lastResult *completedRun
-	lastSeen   time.Time
-	closed     bool
+	mu             sync.Mutex
+	conns          map[*wsConn]struct{}
+	active         *activeRun
+	pendingMCP     *pendingRun
+	lastResult     *completedRun
+	recentRequests map[string]time.Time
+	lastSeen       time.Time
+	closed         bool
 
 	mcpActive    bool
 	mcpInFlight  int
@@ -65,6 +66,7 @@ type activeRun struct {
 
 type pendingRun struct {
 	requestID string
+	code      string
 	waiter    chan runOutcome
 }
 
@@ -104,11 +106,13 @@ func (c *wsConn) stop() {
 
 func newSession(id string, mgr *Manager, store JobStore, work chan<- worker.HeartbeatSignal) *Session {
 	s := &Session{
-		id:       id,
-		mgr:      mgr,
-		store:    store,
-		work:     work,
-		lastSeen: time.Now(),
+		id:             id,
+		mgr:            mgr,
+		store:          store,
+		work:           work,
+		conns:          make(map[*wsConn]struct{}),
+		recentRequests: make(map[string]time.Time),
+		lastSeen:       time.Now(),
 	}
 	s.mcp = newMCPHandler(s)
 	return s
@@ -125,8 +129,7 @@ func (s *Session) attach(raw *websocket.Conn) *wsConn {
 		return nil
 	}
 
-	old := s.conn
-	s.conn = conn
+	s.conns[conn] = struct{}{}
 	s.lastSeen = now
 
 	ready := socketMessage{
@@ -154,28 +157,32 @@ func (s *Session) attach(raw *websocket.Conn) *wsConn {
 	if s.active == nil && s.lastResult != nil && now.Sub(s.lastResult.completedAt) < lastResultRetention {
 		s.enqueueLocked(conn, s.lastResult.message)
 	}
+	if s.pendingMCP != nil {
+		s.enqueueLocked(conn, socketMessage{
+			Type:      MessageExecuteRequest,
+			RequestID: s.pendingMCP.requestID,
+			Code:      s.pendingMCP.code,
+		})
+	}
 	s.mu.Unlock()
 
-	if old != nil {
-		old.stop()
-	}
 	go s.writePump(conn)
 	return conn
 }
 
 func (s *Session) detach(conn *wsConn) {
 	s.mu.Lock()
-	if s.conn != conn {
+	if _, ok := s.conns[conn]; !ok {
 		s.mu.Unlock()
 		conn.stop()
 		return
 	}
 
-	s.conn = nil
+	delete(s.conns, conn)
 	s.lastSeen = time.Now()
 
 	var pending *pendingRun
-	if s.active == nil {
+	if len(s.conns) == 0 && s.active == nil {
 		pending = s.pendingMCP
 		s.pendingMCP = nil
 	}
@@ -255,21 +262,25 @@ func (s *Session) send(message socketMessage) error {
 	}
 
 	s.mu.Lock()
-	conn := s.conn
-	s.mu.Unlock()
+	defer s.mu.Unlock()
+	return s.sendDataLocked(data)
+}
 
-	if conn == nil {
+func (s *Session) sendDataLocked(data []byte) error {
+	if len(s.conns) == 0 {
 		return ErrNoFrontend
 	}
 
-	select {
-	case conn.out <- data:
+	sent := false
+	for conn := range s.conns {
+		if err := s.enqueueDataLocked(conn, data); err == nil {
+			sent = true
+		}
+	}
+	if sent {
 		return nil
-	case <-conn.done:
-		return ErrNoFrontend
-	default:
-		return ErrBackpressure
 	}
+	return ErrBackpressure
 }
 
 func (s *Session) enqueueLocked(conn *wsConn, message socketMessage) {
@@ -278,10 +289,17 @@ func (s *Session) enqueueLocked(conn *wsConn, message socketMessage) {
 		return
 	}
 
+	_ = s.enqueueDataLocked(conn, data)
+}
+
+func (s *Session) enqueueDataLocked(conn *wsConn, data []byte) error {
 	select {
 	case conn.out <- data:
+		return nil
 	case <-conn.done:
+		return ErrNoFrontend
 	default:
+		return ErrBackpressure
 	}
 }
 
@@ -296,6 +314,16 @@ func (s *Session) handleRunSubmit(message socketMessage) {
 	if s.closed {
 		s.mu.Unlock()
 		return
+	}
+	if incomingID != "" {
+		if seenAt, ok := s.recentRequests[incomingID]; ok && time.Since(seenAt) < lastResultRetention {
+			s.mu.Unlock()
+			return
+		}
+		if s.active != nil && s.active.requestID == incomingID {
+			s.mu.Unlock()
+			return
+		}
 	}
 	if s.active != nil {
 		s.mu.Unlock()
@@ -317,6 +345,14 @@ func (s *Session) handleRunSubmit(message socketMessage) {
 	} else {
 		requestID = uuid.NewString()
 	}
+
+	now := time.Now()
+	for id, seenAt := range s.recentRequests {
+		if now.Sub(seenAt) >= lastResultRetention {
+			delete(s.recentRequests, id)
+		}
+	}
+	s.recentRequests[requestID] = now
 
 	s.active = &activeRun{
 		requestID: requestID,
@@ -384,7 +420,7 @@ func (s *Session) Run(ctx context.Context, code string) (runOutcome, error) {
 		s.mu.Unlock()
 		return runOutcome{}, ErrSessionClosed
 	}
-	if s.conn == nil {
+	if len(s.conns) == 0 {
 		s.mu.Unlock()
 		return runOutcome{}, ErrNoFrontend
 	}
@@ -397,18 +433,26 @@ func (s *Session) Run(ctx context.Context, code string) (runOutcome, error) {
 	waiter := make(chan runOutcome, 1)
 	s.pendingMCP = &pendingRun{
 		requestID: requestID,
+		code:      code,
 		waiter:    waiter,
 	}
-	s.mu.Unlock()
 
-	if err := s.send(socketMessage{
+	data, err := json.Marshal(socketMessage{
 		Type:      MessageExecuteRequest,
 		RequestID: requestID,
 		Code:      code,
-	}); err != nil {
-		s.clearPendingMCP(requestID)
+	})
+	if err != nil {
+		s.pendingMCP = nil
+		s.mu.Unlock()
 		return runOutcome{}, err
 	}
+	if err := s.sendDataLocked(data); err != nil {
+		s.pendingMCP = nil
+		s.mu.Unlock()
+		return runOutcome{}, err
+	}
+	s.mu.Unlock()
 
 	timer := time.NewTimer(executeTimeout)
 	defer timer.Stop()
@@ -510,8 +554,11 @@ func (s *Session) close() {
 	}
 	s.closed = true
 
-	conn := s.conn
-	s.conn = nil
+	conns := make([]*wsConn, 0, len(s.conns))
+	for conn := range s.conns {
+		conns = append(conns, conn)
+	}
+	s.conns = make(map[*wsConn]struct{})
 	pending := s.pendingMCP
 	s.pendingMCP = nil
 	active := s.active
@@ -522,7 +569,7 @@ func (s *Session) close() {
 	}
 	s.mu.Unlock()
 
-	if conn != nil {
+	for _, conn := range conns {
 		conn.stop()
 	}
 	if pending != nil {
@@ -604,7 +651,7 @@ func (s *Session) touch() {
 func (s *Session) isConnected() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.conn != nil
+	return len(s.conns) > 0
 }
 
 func (s *Session) lastSeenAt() time.Time {
