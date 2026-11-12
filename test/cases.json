@@ -41,6 +41,7 @@
         { "file": "negative-scripts/06-settimeout-string-handler.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/07-settimeout-non-function.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/72-json-invalid.js", "sourceGoal": "script", "phase": "runtime", "error": "SyntaxError" },
-        { "file": "negative-scripts/19-infinite-loop.js", "sourceGoal": "script", "timeout": true }
+        { "file": "negative-scripts/19-infinite-loop.js", "sourceGoal": "script", "timeout": true },
+        { "file": "negative-scripts/20-unresolved-top-level-await.js", "sourceGoal": "module", "timeout": true }
     ]
 }
