@@ -27,6 +27,7 @@
         { "file": "negative-scripts/24-parse-nullish-mixing.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/25-parse-optional-chain-assignment.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/26-import-missing-module.js", "sourceGoal": "module", "phase": "link", "error": "Error" },
-        { "file": "negative-scripts/27-import-missing-relative-module.js", "sourceGoal": "module", "phase": "link", "error": "Error" }
+        { "file": "negative-scripts/27-import-missing-relative-module.js", "sourceGoal": "module", "phase": "link", "error": "Error" },
+        { "file": "negative-scripts/28-parse-yield-outside-generator.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
     ]
 }
