@@ -39,6 +39,7 @@
         { "file": "negative-scripts/71-json-bigint.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/73-array-reduce-empty.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/06-settimeout-string-handler.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
-        { "file": "negative-scripts/07-settimeout-non-function.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" }
+        { "file": "negative-scripts/07-settimeout-non-function.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/72-json-invalid.js", "sourceGoal": "script", "phase": "runtime", "error": "SyntaxError" }
     ]
 }
