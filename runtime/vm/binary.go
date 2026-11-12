@@ -319,7 +319,7 @@ func (vm *VM) getDataViewMember(view *native.ObjDataView, key value.Value) (valu
 		return value.ValueFromFloat64(float64(view.Offset)), true
 	case "byteLength":
 		return value.ValueFromFloat64(float64(view.Length)), true
-	case "getUint8", "getUint16", "getUint32", "getInt8", "getInt16", "getFloat32", "getFloat64", "getBigInt64", "getBigUint64", "setUint8", "setUint16", "setUint32", "setInt8", "setInt16", "setFloat32", "setFloat64", "setBigInt64", "setBigUint64":
+	case "getUint8", "getUint16", "getUint32", "getInt8", "getInt16", "getInt32", "getFloat32", "getFloat64", "getBigInt64", "getBigUint64", "setUint8", "setUint16", "setUint32", "setInt8", "setInt16", "setInt32", "setFloat32", "setFloat64", "setBigInt64", "setBigUint64":
 		return value.EncodeHandle(heap.Allocate(native.NewDataViewMethod(keyString))), true
 	}
 	return value.UNDEFINED, false
@@ -393,6 +393,8 @@ func (vm *VM) dataViewOperation(view *native.ObjDataView, kind string, args []va
 			return value.ValueFromFloat64(float64(int16(readUint(2)))), nil
 		case containsSuffix(kind, "Uint32"):
 			return value.ValueFromFloat64(float64(uint32(readUint(4)))), nil
+		case containsSuffix(kind, "Int32"):
+			return value.ValueFromFloat64(float64(int32(readUint(4)))), nil
 		case containsSuffix(kind, "Float32"):
 			return value.ValueFromFloat64(float64(math.Float32frombits(uint32(readUint(4))))), nil
 		case containsSuffix(kind, "Float64"):
@@ -423,6 +425,9 @@ func (vm *VM) dataViewOperation(view *native.ObjDataView, kind string, args []va
 	case containsSuffix(kind, "Uint32"):
 		n, _ := vm.toNumber(valueArg)
 		writeUint(4, uint64(uint32(int64(n))))
+	case containsSuffix(kind, "Int32"):
+		n, _ := vm.toNumber(valueArg)
+		writeUint(4, uint64(uint32(int32(int64(n)))))
 	case containsSuffix(kind, "Float32"):
 		n, _ := vm.toNumber(valueArg)
 		writeUint(4, uint64(math.Float32bits(float32(n))))
