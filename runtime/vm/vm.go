@@ -1126,6 +1126,8 @@ func (vm *VM) superBase(home value.Value, this value.Value) value.Value {
 		return homeObj.SuperClass
 	case *native.Prototype:
 		return homeObj.PrototypeValue()
+	case *native.ObjObject:
+		return homeObj.PrototypeValue()
 	}
 	return value.UNDEFINED
 }
@@ -4229,8 +4231,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					obj, _ := heap.GetObject(v.GetHandle())
 
 					// check if we have a closure in hand
-					if _, ok := obj.(*object.ObjFunction); ok {
+					if fn, ok := obj.(*object.ObjFunction); ok {
 						v = cloneFunctionValue(v, f.heapScope)
+						if fn.IsMethod {
+							if cloned, err := heap.GetObject(v.GetHandle()); err == nil {
+								if clonedFn, ok := cloned.(*object.ObjFunction); ok {
+									clonedFn.HomeObject = hash
+								}
+							}
+						}
 					}
 				}
 
@@ -7704,6 +7713,28 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				}
 				vm.push(member)
+			}
+		case chunk.OP_SUPER_SET_RETURN:
+			{
+				v := vm.pop()
+				key := vm.pop()
+				fn, ok := f.fn.(*object.ObjFunction)
+				if !ok {
+					errValue := vm.makeError("TypeError", "Invalid super property access")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				base := vm.superBase(fn.HomeObject, f.thisCtx)
+				if err := vm.setMemberValueWithReceiver(base, key, v, f.thisCtx, false); err != nil {
+					errValue := vm.errorValue(err)
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
+				vm.push(v)
 			}
 		case chunk.OP_GET_PRIVATE_MEMBER:
 			{

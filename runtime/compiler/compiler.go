@@ -877,7 +877,10 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				if left.Type == parser.NODE_MEMBER_EXPRESSION {
 					isPrivate := left.Property != nil && left.Property.Type == parser.NODE_PRIVATE_IDENTIFIER
-					generateByteCode(left.Object, symbolTable, fn)
+					isSuper := left.Object != nil && left.Object.Type == parser.NODE_SUPER
+					if !isSuper {
+						generateByteCode(left.Object, symbolTable, fn)
+					}
 					if left.Computed {
 						generateByteCode(left.Property, symbolTable, fn)
 						fn.ValueChunk().EmitByte(chunk.OP_TO_PROPERTY_KEY)
@@ -888,6 +891,15 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 						key := heap.Allocate(native.NewLightString(name))
 						fn.ValueChunk().WriteConstant(value.EncodeHandle(key))
+					}
+					if isSuper && operator == parser.ASSIGN {
+						generateByteCode(current.Right, symbolTable, fn)
+						fn.ValueChunk().EmitByte(chunk.OP_SUPER_SET_RETURN)
+						popReturnValue.pop()
+						if popReturnValue.current() {
+							fn.ValueChunk().EmitByte(chunk.OP_POP)
+						}
+						return
 					}
 
 					memberSetOp := chunk.OP_SET_MEMBER_RETURN
