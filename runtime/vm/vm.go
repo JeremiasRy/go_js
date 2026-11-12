@@ -6122,11 +6122,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				case *native.QueueMicroTask:
 					{
 						v := vm.pop()
-
 						fn, _ := heap.GetObject(v.GetHandle())
+						callable, ok := fn.(object.Callable)
+						if !ok {
+							errValue := vm.makeError("TypeError", "The callback argument must be of type function")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
 						key := heap.NewCallbackRoot()
 						heap.StoreCallbackRoot(key, v)
-						queue.Enqueue(object.Callback{Fn: fn.(object.Callable), ThisCtx: value.UNDEFINED, Stack: []value.Value{v}, RootKey: key}, queue.MICRO_TASK, false)
+						queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: []value.Value{v}, RootKey: key}, queue.MICRO_TASK, false)
+						vm.push(value.UNDEFINED)
 					}
 				case *native.JSONParse:
 					{
