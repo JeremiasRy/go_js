@@ -4,6 +4,7 @@ import (
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"math"
 	"sort"
 	"strconv"
 )
@@ -524,6 +525,48 @@ func (*ObjectDefineProperty) Define(target, key, descriptor value.Value) value.V
 	keyString, ok := objectKeyString(key)
 	if !ok {
 		return value.UNDEFINED
+	}
+	if arr, isArray := obj.(*ObjArr); isArray && keyString == "length" {
+		getField := func(name string) (value.Value, bool) {
+			k := value.EncodeHandle(heap.Allocate(NewLightString(name)))
+			if !desc.HasOwn(k) {
+				return value.UNDEFINED, false
+			}
+			return desc.GetMember(k), true
+		}
+		valueField, hasValue := getField("value")
+		writableField, hasWritable := getField("writable")
+		configurableField, hasConfigurable := getField("configurable")
+		if hasConfigurable && truthy(configurableField) {
+			return value.UNDEFINED
+		}
+		lengthEntry, _ := arr.GetOwnEntry(value.EncodeHandle(heap.Allocate(NewLightString("length"))))
+		if hasValue {
+			n := math.NaN()
+			if valueField.IsNumber() {
+				n = valueField.AsNumber()
+			}
+			if math.IsNaN(n) || n < 0 || math.Trunc(n) != n || n >= 4294967296 {
+				return value.UNDEFINED
+			}
+			if !lengthEntry.Writable() && int(n) != arr.Length() {
+				return value.UNDEFINED
+			}
+			arr.SetLength(int(n))
+		}
+		lengthEntry, _ = arr.GetOwnEntry(value.EncodeHandle(heap.Allocate(NewLightString("length"))))
+		if hasWritable {
+			if truthy(writableField) && !lengthEntry.Writable() {
+				return value.UNDEFINED
+			}
+			lengthEntry.nonWritable = !truthy(writableField)
+		}
+		lengthEntry.nonEnumerable = true
+		lengthEntry.nonConfigurable = true
+		if arr, ok := obj.(*ObjArr); ok {
+			arr.Members[objectKeyStringMust(value.EncodeHandle(heap.Allocate(NewLightString("length"))))] = lengthEntry
+		}
+		return target
 	}
 	entry, found := o.Members[keyString]
 	if !found {
