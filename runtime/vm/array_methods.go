@@ -468,6 +468,9 @@ func (vm *VM) arraySplice(arr *native.ObjArr, args []value.Value) (value.Value, 
 }
 
 func (vm *VM) invokeCallback(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
+	if vm.depth >= FRAMES_MAX {
+		return value.UNDEFINED, &JSException{Name: "RangeError", Message: "Maximum call stack size exceeded"}
+	}
 	obj, err := heap.GetObject(fn.GetHandle())
 	if err != nil {
 		return value.UNDEFINED, err
@@ -486,6 +489,7 @@ func (vm *VM) invokeCallback(fn value.Value, this value.Value, args []value.Valu
 		callThis = vm.ensureGlobalObject()
 	}
 	runner := NewVM(false, vm.output)
+	runner.depth = vm.depth + 1
 	for _, arg := range args {
 		runner.push(arg)
 	}

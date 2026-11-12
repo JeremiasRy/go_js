@@ -24,9 +24,9 @@ import (
 	"unsafe"
 )
 
-const STACK_MAX = math.MaxUint8
-const FRAMES_MAX = 64
-const IS_HOT_PATH = 0
+const STACK_MAX = 1 << 18
+const FRAMES_MAX = 1024
+const IS_HOT_PATH = 4096
 
 var ROOT_SCRIPT_LOCATION string
 var globals = make([]value.Value, 30)
@@ -110,6 +110,7 @@ type VM struct {
 	catchValues       map[int]value.Value
 
 	main          bool
+	depth         int
 	loopMarks     map[int][]int
 	loopIterators map[int]value.Value
 }
@@ -1371,7 +1372,11 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 }
 
 func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Value) (value.Value, error) {
+	if vm.depth >= FRAMES_MAX {
+		return value.UNDEFINED, &JSException{Name: "RangeError", Message: "Maximum call stack size exceeded"}
+	}
 	runner := NewVM(false, vm.output)
+	runner.depth = vm.depth + 1
 	fn := object.NewFunction("native-call", 0, nil)
 	for _, arg := range args {
 		fn.ValueChunk().WriteConstant(arg)
@@ -1397,6 +1402,9 @@ func builderFromValue(v value.Value) (*native.ObjStringBuilder, bool) {
 }
 
 func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (value.Value, error) {
+	if vm.depth >= FRAMES_MAX {
+		return value.UNDEFINED, &JSException{Name: "RangeError", Message: "Maximum call stack size exceeded"}
+	}
 	obj, err := heap.GetObject(fn.GetHandle())
 	if err != nil {
 		return value.UNDEFINED, err
@@ -1409,6 +1417,7 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 		return vm.invokeCallableWithThis(fn, this, args)
 	}
 	runner := NewVM(false, vm.output)
+	runner.depth = vm.depth + 1
 	for _, arg := range args {
 		runner.push(arg)
 	}
@@ -1947,13 +1956,14 @@ func (vm *VM) toPrimitive(v value.Value, hint string) (value.Value, error) {
 		} else {
 			result, err = vm.invokeCallableWithThis(method, v, nil)
 		}
-		if err == nil {
-			if !result.IsObject() {
-				return result, nil
-			}
-			if _, ok := vm.valueAsString(result); ok {
-				return result, nil
-			}
+		if err != nil {
+			return value.UNDEFINED, err
+		}
+		if !result.IsObject() {
+			return result, nil
+		}
+		if _, ok := vm.valueAsString(result); ok {
+			return result, nil
 		}
 	}
 
@@ -4354,6 +4364,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CALL:
 			{
+				if vm.frameCount >= FRAMES_MAX {
+					errValue := vm.makeError("RangeError", "Maximum call stack size exceeded")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				argCount := int(c.Code[ip])
 				ip++
 				spread := c.Code[ip]
@@ -4369,6 +4386,14 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if callee == value.TAG_METHOD_HANDLE {
 					callee = vm.pop()
 					thisCtx = vm.pop()
+				}
+				if calledWithSpread {
+					args := vm.findArgStart()
+					for _, arg := range args {
+						vm.push(arg)
+					}
+					argCount = len(args)
+					calledWithSpread = false
 				}
 
 				fn, err := heap.GetObject(callee.GetHandle())
@@ -6622,6 +6647,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			fallthrough
 		case chunk.OP_CALL_CALLEE_FIRST:
 			{
+				if vm.frameCount >= FRAMES_MAX {
+					errValue := vm.makeError("RangeError", "Maximum call stack size exceeded")
+					if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+						return value.UNDEFINED, err
+					}
+					continue
+				}
 				optional := code == chunk.OP_CALL_OPTIONAL
 				argCount := int(c.Code[ip])
 				ip++

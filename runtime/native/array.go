@@ -258,31 +258,42 @@ func NewArrayJoin() *ArrayJoin {
 }
 
 func arrayElementString(item value.Value) string {
+	return arrayElementStringVisited(item, map[*ObjArr]bool{})
+}
+
+func arrayElementStringVisited(item value.Value, visited map[*ObjArr]bool) string {
 	if item == value.EMPTY_ARRAY_ITEM || item == value.UNDEFINED || item == value.NULL {
 		return ""
 	}
 	if item.IsObject() {
 		if obj, err := heap.GetObject(item.GetHandle()); err == nil {
 			if arr, ok := obj.(*ObjArr); ok {
-				return String((&ArrayJoin{}).Join(arr, value.UNDEFINED))
+				if visited[arr] {
+					return ""
+				}
+				return joinArray(arr, ",", visited)
 			}
 		}
 	}
 	return String(item)
 }
 
-func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
-	s := ","
+func joinArray(arr *ObjArr, separator string, visited map[*ObjArr]bool) string {
+	visited[arr] = true
+	defer delete(visited, arr)
 	i := make([]string, len(arr.items))
 	for idx, item := range arr.items {
-		i[idx] = arrayElementString(item)
+		i[idx] = arrayElementStringVisited(item, visited)
 	}
+	return strings.Join(i, separator)
+}
 
+func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
+	s := ","
 	if separator != value.UNDEFINED {
 		s = String(separator)
 	}
-
-	res := strings.Join(i, s)
+	res := joinArray(arr, s, map[*ObjArr]bool{})
 	return value.EncodeHandle(heap.Allocate(NewLightString(res)))
 }
 

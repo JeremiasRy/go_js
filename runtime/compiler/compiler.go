@@ -1433,13 +1433,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitBytes(op, uint8(len(current.Arguments)), 0)
 				} else {
 					var calledWithSpread uint8 = 0 // false
+					hasSpread := argumentsContainSpread(current.Arguments)
+					hasRest := false
 					if callee, _ := symbolTable.findVariable(current.Callee.Name); callee != nil && callee.fn != nil {
-						if argumentsContainSpread(current.Arguments) || callee.fn.HasRestParameter() {
-							fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
-							if !callee.fn.HasRestParameter() && argumentsContainSpread(current.Arguments) {
-								calledWithSpread = 1
-							}
-						}
+						hasRest = callee.fn.HasRestParameter()
+					}
+					if hasSpread || hasRest {
+						fn.ValueChunk().EmitByte(chunk.OP_ARG_START)
+					}
+					if hasSpread {
+						calledWithSpread = 1
 					}
 
 					for _, node := range current.Arguments {
