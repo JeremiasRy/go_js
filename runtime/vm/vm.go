@@ -15,6 +15,7 @@ import (
 	"go_js/value"
 	"math"
 	"math/big"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -8073,6 +8074,18 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 					vm.push(f.thisCtx)
 				}
+			}
+		case chunk.OP_IMPORT_META:
+			{
+				name := f.fn.ValueChunk().FnName
+				name = strings.TrimPrefix(name, "MODULE ")
+				absolute, err := filepath.Abs(name)
+				if err != nil {
+					absolute = name
+				}
+				meta := native.NewObjectHash()
+				meta.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("url"))), value.EncodeHandle(heap.Allocate(native.NewLightString("file://"+filepath.ToSlash(absolute)))))
+				vm.push(value.EncodeHandle(heap.Allocate(meta)))
 			}
 		case chunk.OP_NEW_TARGET:
 			{

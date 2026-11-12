@@ -1515,7 +1515,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 			}
 		case parser.NODE_META_PROPERTY:
 			{
-				fn.ValueChunk().EmitByte(chunk.OP_NEW_TARGET)
+				if current.Meta != nil && current.Meta.Name == "import" {
+					fn.ValueChunk().EmitByte(chunk.OP_IMPORT_META)
+				} else {
+					fn.ValueChunk().EmitByte(chunk.OP_NEW_TARGET)
+				}
 			}
 		case parser.NODE_VARIABLE_DECLARATOR:
 			{
