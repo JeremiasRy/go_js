@@ -3611,6 +3611,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_DUP2)
 						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 						if valueNode, ok := property.Value.(*parser.Node); ok {
 							assign(valueNode)
 						}
@@ -3626,6 +3627,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 							fn.ValueChunk().WriteConstant(key)
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_GET_OBJECT_MEMBER)
+						fn.ValueChunk().EmitByte(chunk.OP_UNWRAP_METHOD)
 						if valueNode, ok := property.Value.(*parser.Node); ok {
 							assign(valueNode)
 						}
