@@ -247,6 +247,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			prePass(node, symbolTable)
 		}
 	case parser.NODE_PROPERTY:
+		if current.Computed {
+			prePass(current.Key, symbolTable)
+		}
 		prePass(current.Value.(*parser.Node), symbolTable)
 	case parser.NODE_IDENTIFIER:
 		if current.Name == RESERVED_ARGUMENTS {
