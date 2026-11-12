@@ -548,7 +548,7 @@ func (vm *VM) iteratorNext(iteratorValue value.Value) (bool, error) {
 			return false, err
 		}
 		if !result.IsObject() {
-			return false, fmt.Errorf("Iterator result is not an object")
+			return false, &JSException{Name: "TypeError", Message: "Iterator result is not an object"}
 		}
 		doneValue, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("done"))))
 		if err != nil {
@@ -571,7 +571,7 @@ func (vm *VM) iteratorNext(iteratorValue value.Value) (bool, error) {
 			return false, err
 		}
 		if !result.IsObject() {
-			return false, fmt.Errorf("Iterator result is not an object")
+			return false, &JSException{Name: "TypeError", Message: "Iterator result is not an object"}
 		}
 		doneValue, err := vm.getMemberValue(result, value.EncodeHandle(heap.Allocate(native.NewLightString("done"))))
 		if err != nil {
@@ -1257,11 +1257,14 @@ func (vm *VM) promiseReaction(reaction native.PromiseReaction, fulfilled bool, a
 				return
 			}
 		}
-		if fulfilled {
-			vm.resolvePromise(derived, argument)
-		} else {
-			vm.rejectPromise(derived, argument)
-		}
+		callbackRoots := []value.Value{reaction.Derived, argument}
+		vm.enqueueNativeCallback(callbackRoots, func() {
+			if fulfilled {
+				vm.resolvePromise(derived, argument)
+			} else {
+				vm.rejectPromise(derived, argument)
+			}
+		})
 		return
 	}
 	handler := reaction.OnRejected
