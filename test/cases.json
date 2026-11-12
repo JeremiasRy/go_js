@@ -30,6 +30,7 @@
         { "file": "negative-scripts/27-import-missing-relative-module.js", "sourceGoal": "module", "phase": "link", "error": "Error" },
         { "file": "negative-scripts/28-parse-yield-outside-generator.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/29-parse-await-in-non-async.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
-        { "file": "negative-scripts/30-parse-break-outside-loop.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
+        { "file": "negative-scripts/30-parse-break-outside-loop.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/02-recursion-unbounded-segv.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" }
     ]
 }
