@@ -10,7 +10,8 @@
         "module-cycles.js": ["module"],
         "module-evaluation-once.js": ["module"],
         "module-dynamic-import.js": ["module"],
-        "module-top-level-await.js": ["module"]
+        "module-top-level-await.js": ["module"],
+        "31-module-meta-null.js": ["module"]
     },
     "negative": [
         { "file": "negative-scripts/duplicate-lexical-binding.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
