@@ -169,6 +169,171 @@ func (vm *VM) callDateMethod(method *native.DateMethod, this value.Value, argCou
 			return value.NULL, nil
 		}
 		return value.EncodeHandle(heap.Allocate(native.NewLightString(time.UnixMilli(int64(date.Millis)).UTC().Format("2006-01-02T15:04:05.000Z")))), nil
+	case native.DATE_GET_FULL_YEAR:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(t.Year())), nil
+	case native.DATE_GET_MONTH:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(int(t.Month()) - 1)), nil
+	case native.DATE_GET_DATE:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(t.Day())), nil
+	case native.DATE_GET_DAY:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(int(t.Weekday()))), nil
+	case native.DATE_GET_HOURS:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(t.Hour())), nil
+	case native.DATE_GET_MINUTES:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(t.Minute())), nil
+	case native.DATE_GET_SECONDS:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(t.Second())), nil
+	case native.DATE_GET_MILLISECONDS:
+		if invalid {
+			return nan, nil
+		}
+		return value.ValueFromFloat64(float64(t.Nanosecond() / int(time.Millisecond))), nil
+	case native.DATE_GET_TIMEZONE_OFFSET:
+		_, offset := time.UnixMilli(int64(date.Millis)).Zone()
+		return value.ValueFromFloat64(float64(-offset / 60)), nil
+	case native.DATE_SET_FULL_YEAR:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		year := int(num(0, float64(t.Year())))
+		month := t.Month()
+		day := t.Day()
+		if len(args) > 1 {
+			month = time.Month(int(num(1, float64(int(t.Month())-1))) + 1)
+		}
+		if len(args) > 2 {
+			day = int(num(2, float64(t.Day())))
+		}
+		date.Millis = native.TimeClip(float64(time.Date(year, month, day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_SET_MONTH:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		month := time.Month(int(num(0, float64(int(t.Month())-1))) + 1)
+		day := t.Day()
+		if len(args) > 1 {
+			day = int(num(1, float64(t.Day())))
+		}
+		date.Millis = native.TimeClip(float64(time.Date(t.Year(), month, day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_SET_DATE:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		day := int(num(0, float64(t.Day())))
+		date.Millis = native.TimeClip(float64(time.Date(t.Year(), t.Month(), day, t.Hour(), t.Minute(), t.Second(), t.Nanosecond(), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_SET_HOURS:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		hour := int(num(0, float64(t.Hour())))
+		minute := t.Minute()
+		second := t.Second()
+		ms := t.Nanosecond() / int(time.Millisecond)
+		if len(args) > 1 {
+			minute = int(num(1, float64(t.Minute())))
+		}
+		if len(args) > 2 {
+			second = int(num(2, float64(t.Second())))
+		}
+		if len(args) > 3 {
+			ms = int(num(3, float64(t.Nanosecond()/int(time.Millisecond))))
+		}
+		date.Millis = native.TimeClip(float64(time.Date(t.Year(), t.Month(), t.Day(), hour, minute, second, ms*int(time.Millisecond), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_SET_MINUTES:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		minute := int(num(0, float64(t.Minute())))
+		second := t.Second()
+		ms := t.Nanosecond() / int(time.Millisecond)
+		if len(args) > 1 {
+			second = int(num(1, float64(t.Second())))
+		}
+		if len(args) > 2 {
+			ms = int(num(2, float64(t.Nanosecond()/int(time.Millisecond))))
+		}
+		date.Millis = native.TimeClip(float64(time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), minute, second, ms*int(time.Millisecond), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_SET_SECONDS:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		second := int(num(0, float64(t.Second())))
+		ms := t.Nanosecond() / int(time.Millisecond)
+		if len(args) > 1 {
+			ms = int(num(1, float64(t.Nanosecond()/int(time.Millisecond))))
+		}
+		date.Millis = native.TimeClip(float64(time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), second, ms*int(time.Millisecond), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_SET_MILLISECONDS:
+		if invalid {
+			date.Millis = math.NaN()
+			return nan, nil
+		}
+		ms := int(num(0, float64(t.Nanosecond()/int(time.Millisecond))))
+		date.Millis = native.TimeClip(float64(time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), t.Minute(), t.Second(), ms*int(time.Millisecond), time.UTC).UnixMilli()))
+		return value.ValueFromFloat64(date.Millis), nil
+	case native.DATE_TO_UTC_STRING:
+		if invalid {
+			return value.EncodeHandle(heap.Allocate(native.NewLightString("Invalid Date"))), nil
+		}
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(time.UnixMilli(int64(date.Millis)).UTC().Format("Mon, 02 Jan 2006 15:04:05 GMT")))), nil
+	case native.DATE_TO_DATE_STRING:
+		if invalid {
+			return value.EncodeHandle(heap.Allocate(native.NewLightString("Invalid Date"))), nil
+		}
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(time.UnixMilli(int64(date.Millis)).UTC().Format("Mon Jan 02 2006")))), nil
+	case native.DATE_TO_TIME_STRING:
+		if invalid {
+			return value.EncodeHandle(heap.Allocate(native.NewLightString("Invalid Date"))), nil
+		}
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(time.UnixMilli(int64(date.Millis)).UTC().Format("15:04:05 GMT+0000 (Coordinated Universal Time)")))), nil
+	case native.DATE_TO_LOCALE_STRING:
+		if invalid {
+			return value.EncodeHandle(heap.Allocate(native.NewLightString("Invalid Date"))), nil
+		}
+		local := time.UnixMilli(int64(date.Millis)).UTC()
+		hour := local.Hour() % 12
+		if hour == 0 {
+			hour = 12
+		}
+		period := "AM"
+		if local.Hour() >= 12 {
+			period = "PM"
+		}
+		text := fmt.Sprintf("%d/%d/%d, %d:%s:%s %s", int(local.Month()), local.Day(), local.Year(), hour, twoDigits(local.Minute()), twoDigits(local.Second()), period)
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(text))), nil
 	}
 	return value.UNDEFINED, nil
 }
@@ -221,4 +386,11 @@ func (vm *VM) callDateStaticMethod(method *native.DateStaticMethod, argCount int
 	ms := int(msValue)
 	t := time.Date(year, time.Month(month), day, hour, minute, second, ms*int(time.Millisecond), time.UTC)
 	return value.ValueFromFloat64(native.TimeClip(float64(t.UnixMilli()))), nil
+}
+
+func twoDigits(n int) string {
+	if n < 10 {
+		return "0" + string(rune('0'+n))
+	}
+	return string(rune('0'+n/10)) + string(rune('0'+n%10))
 }

@@ -1745,6 +1745,11 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 			}
 		}
 	}
+	if nativeFn, ok := obj.(interface{ NativeArity() int }); ok {
+		if keyString, ok := vm.valueAsString(key); ok && keyString == "length" {
+			return value.ValueFromFloat64(float64(nativeFn.NativeArity())), nil
+		}
+	}
 	if obj.Type() == object.OBJ_NATIVE_FN {
 		if keyString, ok := vm.valueAsString(key); ok {
 			switch keyString {
@@ -2115,11 +2120,11 @@ func (vm *VM) toUint32(v value.Value) (uint32, error) {
 func (vm *VM) typeofValue(v value.Value) string {
 	if v.IsObject() {
 		obj, _ := heap.GetObject(v.GetHandle())
-		if obj.Type() == object.OBJ_NATIVE_FN {
+		if obj.Type() == object.OBJ_NATIVE_FN || obj.Type() == object.OBJ_OBJECT_CONSTRUCTOR || obj.Type() == object.OBJ_ARRAY_CONSTRUCTOR || obj.Type() == object.OBJ_ERROR_CONSTRUCTOR || obj.Type() == object.OBJ_DATE_CONSTRUCTOR || obj.Type() == object.OBJ_MAP_CONSTRUCTOR || obj.Type() == object.OBJ_SET_CONSTRUCTOR || obj.Type() == object.OBJ_PROMISE_CONSTRUCTOR || obj.Type() == object.OBJ_STRING_CONSTRUCTOR || obj.Type() == object.OBJ_SYMBOL_CONSTRUCTOR || obj.Type() == object.OBJ_CLASS {
 			return "function"
 		}
 		switch obj := obj.(type) {
-		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass:
+		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ArrayConstructor, *native.ObjectConstructor, *native.ErrorConstructor, *native.DateConstructor, *native.MapConstructor, *native.SetConstructor, *native.PromiseConstructor, *native.StringConstructor, *native.NumberConstructor, *native.BooleanConstructor, *native.SymbolConstructor, *native.BigIntConstructor, *native.RegExpConstructor, *native.ProxyConstructor, *native.TypedArrayConstructor, *native.ArrayBufferConstructor, *native.DataViewConstructor:
 			return "function"
 		case *native.ObjProxy:
 			if obj.Callable {
@@ -4860,6 +4865,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 						}
 						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.ToString(name, message)))))
+					}
+				case *native.DateConstructor:
+					{
+						vm.popN(argCount)
+						text := time.Now().UTC().Format("Mon Jan 02 2006 15:04:05 GMT+0000 (Coordinated Universal Time)")
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(text))))
 					}
 				case *native.DateMethod:
 					{

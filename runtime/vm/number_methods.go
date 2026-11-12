@@ -153,6 +153,8 @@ func (vm *VM) callNumberFormatMethod(method *native.NumberFormatMethod, this val
 			s = mantissa + "e" + sign + exponent
 		}
 		return value.EncodeHandle(heap.Allocate(native.NewLightString(s))), nil
+	case native.NUMBER_TO_LOCALE_STRING:
+		return value.EncodeHandle(heap.Allocate(native.NewLightString(localeNumberString(n)))), nil
 	case native.NUMBER_TO_STRING:
 		if len(args) > 0 && args[0] != value.UNDEFINED {
 			radix = vm.arrayInteger(args[0], 10)
@@ -208,4 +210,36 @@ func nativeParseNumberString(s string) (float64, error) {
 		return math.NaN(), nil
 	}
 	return n, nil
+}
+
+func localeNumberString(n float64) string {
+	text := nativeNumberString(n)
+	exponent := ""
+	if index := strings.IndexByte(text, 'e'); index >= 0 {
+		exponent = text[index:]
+		text = text[:index]
+	}
+	negative := strings.HasPrefix(text, "-")
+	if negative {
+		text = text[1:]
+	}
+	parts := strings.SplitN(text, ".", 2)
+	integer := parts[0]
+	if len(integer) > 3 {
+		groups := []string{}
+		for len(integer) > 3 {
+			groups = append([]string{integer[len(integer)-3:]}, groups...)
+			integer = integer[:len(integer)-3]
+		}
+		groups = append([]string{integer}, groups...)
+		integer = strings.Join(groups, ",")
+	}
+	result := integer
+	if len(parts) > 1 {
+		result += "." + parts[1]
+	}
+	if negative {
+		result = "-" + result
+	}
+	return result + exponent
 }

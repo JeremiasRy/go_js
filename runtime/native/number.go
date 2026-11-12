@@ -56,6 +56,7 @@ const (
 	NUMBER_TO_PRECISION
 	NUMBER_TO_EXPONENTIAL
 	NUMBER_TO_STRING
+	NUMBER_TO_LOCALE_STRING
 )
 
 type NumberFormatMethod struct {
@@ -82,6 +83,7 @@ func NewNumberPrototype() *Prototype {
 		{"toExponential", NUMBER_TO_EXPONENTIAL},
 		{"toString", NUMBER_TO_STRING},
 		{"valueOf", NUMBER_TO_STRING},
+		{"toLocaleString", NUMBER_TO_LOCALE_STRING},
 	} {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(item.name)))
 		p.SetMember(key, value.EncodeHandle(heap.Allocate(NewNumberFormatMethod(item.name, item.kind))))
