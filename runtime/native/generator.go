@@ -2,16 +2,59 @@ package native
 
 import (
 	"fmt"
+	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 )
+
+type GeneratorException struct {
+	JumpTo    int
+	StackTop  int
+	Frame     int
+	IsFinally bool
+}
+
+type AsyncGeneratorRequest struct {
+	Input   value.Value
+	Mode    int
+	Promise *ObjPromise
+}
 
 type ObjGenerator struct {
 	object.ObjFunction
 	ObjObject
 
-	Ip     int
-	Locals []value.Value
+	Ip                int
+	Locals            []value.Value
+	Args              []value.Value
+	Started           bool
+	Done              bool
+	Running           bool
+	PendingThrow      value.Value
+	HasPendingThrow   bool
+	PendingReturn     bool
+	ReturnValue       value.Value
+	CompletionMark    value.Value
+	Current           value.Value
+	Exceptions        []GeneratorException
+	SavedHeapScope    int
+	SavedOwnScope     bool
+	HasSavedScope     bool
+	Delegating        bool
+	DelegateStarted   bool
+	DelegateIterator  value.Value
+	DelegateHasResult bool
+	DelegateResult    value.Value
+	IsAsync           bool
+	AsyncAwaiting     *ObjPromise
+	AsyncProcessing   bool
+	AsyncRequests     []AsyncGeneratorRequest
+}
+
+func NewAsyncGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
+	g := NewGenerator(name, arity, chunk)
+	g.IsAsync = true
+	return g
 }
 
 func NewGenerator(name string, arity int, chunk *value.ValueChunk) *ObjGenerator {
@@ -43,20 +86,20 @@ func (i *ObjGenerator) Clear() {
 }
 
 func (i *ObjGenerator) GetReferencingValues() []value.Value {
-	arr := []value.Value{}
-
-	for _, v := range i.Members {
-		if v.Value.IsObject() {
-			arr = append(arr, v.Value)
+	arr := i.ObjObject.GetReferencingValues()
+	arr = append(arr, i.ObjFunction.GetReferencingValues()...)
+	arr = append(arr, i.Locals...)
+	arr = append(arr, i.Args...)
+	arr = append(arr, i.Current, i.PendingThrow, i.ReturnValue, i.CompletionMark, i.DelegateIterator, i.DelegateResult)
+	if i.AsyncAwaiting != nil {
+		arr = append(arr, value.EncodeHandle(heap.Allocate(i.AsyncAwaiting)))
+	}
+	for _, request := range i.AsyncRequests {
+		arr = append(arr, request.Input)
+		if request.Promise != nil {
+			arr = append(arr, value.EncodeHandle(heap.Allocate(request.Promise)))
 		}
 	}
-
-	for _, v := range append(i.Locals, i.ValueChunk().Constants...) {
-		if v.IsObject() {
-			arr = append(arr, v)
-		}
-	}
-
 	return arr
 }
 
@@ -120,4 +163,14 @@ func NewThrow() *Throw {
 	t := &Throw{}
 	t.name = "throw"
 	return t
+}
+
+type GeneratorIterator struct {
+	ObjNativeFn
+}
+
+func NewGeneratorIterator() *GeneratorIterator {
+	g := &GeneratorIterator{}
+	g.name = "iterator"
+	return g
 }

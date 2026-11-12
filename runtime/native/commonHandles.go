@@ -44,6 +44,7 @@ var (
 
 	// error
 	KEY_MESSAGE value.Value
+	KEY_NAME    value.Value
 
 	// generator
 	KEY_THROW  value.Value
@@ -94,6 +95,7 @@ func createCommonHandles() {
 	KEY_CTOR = value.EncodeHandle(heap.Allocate(NewLightString("constructor")))
 
 	KEY_MESSAGE = value.EncodeHandle(heap.Allocate(NewLightString("message")))
+	KEY_NAME = value.EncodeHandle(heap.Allocate(NewLightString("name")))
 
 	KEY_THROW = value.EncodeHandle(heap.Allocate(NewLightString("throw")))
 	KEY_NEXT = value.EncodeHandle(heap.Allocate(NewLightString("next")))
@@ -109,4 +111,13 @@ func createCommonHandles() {
 
 	KEY_RESOLVE = value.EncodeHandle(heap.Allocate(NewLightString("resolve")))
 	KEY_THEN = value.EncodeHandle(heap.Allocate(NewLightString("then")))
+
+	keys := []value.Value{
+		KEY_PROTO, KEY_LOG, KEY_FILTER, KEY_FOREACH, KEY_MAP, KEY_REDUCE, KEY_PUSH, KEY_JOIN, KEY_SHIFT, KEY_REVERSE, KEY_LENGTH, KEY_FILL,
+		KEY_INCLUDES, KEY_TOUPPERCASE, KEY_SPLIT, KEY_REPLACE, KEY_STARTS_WITH,
+		KEY_TOSTRING, KEY_CREATE, KEY_KEYS, KEY_VALUES, KEY_HASOWNPROPERTY,
+		KEY_CTOR, KEY_MESSAGE, KEY_NAME, KEY_THROW, KEY_NEXT, KEY_RETURN, KEY_VALUE, KEY_DONE,
+		KEY_HAS, KEY_GET, KEY_SET, KEY_SIZE, KEY_ADD, KEY_RESOLVE, KEY_THEN,
+	}
+	heap.PushToRoots(keys...)
 }

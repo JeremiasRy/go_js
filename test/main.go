@@ -5,177 +5,109 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
 const DIR_NAME_TEST_SCRIPTS string = "test-scripts"
 const DIR_NAME_BENCMARKS string = "benchmark-scripts"
-
-const PREFIX_TEST_SCIPT string = "mission"
-
 const EXPECTED_TEST_RESULT_RUNNER = "node"
 const RUNTIME_BINARY_NAME = "go_js"
-
 const AOC_PUZZLE_LOCATION = "aoc/solution.js"
 
+type failure struct {
+	test     string
+	reason   string
+	expected string
+	got      string
+}
+
 func main() {
-	benchmarks, err := os.ReadDir(DIR_NAME_BENCMARKS)
-
+	cases, timeout, err := loadCases(".")
 	if err != nil {
-		log.Fatalf("failed to read benchmark scripts %s", err)
+		log.Fatalf("failed to load test cases: %s", err)
 	}
-
-	scripts, err := os.ReadDir(DIR_NAME_TEST_SCRIPTS)
-
-	if err != nil {
-		log.Fatalf("failed to read test scripts %s", err)
-	}
-
-	expected := map[string][]byte{}
-
-	fmt.Print("generating expected outputs...")
-
-	for _, script := range scripts {
-		if script.IsDir() {
-			continue
-		}
-		name := script.Name()
-
-		cmd := exec.Command(EXPECTED_TEST_RESULT_RUNNER, DIR_NAME_TEST_SCRIPTS+"/"+name)
-		out, err := cmd.CombinedOutput()
-
-		if err != nil {
-			log.Fatalf("failed to run test script %s %s", name, err)
-		}
-
-		expected[name] = out
-	}
-
-	fmt.Print(" done")
-
-	fmt.Printf("\nRunning %d tests.\n", len(scripts))
-
-	fails := []struct {
-		test     string
-		expected string
-		got      string
-	}{}
-
-	count := 0
-	for _, script := range scripts {
-		if script.IsDir() {
-			continue
-		}
-		count++
-		name := script.Name()
-		fmt.Printf("%-50s %02d/%d... ", name, count, len(scripts)-2) // there are two folders here
-
-		cmd := exec.Command("./"+RUNTIME_BINARY_NAME, DIR_NAME_TEST_SCRIPTS+"/"+name)
-		out, err := cmd.CombinedOutput()
-
-		if err != nil {
-			fmt.Println("❌")
-			fails = append(fails, struct {
-				test     string
-				expected string
-				got      string
-			}{test: name, expected: string(expected[name]), got: err.Error()})
-			continue
-		}
-
-		if bytes.Equal(expected[name], out) {
-			fmt.Println("✅")
+	fmt.Printf("Running %d tests against NodeJS and GO_JS.\n", len(cases))
+	fails := []failure{}
+	for index, test := range cases {
+		fmt.Printf("%-70s %03d/%d... ", test.label(), index+1, len(cases))
+		expected := runNode(test, timeout)
+		got := runRuntime(test, timeout)
+		if err := compareCase(test, expected, got); err != nil {
+			fmt.Println("❌", err)
+			fails = append(fails, failure{
+				test: test.label(), reason: err.Error(),
+				expected: describeExecution(expected), got: describeExecution(got),
+			})
 		} else {
-			fmt.Println("❌")
-			fails = append(fails, struct {
-				test     string
-				expected string
-				got      string
-			}{test: name, expected: string(expected[name]), got: string(out)})
+			fmt.Println("✅")
 		}
-
 	}
-
 	if len(fails) > 0 {
-		fmt.Println()
-		fmt.Println("FAILED TESTS")
-		fmt.Println()
+		fmt.Println("\nFAILED TESTS")
 		for _, result := range fails {
-			fmt.Printf("Test case: '%s'\n\n", result.test)
-			fmt.Printf("-- Expected --\n%s", result.expected)
-			fmt.Printf("-- Got --\n%s", result.got)
-			fmt.Println()
-			fmt.Printf("%s\n", strings.Repeat("-", 34))
+			fmt.Printf("\nTest case: %s\n%s\n-- NodeJS --\n%s\n-- GO_JS --\n%s\n%s\n",
+				result.test, result.reason, result.expected, result.got, strings.Repeat("-", 34))
 		}
 	}
+	fmt.Printf("\n%d/%d Tests passed\n\n", len(cases)-len(fails), len(cases))
+	failed := len(fails) != 0
+	if !runAOC(timeout) {
+		failed = true
+	}
+	if !runBenchmarks(30 * time.Second) {
+		failed = true
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
 
-	fmt.Printf("\n#####\n\n%d/%d Tests passed\n\n#####\n\n\n", count-len(fails), len(scripts)-2)
-
+func runAOC(timeout time.Duration) bool {
 	fmt.Println("RUNNING AOC PUZZLE")
-	goJsCmd := exec.Command("./"+RUNTIME_BINARY_NAME, AOC_PUZZLE_LOCATION)
-	nodeCmd := exec.Command(EXPECTED_TEST_RESULT_RUNNER, AOC_PUZZLE_LOCATION)
-
-	resGoJs, _ := goJsCmd.CombinedOutput()
-	resNode, _ := nodeCmd.CombinedOutput()
-
-	gojs := strings.ReplaceAll(string(resGoJs), "\n", "")
-	nodeJs := strings.ReplaceAll(string(resNode), "\n", "")
-
-	if gojs == nodeJs {
-		fmt.Println("aoc solution passed ✅")
-		fmt.Println("go_js:", gojs)
-		fmt.Println("node: ", nodeJs)
-
+	test := testCase{File: AOC_PUZZLE_LOCATION, SourceGoal: "module"}
+	expected := runNode(test, timeout)
+	got := runRuntime(test, timeout)
+	// Preserve the existing puzzle's newline-insensitive object-output check.
+	expected.Output = bytes.ReplaceAll(expected.Output, []byte("\n"), nil)
+	got.Output = bytes.ReplaceAll(got.Output, []byte("\n"), nil)
+	err := compareCase(test, expected, got)
+	if err != nil {
+		fmt.Println("aoc solution failed ❌", err)
 	} else {
-		fmt.Println("aoc solution failed ❌")
+		fmt.Println("aoc solution passed ✅")
 	}
-	fmt.Println()
-	fmt.Println()
+	fmt.Println("go_js:", describeExecution(got))
+	fmt.Println("node: ", describeExecution(expected))
+	return err == nil
+}
 
-	fmt.Print("RUNNING BENCHMARKS")
-
-	results := []struct {
-		test     string
-		expected string
-		got      string
-	}{}
-
+func runBenchmarks(timeout time.Duration) bool {
+	fmt.Println("\nRUNNING BENCHMARKS")
+	benchmarks, err := os.ReadDir(DIR_NAME_BENCMARKS)
+	if err != nil {
+		fmt.Println("failed to read benchmark scripts:", err)
+		return false
+	}
+	passed := true
 	for _, bench := range benchmarks {
-		name := bench.Name()
-		path := DIR_NAME_BENCMARKS + "/" + name
-
-		nodeCmd := exec.Command(EXPECTED_TEST_RESULT_RUNNER, path)
-		standardOut, err := nodeCmd.CombinedOutput()
-
-		if err != nil {
-			log.Fatalf("failed to run benchmark script %s %s", name, err)
+		if bench.IsDir() || filepath.Ext(bench.Name()) != ".js" {
+			continue
 		}
-
-		goJsCmd := exec.Command("./"+RUNTIME_BINARY_NAME, path)
-
-		attemptOut, err := goJsCmd.CombinedOutput()
-
-		if err != nil {
-			log.Fatalf("failed to run benchmark script %s %s", name, err)
+		test := testCase{File: filepath.Join(DIR_NAME_BENCMARKS, bench.Name()), SourceGoal: "script"}
+		expected := runNode(test, timeout)
+		got := runRuntime(test, timeout)
+		fmt.Printf("\nBenchmark: %s\n-- NodeJS performance --\n%s\n-- GO_JS performance --\n%s\n",
+			bench.Name(), describeExecution(expected), describeExecution(got))
+		if err := checkOutcome(test, expected); err != nil {
+			fmt.Println("NodeJS benchmark failed:", err)
+			passed = false
 		}
-
-		results = append(results, struct {
-			test     string
-			expected string
-			got      string
-		}{test: name, expected: string(standardOut), got: string(attemptOut)})
-		fmt.Print(".")
+		if err := checkOutcome(test, got); err != nil {
+			fmt.Println("GO_JS benchmark failed:", err)
+			passed = false
+		}
 	}
-	fmt.Println("Done!")
-	fmt.Println()
-	fmt.Println()
-
-	for _, result := range results {
-		fmt.Printf("Benchmark: '%s'\n\n", result.test)
-		fmt.Printf("-- NodeJS performance --\n%s", result.expected)
-		fmt.Printf("-- Got --\n%s", result.got)
-		fmt.Println()
-		fmt.Printf("%s\n", strings.Repeat("-", 34))
-	}
+	return passed
 }

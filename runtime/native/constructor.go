@@ -1,11 +1,11 @@
 package native
 
 import (
-	"errors"
 	"fmt"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
+	"math"
 	"time"
 )
 
@@ -15,10 +15,15 @@ type Constructor interface {
 
 type ErrorConstructor struct {
 	ObjObject
+	errorName string
 }
 
 func NewErrorConstructor() *ErrorConstructor {
-	ec := &ErrorConstructor{}
+	return NewNamedErrorConstructor("Error")
+}
+
+func NewNamedErrorConstructor(name string) *ErrorConstructor {
+	ec := &ErrorConstructor{errorName: name}
 	ec.Members = map[string]ObjectValueEntry{}
 	return ec
 }
@@ -27,34 +32,27 @@ func (*ErrorConstructor) String() string {
 	return "Error constructor"
 }
 
+func (ec *ErrorConstructor) ErrorName() string {
+	return ec.errorName
+}
+
 func (*ErrorConstructor) Type() object.ObjType {
 	return object.OBJ_ERROR_CONSTRUCTOR
 }
 
 func (ec *ErrorConstructor) New(params ...any) (object.Object, error) {
-	if len(params) < 1 {
-		return nil, errors.New("not enough params for new Error()")
-	}
-
-	var arg object.Object
-	var handle value.Value
-
-	if argHandle, ok := params[0].(value.Value); ok {
-		a, err := heap.GetObject(argHandle.GetHandle())
-		handle = argHandle
-		if err != nil {
-			return nil, err
+	errorObject := NewNamedError(ec.errorName)
+	if len(params) > 0 {
+		if argHandle, ok := params[0].(value.Value); ok {
+			if argHandle != value.UNDEFINED {
+				arg, err := heap.GetObject(argHandle.GetHandle())
+				if err == nil {
+					errorObject.SetMember(KEY_MESSAGE, value.EncodeHandle(heap.Allocate(NewLightString(arg.String()))))
+				}
+			}
 		}
-		arg = a
 	}
-
-	if arg.Type() == object.OBJ_STRING {
-		errorObject := NewError()
-		errorObject.SetMember(KEY_MESSAGE, handle)
-		return errorObject, nil
-	}
-
-	return nil, fmt.Errorf("arg is of wrong type")
+	return errorObject, nil
 }
 
 type ObjectConstructor struct {
@@ -68,6 +66,14 @@ func NewObjectConstructor() *ObjectConstructor {
 	oc.SetMember(KEY_VALUES, value.EncodeHandle(heap.Allocate(NewObjectValues())))
 	oc.SetMember(KEY_KEYS, value.EncodeHandle(heap.Allocate(NewObjectKeys())))
 	oc.SetMember(KEY_CREATE, value.EncodeHandle(heap.Allocate(NewCreate())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_OBJECT)
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("hasOwn"))), value.EncodeHandle(heap.Allocate(NewObjectHasOwn())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getPrototypeOf"))), value.EncodeHandle(heap.Allocate(NewObjectGetPrototypeOf())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("setPrototypeOf"))), value.EncodeHandle(heap.Allocate(NewObjectSetPrototypeOf())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getOwnPropertySymbols"))), value.EncodeHandle(heap.Allocate(NewObjectGetOwnPropertySymbols())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getOwnPropertyNames"))), value.EncodeHandle(heap.Allocate(NewObjectGetOwnPropertyNames())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("defineProperty"))), value.EncodeHandle(heap.Allocate(NewObjectDefineProperty())))
+	oc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("getOwnPropertyDescriptor"))), value.EncodeHandle(heap.Allocate(NewObjectGetOwnPropertyDescriptor())))
 
 	return oc
 }
@@ -91,8 +97,27 @@ func NewObject() *ObjObject {
 	return obj
 }
 
+func NewGlobalObject() *ObjObject {
+	obj := NewObject()
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("undefined"))), value.UNDEFINED)
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("NaN"))), value.STANDARD_NAN)
+	inf := value.ValueFromFloat64(math.Inf(1))
+	obj.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("Infinity"))), inf)
+	return obj
+}
+
 type ArrayConstructor struct {
 	ObjObject
+}
+
+func NewArrayConstructor() *ArrayConstructor {
+	a := &ArrayConstructor{}
+	a.Members = map[string]ObjectValueEntry{}
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_ARRAY)
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("isArray"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("isArray", ARRAY_STATIC_IS_ARRAY))))
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("of"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("of", ARRAY_STATIC_OF))))
+	a.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("from"))), value.EncodeHandle(heap.Allocate(NewArrayStaticMethod("from", ARRAY_STATIC_FROM))))
+	return a
 }
 
 func (*ArrayConstructor) String() string {
@@ -104,21 +129,32 @@ func (*ArrayConstructor) Type() object.ObjType {
 }
 
 func (*ArrayConstructor) New(params ...any) (object.Object, error) {
-	length := 8 // default length
-
+	if len(params) == 0 {
+		return NewArrayFrom([]value.Value{}), nil
+	}
 	if len(params) == 1 {
-		if num, ok := params[0].(value.Value); ok {
-			length = int(num.AsNumber())
+		if v, ok := params[0].(value.Value); ok {
+			if v.IsNumber() {
+				n := v.AsNumber()
+				if n < 0 || math.Trunc(n) != n || n >= 4294967296 {
+					return nil, fmt.Errorf("Invalid array length")
+				}
+				length := int(n)
+				items := make([]value.Value, length)
+				for i := range items {
+					items[i] = value.EMPTY_ARRAY_ITEM
+				}
+				return NewArrayFrom(items), nil
+			}
 		}
 	}
-
-	from := make([]value.Value, length)
-	for i := range from {
-		from[i] = value.EMPTY_ARRAY_ITEM
+	items := make([]value.Value, len(params))
+	for i, param := range params {
+		if v, ok := param.(value.Value); ok {
+			items[i] = v
+		}
 	}
-
-	arr := NewArrayFrom(from)
-	return arr, nil
+	return NewArrayFrom(items), nil
 }
 
 type StringConstructor struct {
@@ -165,6 +201,7 @@ type SetTimeout struct {
 	ObjNativeFn
 	time     int
 	callback object.Callback
+	rootKey  uintptr
 }
 
 func NewSetTimeout() *SetTimeout {
@@ -182,10 +219,16 @@ func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
 	}
 }
 
+func (st *SetTimeout) SetRootKey(key uintptr) {
+	st.rootKey = key
+}
+
 func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	callback := st.callback
+	callback.RootKey = st.rootKey
 	message := &object.JobChannelMessage{
 		Job:      nil,
-		Callback: st.callback,
+		Callback: callback,
 		Done:     done,
 	}
 	if st.time == 0 {
@@ -222,7 +265,32 @@ func (*MapConstructor) Type() object.ObjType {
 }
 
 func (*MapConstructor) New(params ...any) (object.Object, error) {
-	return NewMap(), nil
+	m := NewMap()
+	if len(params) > 0 {
+		if v, ok := params[0].(value.Value); ok && v.IsObject() {
+			if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+				if arr, ok := obj.(*ObjArr); ok {
+					setter := &MapSet{}
+					for i := 0; i < arr.Length(); i++ {
+						entryValue := arr.GetElementAt(i)
+						if !entryValue.IsObject() {
+							return nil, fmt.Errorf("Iterator value is not an entry object")
+						}
+						entryObj, err := heap.GetObject(entryValue.GetHandle())
+						if err != nil {
+							return nil, err
+						}
+						entry, ok := entryObj.(*ObjArr)
+						if !ok || entry.Length() < 2 {
+							return nil, fmt.Errorf("Iterator value is not an entry object")
+						}
+						setter.Set(m, entry.GetElementAt(0), entry.GetElementAt(1))
+					}
+				}
+			}
+		}
+	}
+	return m, nil
 }
 
 type SetConstructor struct {
@@ -242,5 +310,29 @@ func (*SetConstructor) Type() object.ObjType {
 }
 
 func (*SetConstructor) New(params ...any) (object.Object, error) {
-	return NewSet(), nil
+	s := NewSet()
+	adder := &SetAdd{}
+	if len(params) > 0 {
+		if v, ok := params[0].(value.Value); ok {
+			if str, ok := ObjectStringValue(v); ok {
+				for _, r := range []rune(str) {
+					adder.Add(s, value.EncodeHandle(heap.Allocate(NewLightString(string(r)))))
+				}
+			} else if v.IsObject() {
+				if obj, err := heap.GetObject(v.GetHandle()); err == nil {
+					switch source := obj.(type) {
+					case *ObjArr:
+						for i := 0; i < source.Length(); i++ {
+							adder.Add(s, source.GetElementAt(i))
+						}
+					case *Set:
+						for _, item := range source.order {
+							adder.Add(s, item)
+						}
+					}
+				}
+			}
+		}
+	}
+	return s, nil
 }

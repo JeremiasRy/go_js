@@ -6,4 +6,5 @@ var (
 	Debug            = false
 	EnableJIT        = runtime.GOARCH == "amd64"
 	StructuredOutput = true
+	JSONErrors       = false
 )

@@ -7,8 +7,19 @@ import (
 	"go_js/value"
 )
 
+const (
+	defragMinHeapSlots   = 128
+	defragMinFreeSlots   = 64
+	defragFreePercentage = 50
+)
+
+type HeapScope struct {
+	Parent int
+	Values []value.Value
+}
+
 type Heap struct {
-	heapVars       map[int][]value.Value
+	heapVars       map[int]*HeapScope
 	heapScopeCount int
 
 	handleLayer map[uint32]uint32
@@ -22,12 +33,15 @@ type Heap struct {
 	init                bool
 	roots               []value.Value
 	asyncWorkKeepAlive  map[uintptr][]value.Value
+	asyncScopeKeepAlive map[uintptr]int
+	callbackRoots       map[uintptr][]value.Value
+	nextCallbackRoot    uintptr
 	greyStack           []object.Object
 	gcCycleDeterminator uint32
 }
 
 var a = &Heap{
-	heapVars:       map[int][]value.Value{},
+	heapVars:       map[int]*HeapScope{},
 	heapScopeCount: 0,
 	handleLayer:    map[uint32]uint32{},
 	handleCount:    0,
@@ -38,6 +52,9 @@ var a = &Heap{
 
 	roots:               []value.Value{},
 	asyncWorkKeepAlive:  map[uintptr][]value.Value{},
+	asyncScopeKeepAlive: map[uintptr]int{},
+	callbackRoots:       map[uintptr][]value.Value{},
+	nextCallbackRoot:    1,
 	greyStack:           []object.Object{},
 	gcCycleDeterminator: 20,
 	init:                false,
@@ -47,42 +64,103 @@ func ShouldRunGCCycle() bool {
 	return a.shouldRunGCCycle()
 }
 
-func GetHeapVar(scope, slot int) value.Value {
-	return a.getHeapVar(scope, slot)
+func GetHeapVar(scope, depth, slot int) value.Value {
+	return a.getHeapVar(scope, depth, slot)
 }
 
-func SetHeapVar(scope, slot int, v value.Value) {
-	a.setHeapVar(scope, slot, v)
+func HasHeapVar(scope, depth, slot int) bool {
+	scope = a.resolveScope(scope, depth)
+	values, found := a.heapVars[scope]
+	return found && slot >= 0 && slot < len(values.Values)
+}
+
+func SetHeapVar(scope, depth, slot int, v value.Value) {
+	a.setHeapVar(scope, depth, slot, v)
 }
 
 func DefineHeapVar(scope int, v value.Value) {
 	a.defineHeapVar(scope, v)
 }
 
-func CreateHeapScope() (scope int) {
-	scope = a.createHeapScope()
+func DefineHeapVarAt(scope, slot int, v value.Value) {
+	a.defineHeapVarAt(scope, slot, v)
+}
+
+func CreateHeapScope(parent int) (scope int) {
+	scope = a.createHeapScope(parent)
+	return scope
+}
+
+func ScopeValues(scope int) []value.Value {
+	if s, found := a.heapVars[scope]; found {
+		return s.Values
+	}
+	return nil
+}
+
+func ParentScope(scope int) int {
+	if s, found := a.heapVars[scope]; found {
+		return s.Parent
+	}
+	return 0
+}
+
+func CopyHeapScope(old int) (scope int) {
+	scope = a.createHeapScope(0)
+	if old > 0 {
+		values := a.heapVars[old]
+		copied := make([]value.Value, len(values.Values))
+		copy(copied, values.Values)
+		a.heapVars[scope] = &HeapScope{Parent: values.Parent, Values: copied}
+	}
+	return scope
+}
+
+func (a *Heap) resolveScope(scope, depth int) int {
+	for i := 0; i < depth && scope > 0; i++ {
+		scope = a.heapVars[scope].Parent
+	}
 	return scope
 }
 
 func (a *Heap) shouldRunGCCycle() bool {
+	if a.gcCycleDeterminator <= 0 {
+		a.gcCycleDeterminator = 1
+	}
 	return a.handleCount%a.gcCycleDeterminator == 0
 }
 
-func (a *Heap) getHeapVar(scope, slot int) value.Value {
-	return a.heapVars[scope][slot]
+func (a *Heap) getHeapVar(scope, depth, slot int) value.Value {
+	scope = a.resolveScope(scope, depth)
+	values := a.heapVars[scope]
+	if values == nil || slot < 0 || slot >= len(values.Values) {
+		return value.UNINITIALIZED
+	}
+	return values.Values[slot]
 }
 
-func (a *Heap) setHeapVar(scope, slot int, v value.Value) {
-	a.heapVars[scope][slot] = v
+func (a *Heap) setHeapVar(scope, depth, slot int, v value.Value) {
+	scope = a.resolveScope(scope, depth)
+	for len(a.heapVars[scope].Values) <= slot {
+		a.heapVars[scope].Values = append(a.heapVars[scope].Values, value.UNINITIALIZED)
+	}
+	a.heapVars[scope].Values[slot] = v
 }
 
 func (a *Heap) defineHeapVar(scope int, v value.Value) {
-	a.heapVars[scope] = append(a.heapVars[scope], v)
+	a.heapVars[scope].Values = append(a.heapVars[scope].Values, v)
 }
 
-func (a *Heap) createHeapScope() (scope int) {
+func (a *Heap) defineHeapVarAt(scope, slot int, v value.Value) {
+	for len(a.heapVars[scope].Values) <= slot {
+		a.heapVars[scope].Values = append(a.heapVars[scope].Values, value.UNINITIALIZED)
+	}
+	a.heapVars[scope].Values[slot] = v
+}
+
+func (a *Heap) createHeapScope(parent int) (scope int) {
 	a.heapScopeCount++
-	a.heapVars[a.heapScopeCount] = []value.Value{}
+	a.heapVars[a.heapScopeCount] = &HeapScope{Parent: parent}
 	scope = a.heapScopeCount
 	return scope
 }
@@ -155,6 +233,30 @@ func GetPointer(handle uint32) uint32 {
 }
 
 // GARBAGE COLLECTION
+func markValue(v value.Value) {
+	if !v.IsObject() {
+		return
+	}
+	obj, err := GetObject(v.GetHandle())
+	if err != nil {
+		return
+	}
+	pushGrey(obj)
+}
+
+func (a *Heap) markScope(scope int) {
+	for scope > 0 {
+		values, found := a.heapVars[scope]
+		if !found {
+			return
+		}
+		for _, v := range values.Values {
+			markValue(v)
+		}
+		scope = values.Parent
+	}
+}
+
 func markAndSweep(stackValues []value.Value) {
 	if flags.Debug {
 		fmt.Println("-- GC DEBUG --")
@@ -162,38 +264,39 @@ func markAndSweep(stackValues []value.Value) {
 	}
 
 	for _, v := range append(a.roots, stackValues...) {
-		if v.IsObject() {
-			obj, _ := GetObject(v.GetHandle())
-			pushGrey(obj)
-		}
+		markValue(v)
 	}
 
 	for _, items := range a.asyncWorkKeepAlive {
 		for _, v := range items {
-			if v.IsObject() {
-				obj, _ := GetObject(v.GetHandle())
-				pushGrey(obj)
-			}
+			markValue(v)
+		}
+	}
+
+	for _, scope := range a.asyncScopeKeepAlive {
+		a.markScope(scope)
+	}
+
+	for _, items := range a.callbackRoots {
+		for _, v := range items {
+			markValue(v)
 		}
 	}
 
 	current := popGrey()
 
 	for current != nil {
-		for _, v := range current.GetReferencingValues() {
-			obj, _ := GetObject(v.GetHandle())
-			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
-				for _, v := range a.heapVars[fn.HeapScope] {
-					if v.IsObject() {
-						obj, _ := GetObject(v.GetHandle())
-						pushGrey(obj)
-					}
-				}
-			}
-
-			pushGrey(obj)
+		if current.Marked() {
+			current = popGrey()
+			continue
 		}
 		current.Mark()
+		for _, v := range current.GetReferencingValues() {
+			markValue(v)
+		}
+		if callable, ok := current.(object.Callable); ok && callable.GetHeapScope() != object.NOT_IN_HEAP_SCOPE {
+			a.markScope(callable.GetHeapScope())
+		}
 		current = popGrey()
 	}
 	a.sweep()
@@ -214,11 +317,11 @@ func (a *Heap) sweep() {
 				fmt.Println("Cleaning up:", obj.String())
 			}
 			a.freeList[uint32(i)] = struct{}{}
-			if fn, ok := obj.(*object.ObjFunction); ok && fn.HeapScope != object.NOT_IN_HEAP_SCOPE {
-				if flags.Debug {
-					fmt.Println("removing heap scope", fn.HeapScope)
+			if obj.Type() == object.OBJ_STRING {
+				str := obj.String()
+				if ptr, found := a.strings[str]; found && ptr == uint32(i) {
+					delete(a.strings, str)
 				}
-				delete(a.heapVars, fn.HeapScope)
 			}
 		}
 	}
@@ -239,10 +342,60 @@ func (a *Heap) sweep() {
 		a.gcCycleDeterminator /= 2
 	}
 
-	if len(a.freeList) > 0 && len(a.objects)/len(a.freeList) > 1 {
-		defragment()
+	if a.shouldDefragment() {
+		if flags.Debug {
+			fmt.Printf("Defragmenting heap: %d objects, %d free slots\n", len(a.objects), len(a.freeList))
+		}
+		a.defragment()
 	}
 }
+
+func (a *Heap) shouldDefragment() bool {
+	objects := len(a.objects)
+	free := len(a.freeList)
+	if objects < defragMinHeapSlots || free < defragMinFreeSlots {
+		return false
+	}
+	return free*100 >= objects*defragFreePercentage
+}
+
+func (a *Heap) defragment() {
+	if len(a.objects) == 0 || len(a.freeList) == 0 {
+		return
+	}
+
+	remap := make([]uint32, len(a.objects))
+	write := 0
+	for read, obj := range a.objects {
+		if _, free := a.freeList[uint32(read)]; free {
+			continue
+		}
+		remap[read] = uint32(write + 1)
+		a.objects[write] = obj
+		write++
+	}
+
+	for handle, pointer := range a.handleLayer {
+		if int(pointer) >= len(remap) || remap[pointer] == 0 {
+			delete(a.handleLayer, handle)
+			continue
+		}
+		a.handleLayer[handle] = remap[pointer] - 1
+	}
+
+	for str, pointer := range a.strings {
+		if int(pointer) >= len(remap) || remap[pointer] == 0 {
+			delete(a.strings, str)
+			continue
+		}
+		a.strings[str] = remap[pointer] - 1
+	}
+
+	clear(a.objects[write:])
+	a.objects = a.objects[:write]
+	a.freeList = make(map[uint32]struct{})
+}
+
 func pushGrey(o object.Object) {
 	a.greyStack = append(a.greyStack, o)
 }
@@ -255,49 +408,6 @@ func popGrey() object.Object {
 	a.greyStack = a.greyStack[:len(a.greyStack)-1]
 
 	return o
-}
-
-func defragment() {
-	arr := make([]object.Object, 0, len(a.objects)-len(a.freeList))
-	indexMap := map[uint32]uint32{}
-
-	for current := range a.objects {
-		if _, found := a.freeList[uint32(current)]; !found {
-			arr = append(arr, a.objects[current])
-			indexMap[uint32(current)] = uint32(len(arr) - 1)
-		}
-		current++
-	}
-
-	deleteMap := map[uint32]struct{}{}
-	deleteStrings := map[string]struct{}{}
-
-	for k, v := range a.handleLayer {
-		if new, found := indexMap[v]; found {
-			a.handleLayer[k] = new
-		} else {
-			deleteMap[k] = struct{}{}
-		}
-	}
-
-	for k, v := range a.strings {
-		if new, found := indexMap[v]; found {
-			a.strings[k] = new
-		} else {
-			deleteStrings[k] = struct{}{}
-		}
-	}
-
-	for k := range deleteMap {
-		delete(a.handleLayer, k)
-	}
-
-	for k := range deleteStrings {
-		delete(a.strings, k)
-	}
-
-	a.freeList = map[uint32]struct{}{}
-	a.objects = arr
 }
 
 func RequestGC(stackValues []value.Value) {
@@ -322,4 +432,25 @@ func StoreAsyncFunctionStack(ptr uintptr, v []value.Value) {
 }
 func ClearAsyncFunctionStack(ptr uintptr) {
 	delete(a.asyncWorkKeepAlive, ptr)
+}
+
+func StoreAsyncFunctionScope(ptr uintptr, scope int) {
+	a.asyncScopeKeepAlive[ptr] = scope
+}
+func ClearAsyncFunctionScope(ptr uintptr) {
+	delete(a.asyncScopeKeepAlive, ptr)
+}
+
+func NewCallbackRoot() uintptr {
+	key := a.nextCallbackRoot
+	a.nextCallbackRoot++
+	return key
+}
+
+func StoreCallbackRoot(key uintptr, values ...value.Value) {
+	a.callbackRoots[key] = values
+}
+
+func ClearCallbackRoot(key uintptr) {
+	delete(a.callbackRoots, key)
 }

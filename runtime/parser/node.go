@@ -127,8 +127,9 @@ const (
 )
 
 type TemplateNodeValue struct {
-	Raw    string
-	Cooked string
+	Raw     string
+	Cooked  string
+	Invalid bool
 }
 
 func (nt *NodeType) MarshalJSON() ([]byte, error) {

@@ -10,9 +10,10 @@ type Iterable interface {
 }
 
 type Iterator struct {
-	marked  bool
-	current int
-	values  []value.Value
+	marked   bool
+	current  int
+	values   []value.Value
+	provider func() []value.Value
 }
 
 func NewValueIterator(obj Iterable) *Iterator {
@@ -23,7 +24,14 @@ func NewKeyIterator(obj Iterable) *Iterator {
 	return &Iterator{values: obj.Keys(), current: -1}
 }
 
+func NewLiveIterator(provider func() []value.Value) *Iterator {
+	return &Iterator{current: -1, provider: provider}
+}
+
 func (i *Iterator) Next() bool {
+	if i.provider != nil {
+		i.values = i.provider()
+	}
 	if i.current >= len(i.values)-1 {
 		return true
 	}

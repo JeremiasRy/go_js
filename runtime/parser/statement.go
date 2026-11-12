@@ -369,6 +369,25 @@ func (p *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, error
 			return nil, err
 		}
 
+		if p.shouldParseExportStatement() {
+			decl, err := p.parseExportDeclaration(node)
+			if err != nil {
+				return nil, err
+			}
+			node.Declaration = decl
+		} else {
+			expression, err := p.parseMaybeAssign("", nil, nil)
+			if err != nil {
+				return nil, err
+			}
+			node.Expression = expression
+			err = p.semicolon()
+			if err != nil {
+				return nil, err
+			}
+		}
+		node.Specifiers = []*Node{}
+		node.Source = nil
 		return p.finishNode(node, NODE_EXPORT_DEFAULT_DECLARATION), nil
 	}
 
@@ -413,9 +432,6 @@ func (p *Parser) parseExport(node *Node, exports map[string]*Node) (*Node, error
 		node.Specifiers = specifiers
 
 		if p.eatContextual("from") {
-			if p.Type.identifier == TOKEN_STRING {
-				return nil, p.unexpected("Can't have STRING as current type", nil)
-			}
 			exprAtom, err := p.parseExprAtom(nil, "", false)
 
 			if err != nil {
@@ -1044,7 +1060,7 @@ func (p *Parser) parseVarStatement(node *Node, kind Kind, allowMissingInitialize
 func (p *Parser) parseTryStatement(node *Node) (*Node, error) {
 	p.next(false)
 
-	blok, err := p.parseBlock(false, nil, false)
+	blok, err := p.parseBlock(true, nil, false)
 	if err != nil {
 		return nil, err
 	}
@@ -1076,7 +1092,7 @@ func (p *Parser) parseTryStatement(node *Node) (*Node, error) {
 		node.Handler = p.finishNode(clause, NODE_CATCH_CLAUSE)
 	}
 	if p.eat(TOKEN_FINALLY) {
-		block, err := p.parseBlock(false, nil, false)
+		block, err := p.parseBlock(true, nil, false)
 		if err != nil {
 			return nil, err
 		}
@@ -1180,6 +1196,7 @@ func (p *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 			node.Cases = append(node.Cases, cur)
 
 			cur.Consequent = &Node{}
+			cur.ConsequentSlice = []*Node{}
 			p.next(false)
 			if isCase {
 				test, err := p.parseExpression("", nil)
@@ -1209,6 +1226,7 @@ func (p *Parser) parseSwitchStatement(node *Node) (*Node, error) {
 			}
 
 			cur.Consequent = stmt
+			cur.ConsequentSlice = append(cur.ConsequentSlice, stmt)
 		}
 		sawDefault = false
 	}
@@ -1619,6 +1637,7 @@ func (p *Parser) parseVar(node *Node, isFor bool, kind Kind, allowMissingInitial
 		} else {
 			decl.Initializer = nil
 		}
+		decl.Kind = kind
 		node.Declarations = append(node.Declarations, p.finishNode(decl, NODE_VARIABLE_DECLARATOR))
 		if !p.eat(TOKEN_COMMA) {
 			break
@@ -1785,7 +1804,12 @@ func (p *Parser) parseBlock(createNewLexicalScope bool, node *Node, exitStrict b
 
 func (p *Parser) adaptDirectivePrologue(statements []*Node) {
 	for i := 0; i < len(statements) && p.isDirectiveCandidate(statements[i]); {
-		statements[i].Directive = statements[i].Expression.Raw[1 : len(statements[i].Expression.Raw)-2]
+		switch value := statements[i].Expression.Value.(type) {
+		case string:
+			statements[i].Directive = value
+		case []byte:
+			statements[i].Directive = string(value)
+		}
 		i++
 	}
 }
@@ -1794,8 +1818,10 @@ func (p *Parser) isDirectiveCandidate(statement *Node) bool {
 	literalAndString := false
 
 	if statement.Expression != nil && statement.Expression.Type == NODE_LITERAL {
-		_, ok := statement.Expression.Value.(string)
-		literalAndString = ok
+		switch statement.Expression.Value.(type) {
+		case string, []byte:
+			literalAndString = true
+		}
 	}
 	return p.getEcmaVersion() >= 5 && statement.Type == NODE_EXPRESSION_STATEMENT && literalAndString && /* Reject parenthesized strings.*/ (p.input[statement.Start] == '"' || p.input[statement.Start] == '\'')
 }
@@ -2067,20 +2093,17 @@ func (p *Parser) parseClassElement(constructorAllowsSuper bool) (*Node, error) {
 	}
 
 	if len(keyName) == 0 && !isAsync && !isGenerator {
-		lastValue := p.Value
-		if p.eatContextual("get") || p.eatContextual("set") {
+		if p.eatContextual("get") {
 			if p.isClassElementNameStart() {
-				if k, ok := lastValue.(Kind); ok {
-					kind = k
-				} else {
-					panic("We were expecting p.Value to be kind, it wasn't")
-				}
+				kind = KIND_PROPERTY_GET
 			} else {
-				if str, ok := lastValue.(string); ok {
-					keyName = str
-				} else {
-					panic("We were expecting p.Value to be string, it wasn't")
-				}
+				keyName = "get"
+			}
+		} else if p.eatContextual("set") {
+			if p.isClassElementNameStart() {
+				kind = KIND_PROPERTY_SET
+			} else {
+				keyName = "set"
 			}
 		}
 	}
@@ -2274,12 +2297,6 @@ func (p *Parser) parseClassId(node *Node, isStatement bool) error {
 			if err != nil {
 				return err
 			}
-		} else {
-			if isStatement {
-				return p.unexpected("cant be in a statement", nil)
-			}
-
-			node.Identifier = nil
 		}
 		return nil
 	}

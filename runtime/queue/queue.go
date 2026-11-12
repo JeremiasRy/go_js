@@ -18,6 +18,7 @@ type Queue struct {
 	microTask *list.List
 	task      *list.List
 
+	mu sync.Mutex
 	wg *sync.WaitGroup
 }
 
@@ -38,6 +39,7 @@ func Init(wg *sync.WaitGroup) {
 
 func Enqueue(callback object.Callback, priority TaskPriority, sendMessage bool) {
 	q.wg.Add(1)
+	q.mu.Lock()
 	var l *list.List
 
 	switch priority {
@@ -48,6 +50,7 @@ func Enqueue(callback object.Callback, priority TaskPriority, sendMessage bool) 
 	}
 
 	l.PushBack(callback)
+	q.mu.Unlock()
 
 	if sendMessage {
 		QueueC <- struct{}{}
@@ -55,6 +58,7 @@ func Enqueue(callback object.Callback, priority TaskPriority, sendMessage bool) 
 }
 
 func Dequeue() (object.Callback, error) {
+	q.mu.Lock()
 	var l *list.List
 
 	if q.microTask.Len() > 0 {
@@ -64,11 +68,13 @@ func Dequeue() (object.Callback, error) {
 	}
 
 	if l == nil {
+		q.mu.Unlock()
 		return object.Callback{}, errors.New("no tasks to dequeue")
 	}
 
 	front := l.Front()
 	l.Remove(front)
+	q.mu.Unlock()
 	q.wg.Done()
 	return front.Value.(object.Callback), nil
 }

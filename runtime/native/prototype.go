@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	PROTOTYPE_PROPERTY_STRING string = "prototype"
+	PROTOTYPE_PROPERTY_STRING string = "\x00proto"
 	OBJECT_CONSTRUCTOR_NAME   string = "Object"
 	ARRAY_CONSTRUCTOR_NAME    string = "Array"
 	STRING_CONSTRUCTOR_NAME   string = "String"
@@ -71,6 +71,7 @@ func initObjectPrototype() {
 
 	p.SetMember(KEY_TOSTRING, handle)
 	p.SetMember(KEY_HASOWNPROPERTY, value.EncodeHandle(heap.Allocate(NewHasOwnProperty())))
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("valueOf"))), value.EncodeHandle(heap.Allocate(NewObjectValueOf())))
 
 	PROTOTYPE_OBJECT = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -100,9 +101,11 @@ func initArrayPrototype() {
 	shift := value.EncodeHandle(heap.Allocate(NewArrayShift()))
 	reverse := value.EncodeHandle(heap.Allocate(NewArrayReverse()))
 	fill := value.EncodeHandle(heap.Allocate(NewArrayFill()))
+	toString := value.EncodeHandle(heap.Allocate(NewArrayToString()))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
+	p.SetMember(KEY_TOSTRING, toString)
 	p.SetMember(KEY_FILTER, filter)
 	p.SetMember(KEY_PUSH, push)
 	p.SetMember(KEY_FOREACH, forEach)
@@ -112,6 +115,50 @@ func initArrayPrototype() {
 	p.SetMember(KEY_SHIFT, shift)
 	p.SetMember(KEY_REVERSE, reverse)
 	p.SetMember(KEY_FILL, fill)
+
+	arrayMethods := []struct {
+		name string
+		kind ArrayMethodKind
+	}{
+		{"includes", ARRAY_INCLUDES},
+		{"indexOf", ARRAY_INDEX_OF},
+		{"lastIndexOf", ARRAY_LAST_INDEX_OF},
+		{"at", ARRAY_AT},
+		{"pop", ARRAY_POP},
+		{"unshift", ARRAY_UNSHIFT},
+		{"slice", ARRAY_SLICE},
+		{"splice", ARRAY_SPLICE},
+		{"concat", ARRAY_CONCAT},
+		{"flat", ARRAY_FLAT},
+		{"toSorted", ARRAY_TO_SORTED},
+		{"toReversed", ARRAY_TO_REVERSED},
+		{"toSpliced", ARRAY_TO_SPLICED},
+		{"with", ARRAY_WITH},
+	}
+	for _, method := range arrayMethods {
+		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
+		p.SetMember(key, value.EncodeHandle(heap.Allocate(NewArrayMethod(method.name, method.kind))))
+		heap.PushToRoots(key)
+	}
+
+	callbackMethods := []struct {
+		name string
+		kind ArrayCallbackKind
+	}{
+		{"some", ARRAY_SOME},
+		{"every", ARRAY_EVERY},
+		{"find", ARRAY_FIND},
+		{"findIndex", ARRAY_FIND_INDEX},
+		{"findLast", ARRAY_FIND_LAST_CB},
+		{"findLastIndex", ARRAY_FIND_LAST_INDEX_CB},
+		{"sort", ARRAY_SORT},
+		{"flatMap", ARRAY_FLAT_MAP},
+	}
+	for _, method := range callbackMethods {
+		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
+		p.SetMember(key, value.EncodeHandle(heap.Allocate(NewArrayCallbackMethod(method.name, method.kind))))
+		heap.PushToRoots(key)
+	}
 	p.SetMember(KEY_LENGTH, value.ValueFromFloat64(0))
 
 	PROTOTYPE_ARRAY = value.EncodeHandle(heap.Allocate(p))
@@ -146,6 +193,10 @@ func initStringPrototype() {
 	replace := value.EncodeHandle(heap.Allocate(NewStringReplace()))
 	split := value.EncodeHandle(heap.Allocate(NewStringSplit()))
 	startsWith := value.EncodeHandle(heap.Allocate(NewStringStartsWith()))
+	charAt := value.EncodeHandle(heap.Allocate(NewStringCharAt()))
+	charCodeAt := value.EncodeHandle(heap.Allocate(NewStringCharCodeAt()))
+	charAtKey := value.EncodeHandle(heap.Allocate(NewLightString("charAt")))
+	charCodeAtKey := value.EncodeHandle(heap.Allocate(NewLightString("charCodeAt")))
 
 	p.SetMember(KEY_PROTO, PROTOTYPE_OBJECT)
 
@@ -154,6 +205,9 @@ func initStringPrototype() {
 	p.SetMember(KEY_REPLACE, replace)
 	p.SetMember(KEY_SPLIT, split)
 	p.SetMember(KEY_STARTS_WITH, startsWith)
+	p.SetMember(charAtKey, charAt)
+	p.SetMember(charCodeAtKey, charCodeAt)
+	AddStringMethods(p)
 
 	PROTOTYPE_STRING = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -163,6 +217,8 @@ func initStringPrototype() {
 		KEY_REPLACE,
 		KEY_SPLIT,
 		KEY_STARTS_WITH,
+		charAtKey,
+		charCodeAtKey,
 	)
 }
 
@@ -211,11 +267,21 @@ func initMapPrototype() {
 	mapGet := value.EncodeHandle(heap.Allocate(NewMapGet()))
 	mapSet := value.EncodeHandle(heap.Allocate(NewMapSet()))
 	mapKeys := value.EncodeHandle(heap.Allocate(NewMapKeys()))
+	mapValues := value.EncodeHandle(heap.Allocate(NewMapValues()))
+	mapEntries := value.EncodeHandle(heap.Allocate(NewMapEntries()))
+	mapDelete := value.EncodeHandle(heap.Allocate(NewMapDelete()))
+	mapClear := value.EncodeHandle(heap.Allocate(NewMapClear()))
+	mapForEach := value.EncodeHandle(heap.Allocate(NewMapForEach()))
 
 	p.SetMember(KEY_HAS, mapHas)
 	p.SetMember(KEY_SET, mapSet)
 	p.SetMember(KEY_GET, mapGet)
 	p.SetMember(KEY_KEYS, mapKeys)
+	p.SetMember(KEY_VALUES, mapValues)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("entries"))), mapEntries)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("delete"))), mapDelete)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("clear"))), mapClear)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("forEach"))), mapForEach)
 
 	PROTOTYPE_MAP = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
@@ -224,6 +290,11 @@ func initMapPrototype() {
 		KEY_SET,
 		KEY_GET,
 		KEY_KEYS,
+		KEY_VALUES,
+		mapEntries,
+		mapDelete,
+		mapClear,
+		mapForEach,
 		KEY_SIZE,
 	)
 }
@@ -240,15 +311,34 @@ func initSetPrototype() {
 
 	setHas := value.EncodeHandle(heap.Allocate(NewSetHas()))
 	setAdd := value.EncodeHandle(heap.Allocate(NewSetAdd()))
+	setDelete := value.EncodeHandle(heap.Allocate(NewSetDelete()))
+	setClear := value.EncodeHandle(heap.Allocate(NewSetClear()))
+	setKeys := value.EncodeHandle(heap.Allocate(NewSetKeys()))
+	setValues := value.EncodeHandle(heap.Allocate(NewSetValues()))
+	setEntries := value.EncodeHandle(heap.Allocate(NewSetEntries()))
+	setForEach := value.EncodeHandle(heap.Allocate(NewSetForEach()))
 
 	p.SetMember(KEY_HAS, setHas)
 	p.SetMember(KEY_ADD, setAdd)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("delete"))), setDelete)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("clear"))), setClear)
+	p.SetMember(KEY_KEYS, setKeys)
+	p.SetMember(KEY_VALUES, setValues)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("entries"))), setEntries)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("forEach"))), setForEach)
 
 	PROTOTYPE_SET = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
 		PROTOTYPE_SET,
 		KEY_HAS,
 		KEY_ADD,
+		setDelete,
+		setClear,
+		setKeys,
+		setValues,
+		setEntries,
+		setForEach,
+		KEY_SIZE,
 	)
 }
 
@@ -285,12 +375,18 @@ func initPromisePrototype() {
 	p.Members = map[string]ObjectValueEntry{}
 
 	then := value.EncodeHandle(heap.Allocate(NewThen()))
+	catch := value.EncodeHandle(heap.Allocate(NewPromiseCatch()))
+	finally := value.EncodeHandle(heap.Allocate(NewPromiseFinally()))
 
 	p.SetMember(KEY_THEN, then)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("catch"))), catch)
+	p.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("finally"))), finally)
 
 	PROTOTYPE_PROMISE = value.EncodeHandle(heap.Allocate(p))
 	heap.PushToRoots(
 		PROTOTYPE_PROMISE,
 		KEY_THEN,
+		catch,
+		finally,
 	)
 }

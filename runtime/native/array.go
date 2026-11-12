@@ -5,6 +5,7 @@ import (
 	"go_js/object"
 	"go_js/value"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -39,12 +40,78 @@ func (oa *ObjArr) GetReferencingValues() []value.Value {
 			arr = append(arr, v)
 		}
 	}
+	arr = append(arr, oa.ObjObject.GetReferencingValues()...)
 
 	return arr
 }
 
 func (oa *ObjArr) GetElementAt(i int) value.Value {
+	if i < 0 || i >= len(oa.items) {
+		return value.UNDEFINED
+	}
 	return oa.items[i]
+}
+
+func (oa *ObjArr) Length() int {
+	return len(oa.items)
+}
+
+func (oa *ObjArr) SetLength(length int) {
+	if length < 0 {
+		length = 0
+	}
+	if length <= len(oa.items) {
+		for i := len(oa.items) - 1; i >= length; i-- {
+			key := strconv.Itoa(i)
+			if entry, found := oa.Members[key]; found && !entry.Configurable() {
+				oa.items = oa.items[:i+1]
+				oa.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(i+1)))
+				return
+			}
+			delete(oa.Members, key)
+		}
+		oa.items = oa.items[:length]
+	} else {
+		for len(oa.items) < length {
+			oa.items = append(oa.items, value.EMPTY_ARRAY_ITEM)
+		}
+	}
+	oa.SetMember(KEY_LENGTH, value.ValueFromFloat64(float64(length)))
+}
+
+func (oa *ObjArr) DeleteIndex(i int) bool {
+	if i < 0 || i >= len(oa.items) {
+		return true
+	}
+	oa.items[i] = value.EMPTY_ARRAY_ITEM
+	return true
+}
+
+func (oa *ObjArr) HasIndex(i int) bool {
+	return i >= 0 && i < len(oa.items) && oa.items[i] != value.EMPTY_ARRAY_ITEM
+}
+
+func (oa *ObjArr) HasOwn(prop value.Value) bool {
+	if prop.IsNumber() {
+		i := int(prop.AsNumber())
+		if float64(i) == prop.AsNumber() {
+			return oa.HasIndex(i)
+		}
+	}
+	if key, ok := objectKeyString(prop); ok && key == "length" {
+		return true
+	}
+	return oa.ObjObject.HasOwn(prop)
+}
+
+func (oa *ObjArr) Delete(prop value.Value) bool {
+	if prop.IsNumber() {
+		i := int(prop.AsNumber())
+		if float64(i) == prop.AsNumber() {
+			return oa.DeleteIndex(i)
+		}
+	}
+	return oa.ObjObject.Delete(prop)
 }
 
 func (oa *ObjArr) SetElementAt(i int, v value.Value) {
@@ -79,8 +146,20 @@ func (oa *ObjArr) String() string {
 	return "Array"
 }
 
-func (oa *ObjArr) Values() []value.Value {
+func (oa *ObjArr) RawValues() []value.Value {
 	return oa.items
+}
+
+func (oa *ObjArr) Values() []value.Value {
+	values := make([]value.Value, len(oa.items))
+	for i, item := range oa.items {
+		if item == value.EMPTY_ARRAY_ITEM {
+			values[i] = value.UNDEFINED
+		} else {
+			values[i] = item
+		}
+	}
+	return values
 }
 
 func (oa *ObjArr) Keys() []value.Value {
@@ -90,6 +169,24 @@ func (oa *ObjArr) Keys() []value.Value {
 		arr = append(arr, value.ValueFromFloat64(float64(i)))
 	}
 	return arr
+}
+
+type ArrayToString struct {
+	ObjNativeFn
+}
+
+func NewArrayToString() *ArrayToString {
+	t := &ArrayToString{}
+	t.name = "toString"
+	return t
+}
+
+func (*ArrayToString) ToString(arr *ObjArr) value.Value {
+	parts := make([]string, len(arr.items))
+	for i, item := range arr.items {
+		parts[i] = arrayElementString(item)
+	}
+	return value.EncodeHandle(heap.Allocate(NewLightString(strings.Join(parts, ","))))
 }
 
 type ArrayForEach struct {
@@ -160,11 +257,25 @@ func NewArrayJoin() *ArrayJoin {
 	return j
 }
 
+func arrayElementString(item value.Value) string {
+	if item == value.EMPTY_ARRAY_ITEM || item == value.UNDEFINED || item == value.NULL {
+		return ""
+	}
+	if item.IsObject() {
+		if obj, err := heap.GetObject(item.GetHandle()); err == nil {
+			if arr, ok := obj.(*ObjArr); ok {
+				return String((&ArrayJoin{}).Join(arr, value.UNDEFINED))
+			}
+		}
+	}
+	return String(item)
+}
+
 func (*ArrayJoin) Join(arr *ObjArr, separator value.Value) value.Value {
 	s := ","
 	i := make([]string, len(arr.items))
 	for idx, item := range arr.items {
-		i[idx] = String(item)
+		i[idx] = arrayElementString(item)
 	}
 
 	if separator != value.UNDEFINED {

@@ -7,8 +7,19 @@ import (
 )
 
 type PauseState struct {
-	Stack []value.Value
-	Ip    int
+	Stack      []value.Value
+	Ip         int
+	LocalStart int
+	HeapScope  int
+	OwnScope   bool
+	Exceptions []AsyncException
+}
+
+type AsyncException struct {
+	JumpTo    int
+	StackTop  int
+	Frame     int
+	IsFinally bool
 }
 
 type ObjAsyncFunction struct {
@@ -18,6 +29,9 @@ type ObjAsyncFunction struct {
 	Promise                 *ObjPromise
 	Awaiting                *ObjPromise
 	ReturnArgumentIsPromise bool
+	RejectValue             value.Value
+	HasRejection            bool
+	CallerStack             []value.Value
 }
 
 func NewAsyncFunction(name string, arity int, chunk *value.ValueChunk) *ObjAsyncFunction {
@@ -44,6 +58,18 @@ func (*ObjAsyncFunction) Type() object.ObjType {
 	return object.OBJ_ASYNC_FUNCTION
 }
 
+func (asyncFn *ObjAsyncFunction) GetReferencingValues() []value.Value {
+	arr := asyncFn.ObjFunction.GetReferencingValues()
+	if asyncFn.State != nil {
+		arr = append(arr, asyncFn.State.Stack...)
+	}
+	if asyncFn.RejectValue.IsObject() {
+		arr = append(arr, asyncFn.RejectValue)
+	}
+	arr = append(arr, asyncFn.CallerStack...)
+	return arr
+}
+
 func (asyncFn *ObjAsyncFunction) String() string {
 	return "<async fn " + asyncFn.Name + ">"
 }
@@ -58,10 +84,14 @@ func (asyncFn *ObjAsyncFunction) Resolve(v value.Value) {
 	}
 }
 
-func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int) {
+func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int, localStart int, heapScope int, ownScope bool, exceptions []AsyncException) {
 	asyncFn.State = &PauseState{
-		Stack: s,
-		Ip:    ip,
+		Stack:      s,
+		Ip:         ip,
+		LocalStart: localStart,
+		HeapScope:  heapScope,
+		OwnScope:   ownScope,
+		Exceptions: exceptions,
 	}
 }
 
@@ -72,11 +102,19 @@ func (asyncFn *ObjAsyncFunction) Await(p *ObjPromise) {
 
 func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	asyncFn.Awaiting.Listen()
+	if asyncFn.State != nil && len(asyncFn.State.Stack) > 0 {
+		asyncFn.State.Stack[len(asyncFn.State.Stack)-1] = asyncFn.Awaiting.Value
+	}
+	if asyncFn.Awaiting.Status == REJECTED {
+		asyncFn.RejectValue = asyncFn.Awaiting.Value
+		asyncFn.HasRejection = true
+	}
 	message := &object.JobChannelMessage{
 		Job: nil,
 		Callback: object.Callback{
-			Fn:      asyncFn,
-			ThisCtx: value.UNDEFINED,
+			Fn:        asyncFn,
+			ThisCtx:   value.UNDEFINED,
+			MicroTask: true,
 		},
 		Done: done,
 	}

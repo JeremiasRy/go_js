@@ -13,13 +13,26 @@ func (Ctx) Context() {}
 
 type ObjFunction struct {
 	Ctx
-	marked    bool
-	Name      string
-	Chunk     *value.ValueChunk
-	Arity     int
-	HeapScope int
-	rest      bool
-	arguments bool
+	marked               bool
+	Name                 string
+	Chunk                *value.ValueChunk
+	Arity                int
+	Length               int
+	HeapScope            int
+	Prototype            value.Value
+	Strict               bool
+	IsArrow              bool
+	IsMethod             bool
+	LexicalThis          value.Value
+	LexicalNewTarget     value.Value
+	HomeObject           value.Value
+	IsDerivedConstructor bool
+	rest                 bool
+	arguments            bool
+	ArgumentsHeapSlot    int
+	Cloned               bool
+	DefaultParams        []bool
+	Props                map[string]value.Value
 }
 
 const NOT_IN_HEAP_SCOPE int = -1
@@ -29,10 +42,13 @@ func NewFunction(name string, arity int, chunk *value.ValueChunk) *ObjFunction {
 		chunk = value.NewChunk(name)
 	}
 	return &ObjFunction{
-		Name:      name,
-		Chunk:     chunk,
-		Arity:     arity,
-		HeapScope: NOT_IN_HEAP_SCOPE,
+		Name:              name,
+		Chunk:             chunk,
+		Arity:             arity,
+		Length:            arity,
+		HeapScope:         NOT_IN_HEAP_SCOPE,
+		Prototype:         value.UNDEFINED,
+		ArgumentsHeapSlot: -1,
 	}
 }
 
@@ -54,6 +70,23 @@ func (fn *ObjFunction) GetReferencingValues() []value.Value {
 		if v.IsObject() {
 			arr = append(arr, v)
 		}
+	}
+	for _, v := range fn.Props {
+		if v.IsObject() {
+			arr = append(arr, v)
+		}
+	}
+	if fn.Prototype.IsObject() {
+		arr = append(arr, fn.Prototype)
+	}
+	if fn.LexicalThis.IsObject() {
+		arr = append(arr, fn.LexicalThis)
+	}
+	if fn.LexicalNewTarget.IsObject() {
+		arr = append(arr, fn.LexicalNewTarget)
+	}
+	if fn.HomeObject.IsObject() {
+		arr = append(arr, fn.HomeObject)
 	}
 	return arr
 }

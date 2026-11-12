@@ -30,11 +30,20 @@ const (
 	OBJ_METHOD_HANDLE
 	OBJ_CLASS
 	OBJ_CLASS_METHOD
+	OBJ_DATE
 	OBJ_DATE_CONSTRUCTOR
+	OBJ_REGEXP
+	OBJ_BIGINT
+	OBJ_ARRAY_BUFFER
+	OBJ_TYPED_ARRAY
+	OBJ_DATA_VIEW
 	OBJ_MAP_CONSTRUCTOR
 	OBJ_MAP
 	OBJ_SET
 	OBJ_SET_CONSTRUCTOR
+	OBJ_SYMBOL
+	OBJ_SYMBOL_CONSTRUCTOR
+	OBJ_PROXY
 )
 
 const MAIN_FN_NAME = "PROGRAM_MAIN"
@@ -48,9 +57,12 @@ func IsValueObject(v value.Value) (bool, uint32) {
 }
 
 type Callback struct {
-	Fn      Callable
-	ThisCtx value.Value
-	Stack   []value.Value
+	Fn        Callable
+	ThisCtx   value.Value
+	Stack     []value.Value
+	Native    func()
+	RootKey   uintptr
+	MicroTask bool
 }
 
 type JobChannelMessage struct {
@@ -76,6 +88,10 @@ type Hashable interface {
 	GetMember(k value.Value) value.Value
 	SetMember(k, v value.Value)
 	HasOwn(prop value.Value) bool
+}
+
+type Deletable interface {
+	Delete(k value.Value) bool
 }
 
 type Callable interface {

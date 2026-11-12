@@ -1,5 +1,7 @@
 github.com/can1357/gengo v0.2.0 h1:ekg3RWWDKaUCmb2Ib+gAYqT0v6v3xSwZreiI133+DMc=
 github.com/can1357/gengo v0.2.0/go.mod h1:XX6FcockCfPXg1ixiUQiU2Nm7gowrIm3YFO2VANLsMA=
+github.com/dlclark/regexp2 v1.11.5 h1:Q/sSnsKerHeCkc/jSTNq1oCm7KiVgUMZRDUoRu0JQZQ=
+github.com/dlclark/regexp2 v1.11.5/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
 github.com/ebitengine/purego v0.11.0 h1:jhp/D+Nyv7UUW8HAcmcjt2N2rYrYi9m3SL21k0Ua/NI=
 github.com/ebitengine/purego v0.11.0/go.mod h1:DCHPP08djqhNSoTfImcnHYQRZmd0qhakvrozqaEYhGQ=
 github.com/zyantific/zydis-go v1.2.1 h1:HJYpJEzJWY6I08bB2Y2RU5kv1wGjv5VsbkZAe2sJEUM=

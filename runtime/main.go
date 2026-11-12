@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"go_js/compiler"
+	"go_js/diagnostic"
 	"go_js/eventloop"
 	"go_js/flags"
 	"go_js/heap"
@@ -47,8 +48,13 @@ func main() {
 
 	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug mode")
 	flag.BoolVar(&flags.StructuredOutput, "structured", false, "Enable structured output")
+	flag.BoolVar(&flags.JSONErrors, "json-errors", false, "Report error classes and phases as JSON on stderr")
+	sourceType := flag.String("source-type", "module", "JavaScript source goal: script or module")
 
 	flag.Parse()
+	if *sourceType != "script" && *sourceType != "module" {
+		diagnostic.Fatal("configuration", "Error", fmt.Errorf("invalid source type %q", *sourceType))
+	}
 
 	args := flag.Args()
 
@@ -66,16 +72,19 @@ func main() {
 
 	virtualMachine.InitFileRoot(rootFileLocation)
 	compiler.InitRootScriptLocation(rootFileLocation)
+	compiler.SetEntryFile(input)
+	virtualMachine.SetScriptMode(*sourceType == "script")
+	compiler.SetModule(*sourceType == "module")
 
 	if err != nil {
 		println("Can't read file: ", os.Args[1])
 		os.Exit(1)
 	}
 
-	ast, err := parser.GetAst(b, &parser.Options{SourceType: "module"}, 0)
+	ast, err := parser.GetAst(b, &parser.Options{SourceType: *sourceType}, 0)
 
 	if err != nil {
-		log.Fatalf("Failed to parse javascript, %e", err)
+		diagnostic.Fatal("parse", "SyntaxError", err)
 	}
 
 	if flags.Debug {
@@ -86,11 +95,14 @@ func main() {
 	native.Init()
 
 	main, err := compiler.Compile(ast)
-	heap.InitGC(main.ValueChunk().Constants)
 
 	if err != nil {
-		log.Fatalf("Failed to parse javascript, %e", err)
+		if _, ok := err.(*compiler.ModuleLinkError); ok {
+			diagnostic.Fatal("link", "SyntaxError", err)
+		}
+		diagnostic.Fatal("compile", "Error", err)
 	}
+	heap.InitGC(main.ValueChunk().Constants)
 
 	var wg sync.WaitGroup
 

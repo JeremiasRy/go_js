@@ -1,0 +1,24 @@
+{
+    "timeoutMs": 5000,
+    "sourceGoals": {
+        "import-statement.js": ["module"],
+        "global-environment.js": ["script", "module"],
+        "strict-mode.js": ["script", "module"],
+        "var-global-bindings.js": ["script", "module"],
+        "module-import-forms.js": ["module"],
+        "module-live-bindings.js": ["module"],
+        "module-cycles.js": ["module"],
+        "module-evaluation-once.js": ["module"],
+        "module-dynamic-import.js": ["module"],
+        "module-top-level-await.js": ["module"]
+    },
+    "negative": [
+        { "file": "negative-scripts/duplicate-lexical-binding.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/const-without-initializer.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/invalid-assignment-target.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
+        { "file": "negative-scripts/uncaught-type-error.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/module-missing-export.js", "sourceGoal": "module", "phase": "link", "error": "SyntaxError" },
+        { "file": "negative-scripts/module-import-assignment.js", "sourceGoal": "module", "phase": "runtime", "error": "TypeError" },
+        { "file": "negative-scripts/class-private-undeclared.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" }
+    ]
+}

@@ -746,13 +746,16 @@ func (p *Parser) parseTemplateElement(opts struct{ isTagged bool }) (*Node, erro
 		}
 
 		elem.Value = TemplateNodeValue{
-			Raw:    strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
-			Cooked: "",
+			Raw:     strings.ReplaceAll(string(p.Value.([]byte)), "\r\n", "\n"),
+			Cooked:  "",
+			Invalid: true,
 		}
 	} else {
+		cooked := string(p.Value.([]byte))
 		elem.Value = TemplateNodeValue{
-			Raw:    strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
-			Cooked: string(p.Value.([]byte)),
+			Raw:     strings.ReplaceAll(string(p.input[p.start:p.End]), "\r\n", "\n"),
+			Cooked:  cooked,
+			Invalid: strings.IndexByte(cooked, 0) >= 0,
 		}
 	}
 	p.next(false)
@@ -844,13 +847,19 @@ func (p *Parser) parseExprAtom(refDestructuringErrors *DestructuringErrors, forI
 		return id, nil
 
 	case TOKEN_REGEXP:
-		panic("TOKEN_REGEXP not implemented")
-		/*
-			value := p.Value
-			node = p.parseLiteral(value.value)
-			node.regex = RegExpState{Pattern: value.pattern, flags: value.flags}
-			return node
-		*/
+		{
+			value := p.Value.(struct {
+				pattern string
+				flags   string
+				value   *regexp.Regexp
+			})
+			literal, err := p.parseLiteral(value.value)
+			if err != nil {
+				return nil, err
+			}
+			literal.Regex = &Regex{Pattern: value.pattern, Flags: value.flags}
+			return literal, nil
+		}
 
 	case TOKEN_NUM, TOKEN_STRING:
 		{
@@ -1858,7 +1867,7 @@ func (p *Parser) parseGetterSetter(prop *Node) error {
 	prop.Kind = kind
 	paramCount := 0
 
-	if prop.Kind == KIND_PROPERTY_GET {
+	if prop.Kind == KIND_PROPERTY_SET {
 		paramCount = 1
 	}
 
