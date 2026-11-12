@@ -614,6 +614,44 @@ func (*ObjectGetOwnPropertyDescriptor) Descriptor(target, key value.Value) value
 	if err != nil {
 		return value.UNDEFINED
 	}
+	if fn, ok := obj.(*object.ObjFunction); ok {
+		keyString, ok := objectKeyString(key)
+		if !ok {
+			return value.UNDEFINED
+		}
+		desc := NewObjectHash()
+		switch keyString {
+		case "prototype":
+			if fn.IsArrow || fn.IsMethod {
+				return value.UNDEFINED
+			}
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), EnsureFunctionPrototype(fn, target))
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.TRUE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.FALSE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		case "name":
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), value.EncodeHandle(heap.Allocate(NewLightString(fn.Name))))
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.TRUE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		case "length":
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), value.ValueFromFloat64(float64(fn.Length)))
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.FALSE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.TRUE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		}
+		if prop, found := fn.Props[keyString]; found {
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("value"))), prop)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("writable"))), value.TRUE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("enumerable"))), value.TRUE)
+			desc.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("configurable"))), value.TRUE)
+			return value.EncodeHandle(heap.Allocate(desc))
+		}
+		return value.UNDEFINED
+	}
 	o, ok := objectAsObjObject(obj)
 	if !ok {
 		return value.UNDEFINED
@@ -693,7 +731,30 @@ func (*HasOwnProperty) HasOwn(obj value.Value, prop value.Value) bool {
 	if err != nil {
 		return false
 	}
-	return o.(object.Hashable).HasOwn(prop)
+	if fn, ok := o.(*object.ObjFunction); ok {
+		key, ok := objectKeyString(prop)
+		if !ok {
+			return false
+		}
+		switch key {
+		case "prototype":
+			if fn.IsArrow || fn.IsMethod {
+				return false
+			}
+			EnsureFunctionPrototype(fn, obj)
+			return true
+		case "name", "length":
+			return true
+		}
+		if _, found := fn.Props[key]; found {
+			return true
+		}
+		return false
+	}
+	if hashable, ok := o.(object.Hashable); ok {
+		return hashable.HasOwn(prop)
+	}
+	return false
 }
 
 func (ts *ToString) ToString(obj object.Object) string {

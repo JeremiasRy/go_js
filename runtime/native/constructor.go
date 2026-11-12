@@ -2,10 +2,12 @@ package native
 
 import (
 	"fmt"
+	"go_js/eventloop"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
 	"math"
+	"sync/atomic"
 	"time"
 )
 
@@ -250,16 +252,24 @@ type SetTimeout struct {
 	time     int
 	callback object.Callback
 	rootKey  uintptr
+	cancel   *atomic.Bool
+	interval bool
 }
 
 func NewSetTimeout() *SetTimeout {
-	setTimeout := &SetTimeout{}
+	setTimeout := &SetTimeout{cancel: &atomic.Bool{}}
 	setTimeout.name = "setTimeout"
 
 	return setTimeout
 }
 
-func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
+func NewSetInterval() *SetTimeout {
+	interval := &SetTimeout{cancel: &atomic.Bool{}, interval: true}
+	interval.name = "setInterval"
+	return interval
+}
+
+func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value) {
 	st.time = ms
 	st.callback = object.Callback{
 		Fn:      fn,
@@ -267,11 +277,19 @@ func (st *SetTimeout) Set(ms int, fn *object.ObjFunction, this value.Value) {
 	}
 }
 
+func (st *SetTimeout) Cancel() {
+	st.cancel.Store(true)
+}
+
 func (st *SetTimeout) SetRootKey(key uintptr) {
 	st.rootKey = key
 }
 
 func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
+	if st.cancel.Load() {
+		done()
+		return
+	}
 	callback := st.callback
 	callback.RootKey = st.rootKey
 	message := &object.JobChannelMessage{
@@ -279,15 +297,31 @@ func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done 
 		Callback: callback,
 		Done:     done,
 	}
-	if st.time == 0 {
+	if st.time == 0 && !st.interval {
 		callbackChannel <- message
 		return
 	}
-	tick := time.NewTicker((time.Duration(st.time) * time.Millisecond))
-
+	delay := time.Duration(st.time) * time.Millisecond
+	if delay <= 0 {
+		delay = time.Millisecond
+	}
+	tick := time.NewTicker(delay)
+	defer tick.Stop()
 	for range tick.C {
+		if st.cancel.Load() {
+			done()
+			return
+		}
+		if st.interval {
+			message.Done = func() {
+				done()
+				if !st.cancel.Load() {
+					eventloop.Dispatch(st.Clone())
+				}
+			}
+		}
 		callbackChannel <- message
-		break
+		return
 	}
 }
 

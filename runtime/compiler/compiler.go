@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 
 	"go_js/chunk"
 	"go_js/flags"
@@ -558,18 +559,12 @@ func defineJSONObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
-func defineProxyConstructor(main *object.ObjFunction) {
-	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("Proxy"))))
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewProxyConstructor())))
-	main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+func defineProxyConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	defineObjectGlobal(main, symbolTable, "Proxy", native.NewProxyConstructor())
 }
 
-func defineRegExpConstructor(main *object.ObjFunction) {
-	main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("RegExp"))))
-	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewRegExpConstructor())))
-	main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+func defineRegExpConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
+	defineObjectGlobal(main, symbolTable, "RegExp", native.NewRegExpConstructor())
 }
 
 func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -588,10 +583,7 @@ func defineBinaryConstructors(main *object.ObjFunction, symbolTable *FunctionSco
 		{"BigUint64Array", native.NewTypedArrayConstructor("BigUint64Array", native.TYPED_BIGUINT64, 8)},
 	}
 	for _, ctor := range constructors {
-		main.ValueChunk().EmitByte(chunk.OP_PUSH_GLOBAL_OBJECT)
-		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(ctor.name))))
-		main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(ctor.obj)))
-		main.ValueChunk().EmitBytes(chunk.OP_SET_OBJECT_MEMBER, chunk.OP_POP)
+		defineObjectGlobal(main, symbolTable, ctor.name, ctor.obj)
 	}
 }
 
@@ -638,6 +630,34 @@ func defineMathObject(main *object.ObjFunction, symbolTable *FunctionScope) {
 	symbolTable.addVariable(native.MATH_OBJECT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(handle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineObjectGlobal(main *object.ObjFunction, symbolTable *FunctionScope, name string, obj object.Object) {
+	symbolTable.addVariable(name, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(obj)))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineGlobalFunctions(main *object.ObjFunction, symbolTable *FunctionScope) {
+	for _, item := range []struct {
+		name string
+		kind native.GlobalFunctionKind
+	}{
+		{"isNaN", native.GLOBAL_IS_NAN},
+		{"isFinite", native.GLOBAL_IS_FINITE},
+		{"encodeURIComponent", native.GLOBAL_ENCODE_URI_COMPONENT},
+		{"decodeURIComponent", native.GLOBAL_DECODE_URI_COMPONENT},
+	} {
+		defineObjectGlobal(main, symbolTable, item.name, native.NewGlobalFunction(item.name, item.kind))
+	}
+	defineObjectGlobal(main, symbolTable, "WeakMap", native.NewWeakMapConstructor())
+	defineObjectGlobal(main, symbolTable, "WeakSet", native.NewWeakSetConstructor())
+	defineObjectGlobal(main, symbolTable, "Intl", native.NewIntlObject())
+	defineObjectGlobal(main, symbolTable, "URL", native.NewURLConstructor())
+	defineObjectGlobal(main, symbolTable, "Function", native.NewFunctionConstructor())
+	defineObjectGlobal(main, symbolTable, "setInterval", native.NewSetInterval())
+	defineObjectGlobal(main, symbolTable, "clearTimeout", native.NewClearTimeout("clearTimeout"))
+	defineObjectGlobal(main, symbolTable, "clearInterval", native.NewClearTimeout("clearInterval"))
 }
 
 func defineBooleanConstructor(main *object.ObjFunction, symbolTable *FunctionScope) {
@@ -721,12 +741,13 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineReflectObject(setup, global)
 	defineBigIntConstructor(setup, global)
 	defineBinaryConstructors(setup, global)
-	defineRegExpConstructor(setup)
-	defineProxyConstructor(setup)
+	defineRegExpConstructor(setup, global)
+	defineProxyConstructor(setup, global)
 	defineSymbolConstructor(setup, global)
 	defineStringConstructor(setup, global)
 	defineMathObject(setup, global)
 	defineBooleanConstructor(setup, global)
+	defineGlobalFunctions(setup, global)
 	for _, variable := range global.vars {
 		variable.declared = true
 	}
@@ -2517,7 +2538,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				switch current.UnaryOperator {
 				case parser.UNARY_TYPEOF:
 					if current.Argument.Type == parser.NODE_IDENTIFIER {
-						if variable, _ := symbolTable.findVariable(current.Argument.Name); variable == nil {
+						name := current.Argument.Name
+						if name == "globalThis" {
+							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("object"))))
+							return
+						}
+						if name == "NaN" || name == "Infinity" {
+							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("number"))))
+							return
+						}
+						if variable, _ := symbolTable.findVariable(name); variable == nil {
 							fn.ValueChunk().WriteConstant(value.EncodeHandle(heap.Allocate(native.NewLightString("undefined"))))
 							return
 						}
@@ -4017,4 +4047,33 @@ func calleeIsPromiseFunction(current *parser.Node) bool {
 		}
 	}
 	return false
+}
+
+func CompileDynamicFunction(params []string, body string) (object.Callable, error) {
+	source := "var __gojs_dynamic_function__ = function(" + strings.Join(params, ",") + ") {\n" + body + "\n};"
+	ast, err := parser.GetAst([]byte(source), &parser.Options{SourceType: "script"}, 0)
+	if err != nil {
+		return nil, err
+	}
+	if ast == nil || len(ast.Body) == 0 || len(ast.Body[0].Declarations) == 0 {
+		return nil, fmt.Errorf("invalid dynamic function")
+	}
+	function := ast.Body[0].Declarations[0].Initializer
+	prePass(function, global)
+	holder := object.NewFunction("__dynamic_holder__", 0, nil)
+	generateByteCode(function, global, holder)
+	constants := holder.ValueChunk().Constants
+	for i := len(constants) - 1; i >= 0; i-- {
+		if !constants[i].IsObject() {
+			continue
+		}
+		obj, err := heap.GetObject(constants[i].GetHandle())
+		if err != nil {
+			continue
+		}
+		if fn, ok := obj.(object.Callable); ok {
+			return fn, nil
+		}
+	}
+	return nil, fmt.Errorf("failed to compile dynamic function")
 }

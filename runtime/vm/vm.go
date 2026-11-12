@@ -163,9 +163,9 @@ func (vm *VM) popUnwrapped() value.Value {
 func (vm *VM) addGlobal(v value.Value) {
 	if globalsCount >= len(globals) {
 		globals = append(globals, v)
-		return
+	} else {
+		globals[globalsCount] = v
 	}
-	globals[globalsCount] = v
 	globalsCount++
 }
 
@@ -1721,12 +1721,7 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 				if fn.IsArrow || fn.IsMethod {
 					return value.UNDEFINED, nil
 				}
-				if fn.Prototype == value.UNDEFINED {
-					proto := native.NewObject()
-					proto.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("constructor"))), objValue)
-					fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
-				}
-				return fn.Prototype, nil
+				return native.EnsureFunctionPrototype(fn, objValue), nil
 			}
 		}
 		if keyString, ok := vm.valueAsString(key); ok {
@@ -1734,6 +1729,13 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 				return v, nil
 			}
 		}
+		return vm.getMemberValue(native.PROTOTYPE_OBJECT, key)
+	}
+	if _, ok := obj.(*native.ObjAsyncFunction); ok {
+		return vm.getMemberValue(native.PROTOTYPE_OBJECT, key)
+	}
+	if _, ok := obj.(*native.ObjGenerator); ok {
+		return vm.getMemberValue(native.PROTOTYPE_OBJECT, key)
 	}
 	if class, ok := obj.(*native.ObjClass); ok {
 		if keyString, ok := vm.valueAsString(key); ok {
@@ -4960,6 +4962,27 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.ToString(name, message)))))
 					}
+				case *native.FunctionConstructor:
+					{
+						args := vm.popN(argCount)
+						params := []string{}
+						body := ""
+						if len(args) > 0 {
+							for i := 0; i < len(args)-1; i++ {
+								params = append(params, mustString(vm, args[i]))
+							}
+							body = mustString(vm, args[len(args)-1])
+						}
+						fn, err := compiler.CompileDynamicFunction(params, body)
+						if err != nil {
+							errValue := vm.makeError("SyntaxError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(fn)))
+					}
 				case *native.DateConstructor:
 					{
 						vm.popN(argCount)
@@ -5565,6 +5588,44 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.Log(args, vm.output)
 						vm.push(value.UNDEFINED)
 					}
+				case *native.ConsoleMethod:
+					{
+						args := vm.popN(argCount)
+						console := (*native.Console)(nil)
+						if thisCtx.IsObject() {
+							if obj, err := heap.GetObject(thisCtx.GetHandle()); err == nil {
+								console, _ = obj.(*native.Console)
+							}
+						}
+						label := "default"
+						if len(args) > 0 {
+							label = mustString(vm, args[0])
+						}
+						switch fn.Kind {
+						case native.CONSOLE_ERROR:
+							logger := &native.Log{}
+							logger.Log(args, vm.output)
+						case native.CONSOLE_TABLE:
+							native.ConsoleTable(args, vm.output)
+						case native.CONSOLE_TIME:
+							if console != nil {
+								console.Start(label)
+							}
+						case native.CONSOLE_TIME_END:
+							if console != nil {
+								duration, found := console.End(label)
+								if found {
+									text := fmt.Sprintf("%s: %.3fms\n", label, float64(duration.Microseconds())/1000)
+									if vm.output != nil {
+										vm.output.WriteString(text)
+									} else {
+										fmt.Print(text)
+									}
+								}
+							}
+						}
+						vm.push(value.UNDEFINED)
+					}
 				case *native.Next:
 					{
 						args := vm.popN(argCount)
@@ -5766,25 +5827,42 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					}
 				case *native.SetTimeout:
 					{
-						ms := vm.pop().AsNumber()
+						ms := vm.pop()
 						callback := vm.pop()
-
-						handle := callback.GetHandle()
-						obj, err := heap.GetObject(handle)
-
+						delay, _ := vm.toNumber(ms)
+						obj, err := heap.GetObject(callback.GetHandle())
 						if err != nil {
-							return value.UNDEFINED, err
+							errValue := vm.makeError("TypeError", "The callback argument must be of type function")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
 						}
-
-						if callbackFn, ok := obj.(*object.ObjFunction); ok {
-							fn.Set(int(ms), callbackFn, thisCtx)
-							clone := fn.Clone()
-							key := heap.NewCallbackRoot()
-							clone.SetRootKey(key)
-							heap.StoreCallbackRoot(key, callback, thisCtx)
-							eventloop.Dispatch(clone)
-							vm.push(value.UNDEFINED)
+						callbackFn, ok := obj.(object.Callable)
+						if !ok {
+							errValue := vm.makeError("TypeError", "The callback argument must be of type function")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
 						}
+						fn.Set(int(delay), callbackFn, thisCtx)
+						clone := fn.Clone()
+						key := heap.NewCallbackRoot()
+						clone.SetRootKey(key)
+						heap.StoreCallbackRoot(key, callback, thisCtx)
+						id := native.RegisterTimer(clone)
+						eventloop.Dispatch(clone)
+						vm.push(value.ValueFromFloat64(float64(id)))
+					}
+				case *native.ClearTimeout:
+					{
+						args := vm.popN(argCount)
+						if len(args) > 0 {
+							id, _ := vm.toNumber(args[0])
+							native.CancelTimer(int(id))
+						}
+						vm.push(value.UNDEFINED)
 					}
 				case *native.Now:
 					vm.push(fn.Now())
@@ -6398,6 +6476,56 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						vm.push(parseIntString(text, radix))
 					}
+				case *native.GlobalFunction:
+					{
+						args := vm.popN(argCount)
+						switch fn.Kind {
+						case native.GLOBAL_IS_NAN:
+							n, err := vm.toNumber(args[0])
+							vm.push(boolValue(err == nil && math.IsNaN(n)))
+						case native.GLOBAL_IS_FINITE:
+							n, err := vm.toNumber(args[0])
+							vm.push(boolValue(err == nil && !math.IsNaN(n) && !math.IsInf(n, 0)))
+						case native.GLOBAL_ENCODE_URI_COMPONENT:
+							text := ""
+							if len(args) > 0 {
+								text = mustString(vm, args[0])
+							}
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(native.EncodeURIComponent(text)))))
+						case native.GLOBAL_DECODE_URI_COMPONENT:
+							text := ""
+							if len(args) > 0 {
+								text = mustString(vm, args[0])
+							}
+							decoded, err := native.DecodeURIComponent(text)
+							if err != nil {
+								errValue := vm.makeError("URIError", err.Error())
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(decoded))))
+						}
+					}
+				case *native.IntlNumberFormatMethod:
+					{
+						args := vm.popN(argCount)
+						number := 0.0
+						if len(args) > 0 {
+							number, _ = vm.toNumber(args[0])
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(native.LocaleNumberString(number)))))
+					}
+				case *native.URLSearchParamsGet:
+					{
+						args := vm.popN(argCount)
+						name := ""
+						if len(args) > 0 {
+							name = mustString(vm, args[0])
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.Values.Get(name)))))
+					}
 				case *native.ParseFloat:
 					{
 						text := "undefined"
@@ -6904,6 +7032,27 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 
 				switch ctor := obj.(type) {
+				case *native.FunctionConstructor:
+					{
+						args := vm.popN(int(argCount))
+						params := []string{}
+						body := ""
+						if len(args) > 0 {
+							for i := 0; i < len(args)-1; i++ {
+								params = append(params, mustString(vm, args[i]))
+							}
+							body = mustString(vm, args[len(args)-1])
+						}
+						fn, err := compiler.CompileDynamicFunction(params, body)
+						if err != nil {
+							errValue := vm.makeError("SyntaxError", err.Error())
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						vm.push(value.EncodeHandle(heap.Allocate(fn)))
+					}
 				case *native.BooleanConstructor:
 					{
 						primitive := value.FALSE

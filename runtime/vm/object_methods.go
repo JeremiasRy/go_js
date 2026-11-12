@@ -222,6 +222,63 @@ func (vm *VM) callObjectMethod(method *native.ObjectMethod, argCount int) (value
 			}
 		}
 		return value.FALSE, nil
+	case native.OBJECT_GROUP_BY:
+		if len(args) < 2 {
+			return value.UNDEFINED, fmt.Errorf("Object.groupBy requires an iterable and callback")
+		}
+		result := native.NewObjectHash()
+		items := []value.Value{}
+		if s, ok := vm.valueAsString(args[0]); ok {
+			for _, r := range []rune(s) {
+				items = append(items, value.EncodeHandle(heap.Allocate(native.NewLightString(string(r)))))
+			}
+		} else if args[0].IsObject() {
+			iterator, err := vm.acquireIterator(args[0], 0)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			for {
+				done, err := vm.iteratorNext(iterator)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				if done {
+					break
+				}
+				item, err := vm.iteratorCurrent(iterator)
+				if err != nil {
+					return value.UNDEFINED, err
+				}
+				items = append(items, item)
+			}
+		}
+		for i, item := range items {
+			key, err := vm.invokeCallback(args[1], value.UNDEFINED, []value.Value{item, native.IndexValue(i)})
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			key, err = vm.toPropertyKey(key)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			existing, err := vm.getMemberValue(value.EncodeHandle(heap.Allocate(result)), key)
+			if err != nil {
+				return value.UNDEFINED, err
+			}
+			group := (*native.ObjArr)(nil)
+			if existing.IsObject() {
+				if obj, err := heap.GetObject(existing.GetHandle()); err == nil {
+					group, _ = obj.(*native.ObjArr)
+				}
+			}
+			if group == nil {
+				group = native.NewArrayFrom([]value.Value{})
+				result.SetMember(key, value.EncodeHandle(heap.Allocate(group)))
+			}
+			group.SetElementAt(group.Length(), item)
+			group.SetLength(group.Length() + 1)
+		}
+		return value.EncodeHandle(heap.Allocate(result)), nil
 	}
 	return value.UNDEFINED, nil
 }

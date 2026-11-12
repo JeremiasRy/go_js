@@ -22,6 +22,7 @@ const (
 	OBJECT_IS_SEALED
 	OBJECT_FREEZE
 	OBJECT_IS_FROZEN
+	OBJECT_GROUP_BY
 )
 
 type ObjectMethod struct {
@@ -53,6 +54,7 @@ func NewObjectMethodConstructor() *ObjectConstructor {
 		{"isSealed", OBJECT_IS_SEALED},
 		{"freeze", OBJECT_FREEZE},
 		{"isFrozen", OBJECT_IS_FROZEN},
+		{"groupBy", OBJECT_GROUP_BY},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))

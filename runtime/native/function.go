@@ -1,6 +1,10 @@
 package native
 
-import "go_js/value"
+import (
+	"go_js/heap"
+	"go_js/object"
+	"go_js/value"
+)
 
 type FunctionCall struct {
 	ObjNativeFn
@@ -55,4 +59,13 @@ func (b *ObjBoundFunction) GetReferencingValues() []value.Value {
 	values = append(values, b.Args...)
 	values = append(values, b.ObjObject.GetReferencingValues()...)
 	return values
+}
+
+func EnsureFunctionPrototype(fn *object.ObjFunction, fnValue value.Value) value.Value {
+	if fn.Prototype == value.UNDEFINED {
+		proto := NewObject()
+		proto.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("constructor"))), fnValue)
+		fn.Prototype = value.EncodeHandle(heap.Allocate(proto))
+	}
+	return fn.Prototype
 }
