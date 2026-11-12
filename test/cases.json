@@ -32,6 +32,7 @@
         { "file": "negative-scripts/29-parse-await-in-non-async.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/30-parse-break-outside-loop.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
         { "file": "negative-scripts/02-recursion-unbounded-segv.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
-        { "file": "negative-scripts/15-tostring-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" }
+        { "file": "negative-scripts/15-tostring-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" },
+        { "file": "negative-scripts/16-getter-cycle.js", "sourceGoal": "script", "phase": "runtime", "error": "RangeError" }
     ]
 }
