@@ -28,6 +28,10 @@ const (
 	STRING_MATCH
 	STRING_SEARCH
 	STRING_MATCH_ALL
+	STRING_AT
+	STRING_SUBSTR
+	STRING_CONCAT
+	STRING_LOCALE_COMPARE
 )
 
 type StringMethod struct {
@@ -66,6 +70,10 @@ func AddStringMethods(p *Prototype) {
 		{"match", STRING_MATCH},
 		{"search", STRING_SEARCH},
 		{"matchAll", STRING_MATCH_ALL},
+		{"at", STRING_AT},
+		{"substr", STRING_SUBSTR},
+		{"concat", STRING_CONCAT},
+		{"localeCompare", STRING_LOCALE_COMPARE},
 	}
 	for _, method := range methods {
 		key := value.EncodeHandle(heap.Allocate(NewLightString(method.name)))
@@ -79,6 +87,7 @@ type StringStaticKind int
 const (
 	STRING_FROM_CODE_POINT StringStaticKind = iota
 	STRING_FROM_CHAR_CODE
+	STRING_RAW
 )
 
 type StringStaticMethod struct {
@@ -98,5 +107,6 @@ func NewStringConstructorObject() *StringConstructor {
 	s.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("prototype"))), PROTOTYPE_STRING)
 	s.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("fromCodePoint"))), value.EncodeHandle(heap.Allocate(NewStringStaticMethod("fromCodePoint", STRING_FROM_CODE_POINT))))
 	s.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("fromCharCode"))), value.EncodeHandle(heap.Allocate(NewStringStaticMethod("fromCharCode", STRING_FROM_CHAR_CODE))))
+	s.SetMember(value.EncodeHandle(heap.Allocate(NewLightString("raw"))), value.EncodeHandle(heap.Allocate(NewStringStaticMethod("raw", STRING_RAW))))
 	return s
 }

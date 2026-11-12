@@ -61,3 +61,13 @@ func NewArrayIterator() *ArrayIterator {
 	i.name = "iterator"
 	return i
 }
+
+type StringIterator struct {
+	ObjNativeFn
+}
+
+func NewStringIterator() *StringIterator {
+	i := &StringIterator{}
+	i.name = "iterator"
+	return i
+}

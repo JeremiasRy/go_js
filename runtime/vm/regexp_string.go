@@ -84,7 +84,7 @@ func (vm *VM) stringMatch(owner string, args []value.Value) (value.Value, error)
 	}
 	results := []value.Value{}
 	start := 0
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(re, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err
@@ -177,7 +177,7 @@ func (vm *VM) stringMatchAll(owner string, args []value.Value) (value.Value, err
 	text := newRegexpText(owner, clone.Unicode)
 	results := []value.Value{}
 	start := re.LastIndex
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(clone, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err
@@ -278,7 +278,7 @@ func (vm *VM) stringReplaceRegex(owner string, re *native.ObjRegExp, replacement
 	var builder strings.Builder
 	cursor := 0
 	start := 0
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(re, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err
@@ -341,7 +341,7 @@ func (vm *VM) stringSplitRegex(owner string, re *native.ObjRegExp, limit int) (v
 	}
 	lastEnd := 0
 	start := 0
-	for start <= native.UTF16Length(owner) {
+	for start < native.UTF16Length(owner) {
 		match, err := vm.regexpFind(re, text, start, false)
 		if err != nil {
 			return value.UNDEFINED, err

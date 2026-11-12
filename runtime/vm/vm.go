@@ -1740,6 +1740,12 @@ func (vm *VM) getMemberValueWithReceiver(objValue value.Value, key value.Value, 
 	if _, ok := obj.(*native.ObjArr); ok && key == native.SYMBOL_ITERATOR {
 		return value.EncodeHandle(heap.Allocate(native.NewArrayIterator())), nil
 	}
+	if _, ok := obj.(*native.LightString); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewStringIterator())), nil
+	}
+	if _, ok := obj.(*native.ObjString); ok && key == native.SYMBOL_ITERATOR {
+		return value.EncodeHandle(heap.Allocate(native.NewStringIterator())), nil
+	}
 	if _, ok := obj.(*object.Iterator); ok {
 		if keyString, ok := vm.valueAsString(key); ok && keyString == "next" {
 			return value.EncodeHandle(heap.Allocate(native.NewIteratorNext())), nil
@@ -2537,11 +2543,22 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	}
 
 	if fn.HasRestParameter() {
-		arguments := vm.findArgStart()
+		var arguments []value.Value
+		if calledWithSpread {
+			arguments = vm.findArgStart()
+		} else {
+			start := vm.stackTop - argCount
+			arguments = append([]value.Value{}, vm.stack[start:vm.stackTop]...)
+			if start > 0 && vm.stack[start-1] == value.TAG_ARGUMENT_START {
+				start--
+			}
+			vm.stackTop = start
+		}
 		f.localStart = vm.stackTop
 
-		arr := native.NewArrayFrom(arguments[fn.GetArity()-1:])
-		for _, v := range arguments[:fn.GetArity()-1] {
+		restStart := min(fn.GetArity()-1, len(arguments))
+		arr := native.NewArrayFrom(arguments[restStart:])
+		for _, v := range arguments[:restStart] {
 			vm.push(v)
 		}
 		v := value.EncodeHandle(heap.Allocate(arr))
@@ -4802,8 +4819,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							if err != nil {
 								return value.UNDEFINED, err
 							}
-							result.SetMember(native.KEY_DONE, value.FALSE)
 							result.SetMember(native.KEY_VALUE, current)
+							result.SetMember(native.KEY_DONE, value.FALSE)
 						}
 						vm.push(value.EncodeHandle(heap.Allocate(result)))
 					}
@@ -5362,6 +5379,26 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							continue
 						}
 						vm.push(value.EncodeHandle(heap.Allocate(object.NewValueIterator(arr))))
+					}
+				case *native.StringIterator:
+					{
+						text, err := vm.toStringValue(thisCtx)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						owner, _ := vm.valueAsString(text)
+						units := native.UTF16Units(owner)
+						values := make([]value.Value, 0, len(units))
+						for i := 0; i < len(units); i++ {
+							width := 1
+							if units[i] >= 0xD800 && units[i] <= 0xDBFF && i+1 < len(units) && units[i+1] >= 0xDC00 && units[i+1] <= 0xDFFF {
+								width = 2
+							}
+							values = append(values, value.EncodeHandle(heap.Allocate(native.NewLightString(native.UTF16FromUnits(units[i:i+width])))))
+							i += width - 1
+						}
+						iterator := object.NewLiveIterator(func() []value.Value { return values })
+						vm.push(value.EncodeHandle(heap.Allocate(iterator)))
 					}
 				case *native.Return:
 					{
