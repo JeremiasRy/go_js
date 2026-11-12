@@ -83,6 +83,7 @@ var SUB_SD = []byte{0xF2, 0x0F, 0x5C}
 var UCOMISD = []byte{0x66, 0x0F, 0x2E}
 
 var jittedFns = map[object.Callable]*Assembler{}
+var jittedChunks = map[*value.ValueChunk]*Assembler{}
 var jittableFns = map[object.Callable]struct {
 	is     bool
 	locals int
@@ -742,6 +743,7 @@ func compileFunction(fn object.Callable, localStart *value.Value, globalsStart *
 	}
 
 	jittedFns[fn] = asm
+	jittedChunks[fn.ValueChunk()] = asm
 	return asm, nil
 }
 
@@ -760,6 +762,14 @@ func IsJittable(fn object.Callable, globals []value.Value) bool {
 
 func GetJittedDisassemblyIfPossible(fn object.Callable) (bool, []JitDetail) {
 	if asm, found := jittedFns[fn]; found {
+		return true, asm.disassembled
+	}
+
+	return GetJittedDisassemblyForChunk(fn.ValueChunk())
+}
+
+func GetJittedDisassemblyForChunk(chunk *value.ValueChunk) (bool, []JitDetail) {
+	if asm, found := jittedChunks[chunk]; found {
 		return true, asm.disassembled
 	}
 

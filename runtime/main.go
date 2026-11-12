@@ -11,6 +11,7 @@ import (
 	"go_js/flags"
 	"go_js/heap"
 	"go_js/native"
+	"go_js/object"
 	"go_js/parser"
 	"go_js/queue"
 	virtualMachine "go_js/vm"
@@ -128,6 +129,17 @@ func main() {
 	if flags.StructuredOutput {
 		info := map[string]*virtualMachine.DebugInfo{}
 		virtualMachine.StructureOutput(*main.ValueChunk(), info)
+		entry := compiler.EntryModule()
+		for _, record := range compiler.ModuleRecords() {
+			if record.Main == nil {
+				continue
+			}
+			chunk := *record.Main.ValueChunk()
+			if record == entry {
+				chunk.FnName = object.MAIN_FN_NAME
+			}
+			virtualMachine.StructureOutput(chunk, info)
+		}
 
 		out := virtualMachine.StructuredOut{
 			Output: output.String(),
