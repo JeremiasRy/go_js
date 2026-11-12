@@ -276,7 +276,6 @@ func (vm *VM) callObjectMethod(method *native.ObjectMethod, argCount int) (value
 				result.SetMember(key, value.EncodeHandle(heap.Allocate(group)))
 			}
 			group.SetElementAt(group.Length(), item)
-			group.SetLength(group.Length() + 1)
 		}
 		return value.EncodeHandle(heap.Allocate(result)), nil
 	}
