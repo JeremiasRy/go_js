@@ -7,6 +7,12 @@ import (
 	"go_js/value"
 )
 
+const (
+	defragMinHeapSlots   = 128
+	defragMinFreeSlots   = 64
+	defragFreePercentage = 50
+)
+
 type HeapScope struct {
 	Parent int
 	Values []value.Value
@@ -336,7 +342,60 @@ func (a *Heap) sweep() {
 		a.gcCycleDeterminator /= 2
 	}
 
+	if a.shouldDefragment() {
+		if flags.Debug {
+			fmt.Printf("Defragmenting heap: %d objects, %d free slots\n", len(a.objects), len(a.freeList))
+		}
+		a.defragment()
+	}
 }
+
+func (a *Heap) shouldDefragment() bool {
+	objects := len(a.objects)
+	free := len(a.freeList)
+	if objects < defragMinHeapSlots || free < defragMinFreeSlots {
+		return false
+	}
+	return free*100 >= objects*defragFreePercentage
+}
+
+func (a *Heap) defragment() {
+	if len(a.objects) == 0 || len(a.freeList) == 0 {
+		return
+	}
+
+	remap := make([]uint32, len(a.objects))
+	write := 0
+	for read, obj := range a.objects {
+		if _, free := a.freeList[uint32(read)]; free {
+			continue
+		}
+		remap[read] = uint32(write + 1)
+		a.objects[write] = obj
+		write++
+	}
+
+	for handle, pointer := range a.handleLayer {
+		if int(pointer) >= len(remap) || remap[pointer] == 0 {
+			delete(a.handleLayer, handle)
+			continue
+		}
+		a.handleLayer[handle] = remap[pointer] - 1
+	}
+
+	for str, pointer := range a.strings {
+		if int(pointer) >= len(remap) || remap[pointer] == 0 {
+			delete(a.strings, str)
+			continue
+		}
+		a.strings[str] = remap[pointer] - 1
+	}
+
+	clear(a.objects[write:])
+	a.objects = a.objects[:write]
+	a.freeList = make(map[uint32]struct{})
+}
+
 func pushGrey(o object.Object) {
 	a.greyStack = append(a.greyStack, o)
 }
