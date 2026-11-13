@@ -162,9 +162,26 @@ func writeSocketMessage(t *testing.T, conn *websocket.Conn, message socketMessag
 
 func encodedResult(output string) string {
 	payload, _ := json.Marshal(map[string]any{
-		"output":     output,
-		"debug_info": map[string]any{},
-		"ast":        map[string]any{},
+		"format_version": 2,
+		"output":         output,
+		"debug_chunks":   []any{},
+		"ast":            map[string]any{},
+		"execution": map[string]any{
+			"schema_version": 1,
+			"status":         "not_requested",
+			"frames":         []any{},
+			"truncated":      false,
+			"total_frames":   0,
+			"dropped_frames": 0,
+			"duration_ms":    0,
+			"limits": map[string]any{
+				"max_frames":      10000,
+				"max_stack":       64,
+				"max_queue_items": 32,
+				"max_timers":      16,
+				"max_value_chars": 160,
+			},
+		},
 	})
 	return base64.StdEncoding.EncodeToString(payload)
 }

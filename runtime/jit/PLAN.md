@@ -68,8 +68,8 @@ compilation is not cached, so some functions retry compilation on every call.
 
 These were reproduced against the current tree. They are not hypothetical.
 Each should become a regression test. To confirm a function actually reached the
-JIT, run with `-structured`: `debug_info[fn].jit` is non-empty for a compiled
-function, and `--debug` prints `-- CALLING JIT FUNCTION --`.
+JIT, run with `-structured`: the matching `debug_chunks[]` entry has a non-empty
+`jit` array, and `--debug` prints `-- CALLING JIT FUNCTION --`.
 
 | Case | Expected | Current behavior |
 | --- | --- | --- |

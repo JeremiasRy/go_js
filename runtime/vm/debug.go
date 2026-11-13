@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"go_js/jit"
+	"sort"
 	"strings"
 
 	"go_js/chunk"
@@ -14,10 +15,49 @@ import (
 	"go_js/value"
 )
 
+const StructuredOutputFormatVersion = 2
+const ExecutionSchemaVersion = 1
+
 type StructuredOut struct {
-	Output string                `json:"output"`
-	Code   map[string]*DebugInfo `json:"debug_info"`
-	Ast    *parser.Node          `json:"ast"`
+	FormatVersion int            `json:"format_version"`
+	Output        string         `json:"output"`
+	DebugChunks   []*ChunkInfo   `json:"debug_chunks"`
+	Ast           *parser.Node   `json:"ast"`
+	Execution     *ExecutionInfo `json:"execution"`
+}
+
+type ExecutionLimits struct {
+	MaxFrames     int `json:"max_frames"`
+	MaxStack      int `json:"max_stack"`
+	MaxQueueItems int `json:"max_queue_items"`
+	MaxTimers     int `json:"max_timers"`
+	MaxValueChars int `json:"max_value_chars"`
+}
+
+type ExecutionInfo struct {
+	SchemaVersion int             `json:"schema_version"`
+	Status        string          `json:"status"`
+	Frames        []any           `json:"frames"`
+	Truncated     bool            `json:"truncated"`
+	TotalFrames   int             `json:"total_frames"`
+	DroppedFrames int             `json:"dropped_frames"`
+	DurationMS    float64         `json:"duration_ms"`
+	Limits        ExecutionLimits `json:"limits"`
+}
+
+func NewExecutionPlaceholder() *ExecutionInfo {
+	return &ExecutionInfo{
+		SchemaVersion: ExecutionSchemaVersion,
+		Status:        "not_requested",
+		Frames:        []any{},
+		Limits: ExecutionLimits{
+			MaxFrames:     10000,
+			MaxStack:      64,
+			MaxQueueItems: 32,
+			MaxTimers:     16,
+			MaxValueChars: 160,
+		},
+	}
 }
 
 const NO_MORE_OPS = -1
@@ -244,41 +284,54 @@ type OpDetail struct {
 	OpPtr int    `json:"op_ptr"`
 }
 
-type DebugInfo struct {
-	Jit      []jit.JitDetail `json:"jit"`
+type ChunkInfo struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Kind     string          `json:"kind,omitempty"`
+	Hidden   bool            `json:"hidden,omitempty"`
 	ByteCode []OpDetail      `json:"byte_code"`
+	Jit      []jit.JitDetail `json:"jit"`
 }
 
-func StructureOutput(c value.ValueChunk, r map[string]*DebugInfo) {
-	structureOutput(&c, r, map[*value.ValueChunk]bool{})
+type DebugInfo struct {
+	Chunks []*ChunkInfo
+
+	seen map[*value.ValueChunk]*ChunkInfo
+	byID map[string]*ChunkInfo
 }
 
-func structureOutput(c *value.ValueChunk, r map[string]*DebugInfo, seen map[*value.ValueChunk]bool) {
-	if c == nil || seen[c] {
-		return
+func NewDebugInfo() *DebugInfo {
+	return &DebugInfo{
+		Chunks: []*ChunkInfo{},
+		seen:   map[*value.ValueChunk]*ChunkInfo{},
+		byID:   map[string]*ChunkInfo{},
 	}
-	seen[c] = true
+}
 
-	info := &DebugInfo{
-		Jit:      []jit.JitDetail{},
-		ByteCode: []OpDetail{},
+func (d *DebugInfo) AddCallable(fn object.Callable, nameOverride string, hideSameName bool) *ChunkInfo {
+	if fn == nil {
+		return nil
 	}
-	r[c.FnName] = info
+	if d.seen == nil {
+		d.seen = map[*value.ValueChunk]*ChunkInfo{}
+	}
+	if d.byID == nil {
+		d.byID = map[string]*ChunkInfo{}
+	}
+	return d.addChunkTree(fn.ValueChunk(), callableKind(fn, nameOverride), nameOverride, hideSameName)
+}
 
-	ip := 0
-	sb := &strings.Builder{}
-
-	for ip < len(c.Code) {
-		opcodeIp := ip
-		astId := c.AstId[ip]
-		ip, _ = ReadOp(ip, *c, sb)
-		info.ByteCode = append(info.ByteCode, OpDetail{Op: sb.String(), AstId: astId, OpPtr: opcodeIp})
-		sb.Reset()
+func (d *DebugInfo) addChunkTree(c *value.ValueChunk, kind, nameOverride string, hideSameName bool) *ChunkInfo {
+	if c == nil {
+		return nil
+	}
+	if info, found := d.seen[c]; found {
+		d.applyName(info, nameOverride, hideSameName)
+		return info
 	}
 
-	if found, disassembly := jitContext().Disassembly(c); found {
-		info.Jit = disassembly
-	}
+	info := d.addChunk(c, kind, nameOverride, hideSameName)
+	d.seen[c] = info
 
 	for _, constant := range c.Constants {
 		if !constant.IsObject() {
@@ -292,8 +345,131 @@ func structureOutput(c *value.ValueChunk, r map[string]*DebugInfo, seen map[*val
 		if !ok {
 			continue
 		}
-		structureOutput(fn.ValueChunk(), r, seen)
+		d.addChunkTree(fn.ValueChunk(), callableKind(fn, ""), "", false)
 	}
+
+	return info
+}
+
+func (d *DebugInfo) addChunk(c *value.ValueChunk, kind, nameOverride string, hideSameName bool) *ChunkInfo {
+	if c.ChunkID == "" {
+		c.ChunkID = value.NextChunkID()
+	}
+	if info, found := d.byID[c.ChunkID]; found {
+		d.applyName(info, nameOverride, hideSameName)
+		return info
+	}
+
+	name := c.FnName
+	if nameOverride != "" {
+		name = nameOverride
+	}
+	if kind == "" {
+		kind = chunkNameKind(name)
+	}
+
+	info := &ChunkInfo{
+		ID:       c.ChunkID,
+		Name:     name,
+		Kind:     kind,
+		Hidden:   kind == "setup" || name == object.SETUP_FN_NAME,
+		ByteCode: []OpDetail{},
+		Jit:      []jit.JitDetail{},
+	}
+
+	ip := 0
+	sb := &strings.Builder{}
+	for ip < len(c.Code) {
+		opcodeIp := ip
+		astId := c.AstId[ip]
+		ip, _ = ReadOp(ip, *c, sb)
+		info.ByteCode = append(info.ByteCode, OpDetail{Op: sb.String(), AstId: astId, OpPtr: opcodeIp})
+		sb.Reset()
+	}
+
+	if found, disassembly := jitContext().Disassembly(c); found {
+		info.Jit = disassembly
+	}
+
+	d.Chunks = append(d.Chunks, info)
+	d.byID[c.ChunkID] = info
+
+	if hideSameName {
+		d.hideOtherChunksNamed(name, c.ChunkID)
+	}
+
+	return info
+}
+
+func (d *DebugInfo) applyName(info *ChunkInfo, nameOverride string, hideSameName bool) {
+	if info == nil || nameOverride == "" {
+		return
+	}
+	info.Name = nameOverride
+	if nameOverride == object.MAIN_FN_NAME && info.Kind != "setup" {
+		info.Kind = "main"
+	}
+	if hideSameName {
+		d.hideOtherChunksNamed(nameOverride, info.ID)
+	}
+}
+
+func (d *DebugInfo) hideOtherChunksNamed(name, keepID string) {
+	for _, chunk := range d.Chunks {
+		if chunk.ID != keepID && chunk.Name == name {
+			chunk.Hidden = true
+		}
+	}
+}
+
+func (d *DebugInfo) Finalize() {
+	sort.Slice(d.Chunks, func(i, j int) bool {
+		if d.Chunks[i].Name == d.Chunks[j].Name {
+			return d.Chunks[i].ID < d.Chunks[j].ID
+		}
+		return d.Chunks[i].Name < d.Chunks[j].Name
+	})
+}
+
+func callableKind(fn object.Callable, nameOverride string) string {
+	name := nameOverride
+	if name == "" {
+		name = fn.ValueChunk().FnName
+	}
+	if name == object.SETUP_FN_NAME {
+		return "setup"
+	}
+	if name == object.MAIN_FN_NAME {
+		return "main"
+	}
+	if strings.HasPrefix(name, "MODULE ") {
+		return "module"
+	}
+
+	switch fn := fn.(type) {
+	case *native.ObjAsyncFunction:
+		return "async_function"
+	case *native.ObjGenerator:
+		if fn.IsAsync {
+			return "async_generator"
+		}
+		return "generator"
+	default:
+		return "function"
+	}
+}
+
+func chunkNameKind(name string) string {
+	if name == object.SETUP_FN_NAME {
+		return "setup"
+	}
+	if name == object.MAIN_FN_NAME {
+		return "main"
+	}
+	if strings.HasPrefix(name, "MODULE ") {
+		return "module"
+	}
+	return "function"
 }
 
 func printStack(stack []value.Value) {

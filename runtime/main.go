@@ -144,24 +144,29 @@ func main() {
 	}
 
 	if flags.StructuredOutput {
-		info := map[string]*virtualMachine.DebugInfo{}
-		virtualMachine.StructureOutput(*main.ValueChunk(), info)
+		info := virtualMachine.NewDebugInfo()
+		info.AddCallable(main, "", false)
 		entry := compiler.EntryModule()
 		for _, record := range compiler.ModuleRecords() {
 			if record.Main == nil {
 				continue
 			}
-			chunk := *record.Main.ValueChunk()
+			nameOverride := ""
+			hideSameName := false
 			if record == entry {
-				chunk.FnName = object.MAIN_FN_NAME
+				nameOverride = object.MAIN_FN_NAME
+				hideSameName = true
 			}
-			virtualMachine.StructureOutput(chunk, info)
+			info.AddCallable(record.Main, nameOverride, hideSameName)
 		}
+		info.Finalize()
 
 		out := virtualMachine.StructuredOut{
-			Output: output.String(),
-			Code:   info,
-			Ast:    ast,
+			FormatVersion: virtualMachine.StructuredOutputFormatVersion,
+			Output:        output.String(),
+			DebugChunks:   info.Chunks,
+			Ast:           ast,
+			Execution:     virtualMachine.NewExecutionPlaceholder(),
 		}
 
 		res, err := json.Marshal(out)

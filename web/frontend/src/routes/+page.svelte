@@ -15,6 +15,7 @@
     import { defaultExample, examples, type CodeExample } from "$lib/examples";
     import type {
         AstNode,
+        DisassembledChunk,
         HighlightStatus,
         PageStatus,
         InterpretResult,
@@ -53,6 +54,7 @@
     let activeRequestId = $state<null | string>(null);
     let pageState = $state<PageStatus>("input");
     let interpretResult = $state<InterpretResult | null>(null);
+    let debugChunks = $state<DisassembledChunk[]>([]);
     let runError = $state<string | null>(null);
     let serverStatus = $state<ConnectionStatus>("connecting");
     let mcpStatus = $state<MCPStatus>("waiting");
@@ -127,7 +129,8 @@
         }
 
         return (
-            highlight.fn === opts.fn && highlight.opCodePtr === opts.opCodePtr
+            highlight.chunkId === opts.chunkId &&
+            highlight.opCodePtr === opts.opCodePtr
         );
     };
 
@@ -143,7 +146,7 @@
                 astId: opts.astId,
                 astIds: [opts.astId],
                 opCodePtr: opts.opCodePtr,
-                fn: opts.fn,
+                chunkId: opts.chunkId,
             };
             return;
         }
@@ -152,7 +155,7 @@
             source: opts.source,
             astId: opts.astId,
             astIds: [opts.astId, ...(lookUp?.get(opts.astId)?.ast_train ?? [])],
-            fn: opts.source === "op_code" ? opts.fn : "",
+            chunkId: opts.source === "op_code" ? opts.chunkId : "",
             opCodePtr: opts.source === "op_code" ? opts.opCodePtr : -1,
         };
     };
@@ -569,6 +572,7 @@
             try {
                 const interpretDetails = JSON.parse(atob(message.result));
                 runError = null;
+                debugChunks = interpretDetails.debug_chunks ?? [];
                 interpretResult = {
                     jobStatus: "Success",
                     result: interpretDetails,
@@ -582,6 +586,7 @@
             } catch (error) {
                 console.error(error);
                 runError = "The interpreter returned an invalid result.";
+                debugChunks = [];
                 interpretResult = {
                     jobStatus: "Failed",
                     result: null,
@@ -748,6 +753,7 @@
         jobId = null;
         activeRequestId = null;
         interpretResult = null;
+        debugChunks = [];
         runError = null;
         highlight = null;
         astElements.clear();
@@ -1140,8 +1146,7 @@
                                 class="flex flex-1 min-h-0 flex-col p-2"
                             >
                                 <Code
-                                    debugInfo={interpretResult!.result!
-                                        .debug_info}
+                                    chunks={debugChunks}
                                     {highlight}
                                     {setHighlight}
                                 />
