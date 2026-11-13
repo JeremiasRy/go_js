@@ -406,7 +406,18 @@
                 aria-controls={`bytecode-panel-${fnIndex}`}
                 onclick={() => toggleFunction(fn)}
             >
-                <span>{fn === MAIN_FUNCTION ? "Main" : fn}</span>
+                <span class="flex min-w-0 items-center gap-2">
+                    <span class="truncate">
+                        {fn === MAIN_FUNCTION ? "Main" : fn}
+                    </span>
+                    {#if jit.length > 0}
+                        <span
+                            class="shrink-0 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-700"
+                        >
+                            JIT goes BRRRR
+                        </span>
+                    {/if}
+                </span>
                 <span
                     class="inline-block transition-transform {isExpanded
                         ? 'rotate-90'
