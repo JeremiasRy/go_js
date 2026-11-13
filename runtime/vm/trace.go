@@ -350,7 +350,10 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 		if chunk != nil && chunk.TraceHidden {
 			continue
 		}
-		frameOpPtr := callFrame.returnIp
+		frameOpPtr := 0
+		if i+1 < vm.frameCount {
+			frameOpPtr = vm.frames[i+1].returnIp
+		}
 		frameOp := opNameAt(chunk, frameOpPtr)
 		frameAstID := astIDAt(chunk, frameOpPtr)
 		frameFn := ""
