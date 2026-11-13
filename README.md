@@ -104,6 +104,8 @@ Every job is stored with its client session id. The "Latest runs" sidebar lists
 the scripts submitted by the current client, and clicking one loads it back into
 the editor and runs it again. The "Give me a random script" button fetches any
 non-failed stored script from the database, regardless of which client wrote it.
+The editor's "Examples" tab includes a few runnable demos, from fractals and
+Game of Life to an eight-queens solver.
 
 For frontend development, the SvelteKit dev server proxies `/ws`, `/session`, and
 `/scripts` to port `8000`, so the same browser-origin URLs work in development and

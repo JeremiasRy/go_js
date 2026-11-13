@@ -12,7 +12,7 @@
     import { Tween } from "svelte/motion";
     import { cubicOut } from "svelte/easing";
     import { fade, fly } from "svelte/transition";
-    import fibo from "$lib/examples/fibonacci?raw";
+    import { defaultExample, examples, type CodeExample } from "$lib/examples";
     import type {
         AstNode,
         HighlightStatus,
@@ -39,8 +39,11 @@
     const astElements = $state(new Map<number, HTMLElement>());
     const lookUp = $state(new Map<number, AstNode>());
 
+    type EditorTab = "editor" | "examples";
+
     let editorContainer: HTMLElement;
     let view: EditorView;
+    let editorTab = $state<EditorTab>("editor");
     let jobId = $state<null | string>(null);
     let activeRequestId = $state<null | string>(null);
     let pageState = $state<PageStatus>("input");
@@ -182,7 +185,7 @@
 
     onMount(() => {
         view = new EditorView({
-            doc: fibo,
+            doc: defaultExample,
             parent: editorContainer,
             extensions: [
                 basicSetup,
@@ -418,22 +421,39 @@
         }
     }
 
-    function applyScript(script: ScriptJob) {
+    function replaceEditorSource(src: string): boolean {
         if (view === undefined || isBusy) {
             return false;
         }
 
+        setEditorTab("editor");
         resetPage();
         view.dispatch({
             changes: {
                 from: 0,
                 to: view.state.doc.length,
-                insert: script.src,
+                insert: src,
             },
         });
-        selectedScriptId = script.job_id;
         view.focus();
         return true;
+    }
+
+    function applyScript(script: ScriptJob) {
+        if (!replaceEditorSource(script.src)) {
+            return false;
+        }
+
+        selectedScriptId = script.job_id;
+        return true;
+    }
+
+    function loadExample(example: CodeExample) {
+        if (!replaceEditorSource(example.source)) {
+            return;
+        }
+
+        selectedScriptId = null;
     }
 
     function runScript(script: ScriptJob) {
@@ -441,6 +461,23 @@
             return;
         }
         submitCode();
+    }
+
+    function setEditorTab(tab: EditorTab) {
+        if (editorTab === tab) {
+            return;
+        }
+
+        editorTab = tab;
+        if (tab === "editor") {
+            void tick().then(() => view?.requestMeasure());
+        }
+    }
+
+    function editorTabClass(tab: EditorTab): string {
+        return editorTab === tab
+            ? "cursor-pointer rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+            : "cursor-pointer rounded-md px-3 py-1 text-xs font-medium text-slate-500 hover:text-slate-700";
     }
 
     function scriptPreview(src: string): string {
@@ -600,6 +637,7 @@
         }
 
         resetPage();
+        setEditorTab("editor");
         view.dispatch({
             changes: {
                 from: 0,
@@ -899,7 +937,30 @@
             <div
                 class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex flex-row items-center justify-between gap-2"
             >
-                <span>Editor</span>
+                <div
+                    class="flex items-center gap-1 rounded-lg bg-slate-200/70 p-1"
+                    role="tablist"
+                    aria-label="Editor panels"
+                >
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={editorTab === "editor"}
+                        class={editorTabClass("editor")}
+                        onclick={() => setEditorTab("editor")}
+                    >
+                        Editor
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={editorTab === "examples"}
+                        class={editorTabClass("examples")}
+                        onclick={() => setEditorTab("examples")}
+                    >
+                        Examples
+                    </button>
+                </div>
                 {#if statusLabel}
                     <span
                         class="text-xs font-medium text-slate-500"
@@ -922,12 +983,56 @@
                 </div>
             {/if}
 
-            <div class="flex-1 min-h-0 overflow-y-auto relative">
+            <div
+                class="flex-1 min-h-0 overflow-y-auto relative"
+                class:hidden={editorTab === "examples"}
+            >
                 <div
                     bind:this={editorContainer}
                     class="absolute inset-0 p-2"
                 ></div>
             </div>
+
+            {#if editorTab === "examples"}
+                <div class="flex-1 min-h-0 overflow-y-auto p-4">
+                    <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                        {#each examples as example (example.id)}
+                            <button
+                                type="button"
+                                onclick={() => loadExample(example)}
+                                disabled={isBusy}
+                                class="group flex cursor-pointer flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-[#00ADD8] hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <span
+                                    class="flex w-full items-start justify-between gap-3"
+                                >
+                                    <span
+                                        class="text-sm font-semibold text-slate-700 group-hover:text-[#00758D]"
+                                    >
+                                        {example.title}
+                                    </span>
+                                    <span
+                                        class="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500"
+                                    >
+                                        {example.source.split("\n").length}
+                                        lines
+                                    </span>
+                                </span>
+                                <span
+                                    class="text-xs leading-relaxed text-slate-500"
+                                >
+                                    {example.description}
+                                </span>
+                                <span
+                                    class="mt-auto font-mono text-[11px] text-slate-400"
+                                >
+                                    Click to load into the editor
+                                </span>
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
 
             <div
                 class="p-4 border-t border-slate-100 flex flex-row flex-wrap gap-2 justify-between shrink-0"
