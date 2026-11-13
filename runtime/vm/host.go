@@ -567,7 +567,7 @@ func (vm *VM) callHostFunction(fn *native.HostFunction, thisCtx value.Value, arg
 			}
 			key := heap.NewCallbackRoot()
 			heap.StoreCallbackRoot(key, registry.Cleanup, fired.Held)
-			queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: []value.Value{fired.Held}, RootKey: key}, queue.TASK, false)
+			queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: []value.Value{fired.Held}, RootKey: key, TraceLabel: "FinalizationRegistry cleanup", TraceSource: "gc"}, queue.TASK, false)
 		})
 		return value.UNDEFINED, nil
 	case native.HOST_FINALIZATION_UNREGISTER:
@@ -783,6 +783,8 @@ func (vm *VM) scheduleTimer(fn *native.SetTimeout, callback, thisCtx value.Value
 		return 0, &JSException{Name: "TypeError", Message: "The callback argument must be of type function"}
 	}
 	fn.Set(delay, callbackFn, thisCtx, args)
+	name := fn.Name()
+	fn.SetTraceMetadata(fmt.Sprintf("%s(%dms) callback", name, delay), name)
 	clone := fn.Clone()
 	key := heap.NewCallbackRoot()
 	clone.SetRootKey(key)
@@ -808,7 +810,7 @@ func (vm *VM) scheduleMicrotask(callback value.Value, args []value.Value) error 
 	key := heap.NewCallbackRoot()
 	roots := append([]value.Value{callback}, args...)
 	heap.StoreCallbackRoot(key, roots...)
-	queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: args, RootKey: key, MicroTask: true}, queue.MICRO_TASK, false)
+	queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: args, RootKey: key, MicroTask: true, TraceLabel: "process.nextTick", TraceSource: "process.nextTick"}, queue.MICRO_TASK, false)
 	return nil
 }
 

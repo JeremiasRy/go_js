@@ -77,6 +77,19 @@ func HasWork() bool {
 	return el.work.Load() > 0
 }
 
+type Snapshot struct {
+	Work   int64
+	Closed bool
+}
+
+func SnapshotState() Snapshot {
+	snapshot := Snapshot{Work: el.work.Load()}
+	el.mu.Lock()
+	snapshot.Closed = el.closed
+	el.mu.Unlock()
+	return snapshot
+}
+
 func TryClose() bool {
 	el.mu.Lock()
 	defer el.mu.Unlock()

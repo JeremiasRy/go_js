@@ -63,6 +63,10 @@ type Callback struct {
 	Native    func()
 	RootKey   uintptr
 	MicroTask bool
+
+	TraceID     uint64
+	TraceLabel  string
+	TraceSource string
 }
 
 type JobChannelMessage struct {
