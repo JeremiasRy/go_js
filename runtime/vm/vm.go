@@ -2859,11 +2859,13 @@ Run:
 	callback, priority, errDequeue := queue.Dequeue()
 	for errDequeue == nil {
 		callback.MicroTask = priority == queue.MICRO_TASK
+		vm.traceJobStart(callback, priority)
 		if callback.Native != nil {
 			callback.Native()
 			if callback.RootKey != 0 {
 				heap.ClearCallbackRoot(callback.RootKey)
 			}
+			vm.traceJobEnd()
 			callback, priority, errDequeue = queue.Dequeue()
 			continue
 		}
@@ -2908,6 +2910,7 @@ Run:
 			}
 			diagnostic.Fatal("runtime", name, err)
 		}
+		vm.traceJobEnd()
 		callback, priority, errDequeue = queue.Dequeue()
 	}
 
@@ -2922,6 +2925,7 @@ Run:
 		wg.Done()
 		return
 	}
+	vm.traceWaiting()
 	for {
 		select {
 		case <-queue.QueueC:
