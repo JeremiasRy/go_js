@@ -1,6 +1,7 @@
 # JIT Expansion Plan — amd64
 
-**Status:** planning document only. No implementation is included here.
+**Status:** implemented for Linux amd64. The roadmap checkboxes below record what
+shipped; §9 collects the handoff result, measurements, and deferred work.
 **Scope:** `runtime/jit`, its integration points in `runtime/vm`, and `runtime/chunk`.
 **Target:** Linux amd64 (SysV calling convention). arm64, Windows, and macOS
 JIT-permission differences are explicitly out of scope.
@@ -976,6 +977,7 @@ Measured on the development machine (Linux amd64, Go 1.26.3):
 | `benchmark-scripts/string-operations.js` | ~5.4 s | ~5.4 s (bridged) |
 | `benchmark-scripts/try-catch-shenanigans.js` | ~1.1 s | ~1.1 s (non-jittable, interpreter) |
 
-The test harness allows 60 s for a benchmark because the interpreter's array
-benchmark alone is close to 30 s on the development machine. Wall-clock timing
+The test harness allows 120 s for a benchmark because the interpreter's array
+benchmark alone is close to 30 s on the development machine and can be slower
+under CI load. Wall-clock timing
 is still recorded rather than gated.
