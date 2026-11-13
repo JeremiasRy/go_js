@@ -60,18 +60,6 @@ Requires go version `1.22.5`
 
 Test suite can be run with docker by running `./test.sh` in the root of the repo. Set `GO_JS_DIFFERENTIAL=1` to run every positive case with the JIT both disabled and forced, and fail on any divergence.
 
-### JIT
-
-`runtime/jit/PLAN.md` describes the architecture and the completed roadmap. In short:
-
-- Compiled chunks are cached per `*value.ValueChunk` in a shared, mutex-protected context. Code is emitted into RW pages and mapped RX (never RWX).
-- Values live in a `JITActivation` frame; the machine code never calls Go while a JIT frame is live. A small `jitEnter` trampoline switches to a dedicated native stack.
-- Number arithmetic, comparisons, locals, globals, branches, loops, and returns are native. Non-number `+`, heap/property operations, iterators, calls, and string work go through the bridge.
-- Pure numeric self-recursive functions use direct JIT-to-JIT calls; all other calls use the bridge.
-- Unsupported instructions deoptimize to the interpreter at the exact bytecode IP, so the interpreter remains the semantic reference.
-
-Useful flags: `--jit=off|auto|force`, `--jit-call-threshold`, `--jit-loop-threshold`, `--jit-max-code-bytes`, `--jit-stats`, `--jit-trace`.
-
 ## Web demo and MCP agent bridge
 
 The web demo exposes one MCP endpoint per browser/device:
@@ -81,17 +69,7 @@ https://<host>/session/<client-id>/mcp
 ```
 
 Open the demo, copy the MCP endpoint shown above the editor, and give it to a
-Streamable HTTP MCP client. The URL is a capability: anyone with it can run code
-in a connected browser, so treat it as a secret.
-
-The client uses the open-source
-[FingerprintJS](https://github.com/fingerprintjs/fingerprintjs) library to derive
-a browser/device identifier, hashes that into a UUID, and keeps the UUID in
-`localStorage`. Normal reloads therefore keep the same session even if some
-fingerprint signals drift. In a fresh private window the stored id is unavailable,
-so FingerprintJS is used again and may recover the same session. Clearing browser
-storage, changing browser, OS, device, or fingerprint-relevant settings can
-produce a different id and MCP URL.
+Streamable HTTP MCP client.
 
 The MCP activity indicator is separate from the browser connection. It shows
 `Agent active` after valid MCP traffic and `Last active` after 60 seconds without
@@ -112,13 +90,6 @@ The session survives brief WebSocket disconnects and expires 30 minutes after th
 last browser tab disconnects. Session and in-flight job state are kept in memory;
 restarting the backend invalidates active sessions, but the stable client id
 recreates the same MCP URL on the next page load.
-
-Every job is stored with its client session id. The "Latest runs" sidebar lists
-the scripts submitted by the current client, and clicking one loads it back into
-the editor and runs it again. The "Give me a random script" button fetches any
-non-failed stored script from the database, regardless of which client wrote it.
-The editor's "Examples" tab includes a few runnable demos, from fractals and
-Game of Life to an eight-queens solver.
 
 For frontend development, the SvelteKit dev server proxies `/ws`, `/session`, and
 `/scripts` to port `8000`, so the same browser-origin URLs work in development and
