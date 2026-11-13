@@ -42,7 +42,7 @@
     const CARD_CLASS =
         "min-h-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden";
     const CARD_HEADER_CLASS =
-        "bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2";
+        "h-9 bg-slate-100 px-4 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2";
 
     type EditorTab = "editor" | "examples";
 
@@ -1085,7 +1085,11 @@
                     in:fly={{ x: 32, duration: 300, easing: cubicOut }}
                     out:fade={{ duration: 150 }}
                 >
-                    <section class="flex-1 {CARD_CLASS}">
+                    <section
+                        class="{outputExpanded
+                            ? 'flex-1'
+                            : 'shrink-0'} {CARD_CLASS}"
+                    >
                         <button
                             type="button"
                             class="{CARD_HEADER_CLASS} w-full cursor-pointer text-left hover:text-slate-800"
