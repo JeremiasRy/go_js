@@ -6,8 +6,8 @@ export type SessionBootstrap = {
     mcp_path: string;
 };
 
-export function createSessionBootstrap(): SessionBootstrap | null {
-    const sessionID = createClientId();
+export async function createSessionBootstrap(): Promise<SessionBootstrap | null> {
+    const sessionID = await createClientId();
     if (sessionID === null) {
         return null;
     }

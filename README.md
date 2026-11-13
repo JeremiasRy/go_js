@@ -71,11 +71,14 @@ Open the demo, copy the MCP endpoint shown above the editor, and give it to a
 Streamable HTTP MCP client. The URL is a capability: anyone with it can run code
 in a connected browser, so treat it as a secret.
 
-The client derives its UUID from a browser and device fingerprint and uses it as
-the session id. Reloading, opening another tab, or opening the page in incognito
-mode on the same device therefore produces the same MCP URL. The backend creates
-the session on first use and reuses it afterwards. Changing the browser, OS,
-device, or fingerprint-relevant settings produces a different id and MCP URL.
+The client uses the open-source
+[FingerprintJS](https://github.com/fingerprintjs/fingerprintjs) library to derive
+a browser/device identifier, hashes that into a UUID, and keeps the UUID in
+`localStorage`. Normal reloads therefore keep the same session even if some
+fingerprint signals drift. In a fresh private window the stored id is unavailable,
+so FingerprintJS is used again and may recover the same session. Clearing browser
+storage, changing browser, OS, device, or fingerprint-relevant settings can
+produce a different id and MCP URL.
 
 The MCP activity indicator is separate from the browser connection. It shows
 `Agent active` after valid MCP traffic and `Last active` after 60 seconds without

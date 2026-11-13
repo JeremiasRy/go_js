@@ -22,6 +22,7 @@
 	},
 	"dependencies": {
 		"@codemirror/lang-javascript": "6.2.5",
+		"@fingerprintjs/fingerprintjs": "5.3.0",
 		"@sveltejs/adapter-static": "3.0.10",
 		"@tailwindcss/vite": "^4.3.2",
 		"codemirror": "6.0.2",

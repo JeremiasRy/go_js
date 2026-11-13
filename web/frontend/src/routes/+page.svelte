@@ -205,27 +205,46 @@
     });
 
     onMount(() => {
-        const bootstrap = createSessionBootstrap();
-        if (bootstrap === null) {
-            serverStatus = "disconnected";
-            runError =
-                "Could not initialize the editor session. Reload the page to try again.";
-            pageState = "error";
-            return;
-        }
+        let cancelled = false;
 
-        mcpUrl = resolveUrl(bootstrap.mcp_path);
-        sessionId = bootstrap.session_id;
-        void loadSessionScripts();
-        socket = connectAgentSocket({
-            websocketPath: bootstrap.ws_path,
-            onMessage: handleServerMessage,
-            onStatus: (status) => {
-                serverStatus = status;
-            },
-        });
+        void (async () => {
+            try {
+                const bootstrap = await createSessionBootstrap();
+                if (cancelled) {
+                    return;
+                }
+                if (bootstrap === null) {
+                    serverStatus = "disconnected";
+                    runError =
+                        "Could not initialize the editor session. Reload the page to try again.";
+                    pageState = "error";
+                    return;
+                }
+
+                mcpUrl = resolveUrl(bootstrap.mcp_path);
+                sessionId = bootstrap.session_id;
+                void loadSessionScripts();
+                socket = connectAgentSocket({
+                    websocketPath: bootstrap.ws_path,
+                    onMessage: handleServerMessage,
+                    onStatus: (status) => {
+                        serverStatus = status;
+                    },
+                });
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+                console.error(error);
+                serverStatus = "disconnected";
+                runError =
+                    "Could not initialize the editor session. Reload the page to try again.";
+                pageState = "error";
+            }
+        })();
 
         return () => {
+            cancelled = true;
             socket?.close();
             socket = null;
             clearRunTimeout();
