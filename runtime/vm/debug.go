@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"go_js/jit"
+	"go_js/trace"
 	"sort"
 	"strings"
 
@@ -16,7 +17,7 @@ import (
 )
 
 const StructuredOutputFormatVersion = 2
-const ExecutionSchemaVersion = 1
+const ExecutionSchemaVersion = trace.SchemaVersion
 
 type StructuredOut struct {
 	FormatVersion int            `json:"format_version"`
@@ -26,38 +27,11 @@ type StructuredOut struct {
 	Execution     *ExecutionInfo `json:"execution"`
 }
 
-type ExecutionLimits struct {
-	MaxFrames     int `json:"max_frames"`
-	MaxStack      int `json:"max_stack"`
-	MaxQueueItems int `json:"max_queue_items"`
-	MaxTimers     int `json:"max_timers"`
-	MaxValueChars int `json:"max_value_chars"`
-}
-
-type ExecutionInfo struct {
-	SchemaVersion int             `json:"schema_version"`
-	Status        string          `json:"status"`
-	Frames        []any           `json:"frames"`
-	Truncated     bool            `json:"truncated"`
-	TotalFrames   int             `json:"total_frames"`
-	DroppedFrames int             `json:"dropped_frames"`
-	DurationMS    float64         `json:"duration_ms"`
-	Limits        ExecutionLimits `json:"limits"`
-}
+type ExecutionInfo = trace.Execution
+type ExecutionLimits = trace.Limits
 
 func NewExecutionPlaceholder() *ExecutionInfo {
-	return &ExecutionInfo{
-		SchemaVersion: ExecutionSchemaVersion,
-		Status:        "not_requested",
-		Frames:        []any{},
-		Limits: ExecutionLimits{
-			MaxFrames:     10000,
-			MaxStack:      64,
-			MaxQueueItems: 32,
-			MaxTimers:     16,
-			MaxValueChars: 160,
-		},
-	}
+	return trace.NewExecutionPlaceholder()
 }
 
 const NO_MORE_OPS = -1

@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"go_js/flags"
 	"go_js/jit"
@@ -17,6 +18,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 		*ip = target
 		return false, value.UNDEFINED, nil
 	}
+	jitFn := callableName(f.fn)
 	ctx := jitContext()
 	if !ctx.NoteBackedge(c, target, flags.JITLoopThreshold) {
 		*ip = target
@@ -113,10 +115,22 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 	if jitTracing() {
 		fmt.Fprintf(os.Stderr, "OSR enter ip=%d sp=%d frame=%d fn=%s\n", target, top, vm.frameCount, c.FnName)
 	}
+	jitChunk := *c
+	tracingJIT := vm.traceEnabled
+	jitStart := time.Now()
+	if tracingJIT {
+		vm.traceJITEnter(jitFn, &jitChunk, target, "osr")
+	}
+	exitJIT := func(status string, result value.Value) {
+		if tracingJIT {
+			vm.traceJITExit(jitFn, &jitChunk, target, "osr", status, result, time.Since(jitStart), intPtrValue(ip))
+		}
+	}
 	for {
 		act.Status = jit.StatusDone
 		status, enterErr := ctx.Enter(cc, entry, act)
 		if enterErr != nil {
+			exitJIT("deopt", value.UNDEFINED)
 			release()
 			return false, value.UNDEFINED, enterErr
 		}
@@ -127,17 +141,21 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			vm.frameCount--
 			vm.stackTop = localStart
 			vm.push(returned)
-			release()
 			if vm.frameCount <= 0 {
 				vm.stackTop = 0
+				exitJIT("done", returned)
+				release()
 				return true, returned, nil
 			}
 			*f = vm.currentFrame()
 			*c = *f.fn.ValueChunk()
 			*ip = returnIP
+			exitJIT("done", returned)
+			release()
 			return false, value.UNDEFINED, nil
 		case jit.StatusDeopt:
 			if act.DirectDepth > 1 {
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return false, value.UNDEFINED, fmt.Errorf("jit: deopt inside an OSR direct-recursion frame")
 			}
@@ -155,6 +173,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			if ctx.NoteDeopt(c) {
 				ctx.BlacklistChunk(c)
 			}
+			exitJIT("deopt", value.UNDEFINED)
 			release()
 			return false, value.UNDEFINED, nil
 		case jit.StatusBridge:
@@ -162,6 +181,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 				thrown := vm.makeError("RangeError", "Maximum call stack size exceeded")
 				vm.copyActivationToStack(act, localStart)
 				outcome, throwErr := vm.resumeAfterJITThrow(f, c, ip, int(act.BytecodeIP), thrown)
+				exitJIT("throw", thrown)
 				release()
 				return false, value.UNDEFINED, throwErrOrNil(outcome, throwErr)
 			}
@@ -177,9 +197,11 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 				var jsErr *JSException
 				if asJSException(bridgeErr, &jsErr) && jsErr.HasValue {
 					outcome, throwErr := vm.resumeAfterJITThrow(f, c, ip, int(act.BytecodeIP), jsErr.Value)
+					exitJIT("throw", jsErr.Value)
 					release()
 					return false, value.UNDEFINED, throwErrOrNil(outcome, throwErr)
 				}
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return false, value.UNDEFINED, bridgeErr
 			}
@@ -194,6 +216,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 				f.arguments = act.Args
 				vm.frames[vm.frameCount-1] = *f
 				*ip = next
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return false, value.UNDEFINED, nil
 			}
@@ -201,9 +224,11 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			thrown := act.Result
 			vm.copyActivationToStack(act, localStart)
 			outcome, throwErr := vm.resumeAfterJITThrow(f, c, ip, int(act.BytecodeIP), thrown)
+			exitJIT("throw", thrown)
 			release()
 			return false, value.UNDEFINED, throwErrOrNil(outcome, throwErr)
 		default:
+			exitJIT("deopt", value.UNDEFINED)
 			release()
 			return false, value.UNDEFINED, fmt.Errorf("jit: unknown OSR status %d", status)
 		}

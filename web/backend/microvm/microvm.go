@@ -247,7 +247,7 @@ func (mvm *MicroVMHandler) RunCode(src string, ctx context.Context) (string, err
 		return "", fmt.Errorf("Failed to inject user code to vm's tmpfs: %v", err)
 	}
 
-	runCmd := fmt.Sprintf("%s --structured /workspace/script.js", RUNTIME_PATH)
+	runCmd := fmt.Sprintf("%s --structured --trace-execution --trace-max-frames=10000 /workspace/script.js", RUNTIME_PATH)
 	output, err := runSSHCommandWithTimeout(client, runCmd, EXECUTION_TIMEOUT)
 	if err != nil {
 		if errors.Is(err, errExecutionTimeout) {

@@ -112,9 +112,11 @@ func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMes
 	message := &object.JobChannelMessage{
 		Job: nil,
 		Callback: object.Callback{
-			Fn:        asyncFn,
-			ThisCtx:   value.UNDEFINED,
-			MicroTask: true,
+			Fn:          asyncFn,
+			ThisCtx:     value.UNDEFINED,
+			MicroTask:   true,
+			TraceLabel:  "resume await in " + asyncFn.Name,
+			TraceSource: "await",
 		},
 		Done: done,
 	}
