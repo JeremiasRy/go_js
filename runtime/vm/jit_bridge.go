@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"sync"
+	"time"
 
 	"go_js/chunk"
 	"go_js/flags"
@@ -13,6 +14,7 @@ import (
 	"go_js/jit"
 	"go_js/native"
 	"go_js/object"
+	"go_js/trace"
 	"go_js/value"
 )
 
@@ -51,6 +53,7 @@ const jitBridgeFnName = "JIT_BRIDGE"
 // It is always called with the JIT frame at the top of the VM frame stack.
 func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee value.Value) (jitOutcome, error) {
 	ctx := jitContext()
+	jitFn := callableName(f.fn)
 	cc, err := ctx.Compile(f.fn)
 	if err != nil {
 		if flags.Debug {
@@ -120,6 +123,18 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 		return jitUnavailable, nil
 	}
 
+	jitChunk := *c
+	tracingJIT := trace.Enabled()
+	jitStart := time.Now()
+	if tracingJIT {
+		vm.traceJITEnter(jitFn, &jitChunk, 0, "call")
+	}
+	exitJIT := func(status string, result value.Value) {
+		if tracingJIT {
+			vm.traceJITExit(jitFn, &jitChunk, 0, "call", status, result, time.Since(jitStart), intPtrValue(currentIp))
+		}
+	}
+
 	if flags.Debug {
 		fmt.Println("-- CALLING JIT FUNCTION --")
 	}
@@ -131,6 +146,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			fmt.Fprintf(os.Stderr, "JIT seg entry=%x status=%d req=%d ip=%d sp=%d res=%x frame=%d dd=%d self=%x this=%x\n", entry, status, act.Request, act.BytecodeIP, act.SP, uint64(act.Result), vm.frameCount, act.DirectDepth, uint64(act.SelfValue), uint64(act.This))
 		}
 		if enterErr != nil {
+			exitJIT("deopt", value.UNDEFINED)
 			release()
 			return jitDeoptimized, enterErr
 		}
@@ -151,10 +167,12 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			if flags.Debug {
 				fmt.Println("-- JIT CALL DONE --")
 			}
+			exitJIT("done", result)
 			release()
 			return jitFinished, nil
 		case jit.StatusDeopt:
 			if act.DirectDepth > 1 {
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return jitDeoptimized, fmt.Errorf("jit: deopt inside a direct-recursion frame (ip %d)", act.BytecodeIP)
 			}
@@ -178,6 +196,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			if currentIp != nil {
 				*currentIp = ip
 			}
+			exitJIT("deopt", value.UNDEFINED)
 			release()
 			return jitDeoptimized, nil
 		case jit.StatusBridge:
@@ -185,10 +204,12 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				thrown := vm.makeError("RangeError", "Maximum call stack size exceeded")
 				vm.copyActivationToStack(act, localStart)
 				outcome, throwErr := vm.resumeAfterJITThrow(f, c, currentIp, int(act.BytecodeIP), thrown)
+				exitJIT("throw", thrown)
 				release()
 				return outcome, throwErr
 			}
 			if act.DirectDepth > 1 {
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return jitDeoptimized, fmt.Errorf("jit: bridge inside a direct-recursion frame (ip %d, request %d)", act.BytecodeIP, act.Request)
 			}
@@ -204,9 +225,11 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				var jsErr *JSException
 				if asJSException(bridgeErr, &jsErr) && jsErr.HasValue {
 					outcome, throwErr := vm.resumeAfterJITThrow(f, c, currentIp, int(act.BytecodeIP), jsErr.Value)
+					exitJIT("throw", jsErr.Value)
 					release()
 					return outcome, throwErr
 				}
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return jitDeoptimized, bridgeErr
 			}
@@ -223,6 +246,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				if currentIp != nil {
 					*currentIp = next
 				}
+				exitJIT("deopt", value.UNDEFINED)
 				release()
 				return jitDeoptimized, nil
 			}
@@ -230,9 +254,11 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			thrown := act.Result
 			vm.copyActivationToStack(act, localStart)
 			outcome, throwErr := vm.resumeAfterJITThrow(f, c, currentIp, int(act.BytecodeIP), thrown)
+			exitJIT("throw", thrown)
 			release()
 			return outcome, throwErr
 		default:
+			exitJIT("deopt", value.UNDEFINED)
 			release()
 			return jitDeoptimized, fmt.Errorf("jit: unknown status %d", status)
 		}
@@ -360,11 +386,12 @@ func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 	code = append(code, c.Code[ip:next]...)
 	code = append(code, chunk.OP_JIT_HALT)
 	rc := &value.ValueChunk{
-		Code:      code,
-		AstId:     make([]int, len(code)),
-		Constants: c.Constants,
-		FnName:    jitBridgeFnName,
-		ChunkID:   value.NextChunkID(),
+		Code:        code,
+		AstId:       make([]int, len(code)),
+		Constants:   c.Constants,
+		FnName:      jitBridgeFnName,
+		ChunkID:     value.NextChunkID(),
+		TraceHidden: true,
 	}
 	var bridgeFn object.Callable = object.NewFunction(jitBridgeFnName, 0, rc)
 	if real, ok := act.Fn.(*object.ObjFunction); ok {

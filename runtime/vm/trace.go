@@ -345,6 +345,9 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 	for i := start; i < vm.frameCount; i++ {
 		callFrame := vm.frames[i]
 		chunk := callFrame.fn.ValueChunk()
+		if chunk != nil && chunk.TraceHidden {
+			continue
+		}
 		frameOpPtr := callFrame.returnIp
 		frameOp := opNameAt(chunk, frameOpPtr)
 		frameAstID := astIDAt(chunk, frameOpPtr)
@@ -376,8 +379,22 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 			LocalStart: callFrame.localStart,
 		})
 	}
+	if len(state.Frames) > maxTraceCallFrames {
+		drop := len(state.Frames) - maxTraceCallFrames
+		state.Frames = state.Frames[drop:]
+		state.FramesOmitted += drop
+		for i := range state.Frames {
+			state.Frames[i].Index = i
+		}
+	}
 	if len(state.Frames) > 0 {
 		state.ActiveFrame = len(state.Frames) - 1
+		top := state.Frames[state.ActiveFrame]
+		state.Fn = top.Fn
+		state.ChunkID = top.ChunkID
+		state.OpPtr = top.OpPtr
+		state.Op = top.Op
+		state.AstID = top.AstID
 	}
 
 	top := vm.stackTop
@@ -691,7 +708,7 @@ func (vm *VM) traceJITEnter(fn string, c *value.ValueChunk, entryIP int, mode st
 	})
 }
 
-func (vm *VM) traceJITExit(fn string, entryIP int, mode, status string, result value.Value, duration time.Duration, opIP int) {
+func (vm *VM) traceJITExit(fn string, fallback *value.ValueChunk, entryIP int, mode, status string, result value.Value, duration time.Duration, opIP int) {
 	if !trace.Enabled() {
 		return
 	}
@@ -708,6 +725,13 @@ func (vm *VM) traceJITExit(fn string, entryIP int, mode, status string, result v
 		c = frame.fn.ValueChunk()
 	}
 	state := vm.snapshotVM(callFrame, c, opIP, byteAt(c, opIP))
+	if len(state.Frames) == 0 && fallback != nil {
+		state.Fn = fallback.FnName
+		state.ChunkID = fallback.ChunkID
+		state.OpPtr = entryIP
+		state.Op = opNameAt(fallback, entryIP)
+		state.AstID = astIDAt(fallback, entryIP)
+	}
 	jitState := &trace.JITState{
 		Mode:       mode,
 		State:      status,
@@ -748,4 +772,11 @@ func byteAt(c *value.ValueChunk, ip int) uint8 {
 		return 0
 	}
 	return c.Code[ip]
+}
+
+func intPtrValue(pointer *int) int {
+	if pointer == nil {
+		return 0
+	}
+	return *pointer
 }
