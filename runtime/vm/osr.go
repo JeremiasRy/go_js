@@ -66,6 +66,9 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 		return false, value.UNDEFINED, nil
 	}
 	bufferSize := cc.FrameSlots
+	if cc.Direct {
+		bufferSize = cc.FrameSlots * jit.MaxJITFrames
+	}
 	if top+8 > bufferSize {
 		bufferSize = top + 8
 	}
@@ -134,6 +137,10 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			*ip = returnIP
 			return false, value.UNDEFINED, nil
 		case jit.StatusDeopt:
+			if act.DirectDepth > 1 {
+				release()
+				return false, value.UNDEFINED, fmt.Errorf("jit: deopt inside an OSR direct-recursion frame")
+			}
 			resume := int(act.BytecodeIP)
 			ctx.Stats().NoteDeopt("runtime")
 			if jitTrace {

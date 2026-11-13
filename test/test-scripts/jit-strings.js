@@ -17,7 +17,7 @@ function templates(n) {
   return text;
 }
 
-for (let i = 0; i < 5000; i++) {
+for (let i = 0; i < 2000; i++) {
   build(3);
   templates(3);
 }

@@ -161,7 +161,7 @@ func analyzeDirect(ch *value.ValueChunk, arity int) directInfo {
 		case chunk.OP_SET_LOCAL:
 			slot := instr.Operands[0]
 			t, popped := st.pop()
-			if !popped {
+			if !popped || t == tSelf || t == tUnknown {
 				ok = false
 				break
 			}
@@ -170,7 +170,7 @@ func analyzeDirect(ch *value.ValueChunk, arity int) directInfo {
 		case chunk.OP_DEFINE_LOCAL_SLOT:
 			slot := instr.Operands[0]
 			t, popped := st.pop()
-			if !popped {
+			if !popped || t == tSelf || t == tUnknown {
 				ok = false
 				break
 			}
@@ -188,7 +188,7 @@ func analyzeDirect(ch *value.ValueChunk, arity int) directInfo {
 				ok = false
 				break
 			}
-			if st.types[st.top-1] == tUnknown {
+			if t := st.types[st.top-1]; t == tUnknown || t == tSelf {
 				ok = false
 			}
 		case chunk.OP_POP_LOCAL, chunk.OP_POP:

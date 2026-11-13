@@ -641,7 +641,9 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.DecRR(R11)
 		cs.pushImm(value.UNDEFINED)
 	case chunk.OP_TO_NUMBER:
-		cs.bridge(ip, ReqToNumber)
+		if !cs.direct {
+			cs.bridge(ip, ReqToNumber)
+		}
 	case chunk.OP_TO_STRING:
 		cs.bridge(ip, ReqToString)
 	case chunk.OP_TO_PROPERTY_KEY:

@@ -100,7 +100,7 @@ func main() {
 	if !runAOC(timeout) {
 		failed = true
 	}
-	if !runBenchmarks(30 * time.Second) {
+	if !runBenchmarks(60 * time.Second) {
 		failed = true
 	}
 	if failed {

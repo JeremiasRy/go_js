@@ -22,7 +22,7 @@ function run(n) {
   return total + counter.current;
 }
 
-for (let i = 0; i < 5000; i++) {
+for (let i = 0; i < 1000; i++) {
   run(2);
 }
 

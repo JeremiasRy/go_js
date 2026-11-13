@@ -609,6 +609,7 @@ func (ctx *Context) Compile(fn object.Callable) (*CompiledChunk, error) {
 	if err != nil {
 		ctx.failures[chunk] = err.Error()
 		ctx.stats.NoteFail(err.Error())
+		ctx.eligibility.Store(chunk, false)
 		cc = &CompiledChunk{Chunk: chunk, CompileErr: err.Error()}
 		ctx.compiled[chunk] = cc
 		return nil, err

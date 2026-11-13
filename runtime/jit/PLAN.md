@@ -971,6 +971,11 @@ Measured on the development machine (Linux amd64, Go 1.26.3):
 | recursive `fib(40)` | ~97 s (extrapolated) | ~2.7 s |
 | `sum(5_000_000)` loop in a one-shot function | ~1.1 s | ~0.15 s |
 | top-level `for` loop, 5M numeric iterations | ~1.2 s | ~0.1 s |
-| `benchmark-scripts/array-iteration.js` | ~33 s | ~33 s (kept interpreted by the OSR profitability rule) |
-| `benchmark-scripts/object-access.js` | ~9.5 s | ~10 s (bridged) |
-| `benchmark-scripts/string-operations.js` | ~7.2 s | ~7.2 s |
+| `benchmark-scripts/array-iteration.js` | ~30 s | ~30 s (kept interpreted by the OSR profitability rule) |
+| `benchmark-scripts/object-access.js` | ~6.7 s | ~6.7 s (bridged) |
+| `benchmark-scripts/string-operations.js` | ~5.4 s | ~5.4 s (bridged) |
+| `benchmark-scripts/try-catch-shenanigans.js` | ~1.1 s | ~1.1 s (non-jittable, interpreter) |
+
+The test harness allows 60 s for a benchmark because the interpreter's array
+benchmark alone is close to 30 s on the development machine. Wall-clock timing
+is still recorded rather than gated.

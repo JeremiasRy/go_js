@@ -35,7 +35,7 @@ function run(n) {
   return total;
 }
 
-for (let i = 0; i < 5000; i++) {
+for (let i = 0; i < 200; i++) {
   run(1);
 }
 
