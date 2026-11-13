@@ -702,9 +702,10 @@ invalidate correctly across GC and mutation.
 - [x] Update `README.md` and `ECMASCRIPT_ROADMAP.md` with the supported subset,
       flags, and benchmark results.
 - [x] Delete or build-tag the unused arm64 JIT stubs; keep amd64 clean.
-- [ ] Final pass: `./test.sh`, JIT-off vs JIT-force, benchmarks, and a short
-      handoff note in this file. (Tracked separately below; the Docker gate is
-      run last.)
+- [x] Final pass: `./test.sh`, JIT-off vs JIT-force, benchmarks, and a short
+      handoff note in this file. `GO_JS_DIFFERENTIAL=1 ./test.sh` passed
+      506/506 cases in the Docker image (Go 1.26 / Node 24), including AOC and
+      all benchmarks.
 
 ---
 
@@ -947,7 +948,10 @@ Verification:
   mutation, strings, iterators, classes, `new`/`in`/`instanceof`, and hot
   callbacks.
 - `GO_JS_DIFFERENTIAL=1 ./test.sh` runs the interpreter and forced JIT on every
-  positive case and fails on stdout or diagnostic divergence.
+  positive case and fails on stdout or diagnostic divergence. The final Docker
+  run passed 506/506 tests plus the AOC puzzle and all benchmarks. A local run
+  against Node 20 reports only the modern-feature probes that Node 20 itself
+  cannot evaluate; the Docker Node 24 reference passes them.
 
 Deferred, with reasons:
 

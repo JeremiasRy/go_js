@@ -19,11 +19,15 @@ import (
 var (
 	sharedJITOnce    sync.Once
 	sharedJITContext *jit.Context
-	jitTrace         = flags.JITTrace || os.Getenv("JIT_TRACE") == "1"
+
 )
 
 func PrintJITStats(w io.Writer) {
 	jitContext().PrintStats(w)
+}
+
+func jitTracing() bool {
+	return flags.JITTrace || os.Getenv("JIT_TRACE") == "1"
 }
 
 func jitContext() *jit.Context {
@@ -110,7 +114,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 
 	entry, ok := cc.Entry(0)
 	if !ok {
-		if jitTrace {
+		if jitTracing() {
 			fmt.Fprintf(os.Stderr, "JIT no entry 0; entries=%v\n", cc.Entries)
 		}
 		release()
@@ -124,7 +128,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	for {
 		act.Status = jit.StatusDone
 		status, enterErr := ctx.Enter(cc, entry, act)
-		if jitTrace {
+		if jitTracing() {
 			fmt.Fprintf(os.Stderr, "JIT seg entry=%x status=%d req=%d ip=%d sp=%d res=%x frame=%d dd=%d self=%x this=%x\n", entry, status, act.Request, act.BytecodeIP, act.SP, uint64(act.Result), vm.frameCount, act.DirectDepth, uint64(act.SelfValue), uint64(act.This))
 		}
 		if enterErr != nil {
@@ -156,7 +160,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				return jitDeoptimized, fmt.Errorf("jit: deopt inside a direct-recursion frame (ip %d)", act.BytecodeIP)
 			}
 			ip := int(act.BytecodeIP)
-			if jitTrace {
+			if jitTracing() {
 				n := int(act.SP)
 				if n > 6 {
 					n = 6
@@ -313,7 +317,7 @@ func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 	c := *act.Chunk
 	ip := int(act.BytecodeIP)
 	jitContext().Stats().NoteBridge()
-	if jitTrace {
+	if jitTracing() {
 		fmt.Fprintf(os.Stderr, "BRIDGE ip=%d req=%d gc=%d\n", ip, act.Request, act.GlobalsCount)
 	}
 	next, ok := jit.InstructionEnd(c.Code, ip)

@@ -50,7 +50,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 	}
 	entry, ok := cc.Entry(target)
 	if !ok {
-		if jitTrace {
+		if jitTracing() {
 			fmt.Fprintf(os.Stderr, "OSR no entry ip=%d entries=%v\n", target, cc.Entries)
 		}
 		ctx.BlacklistLoop(c, target)
@@ -110,7 +110,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 	}
 
 	ctx.Stats().NoteOSR()
-	if jitTrace {
+	if jitTracing() {
 		fmt.Fprintf(os.Stderr, "OSR enter ip=%d sp=%d frame=%d fn=%s\n", target, top, vm.frameCount, c.FnName)
 	}
 	for {
@@ -143,7 +143,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			}
 			resume := int(act.BytecodeIP)
 			ctx.Stats().NoteDeopt("runtime")
-			if jitTrace {
+			if jitTracing() {
 				fmt.Fprintf(os.Stderr, "OSR deopt ip=%d\n", resume)
 			}
 			vm.copyActivationToStack(act, localStart)
