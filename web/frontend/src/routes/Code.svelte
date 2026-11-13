@@ -22,7 +22,7 @@
     const MAIN_FUNCTION = "PROGRAM_MAIN";
     const EXPAND_DURATION = 200;
 
-    let expandedFunctions = $state<string[]>([MAIN_FUNCTION]);
+    let expandedFunctions = $state<string[]>([]);
 
     const sameFunctions = (a: string[], b: string[]) => {
         return a.length === b.length && a.every((fn) => b.includes(fn));
@@ -231,7 +231,7 @@
 
     const affectedFunctions = $derived.by(() => {
         if (highlight === null) {
-            return [MAIN_FUNCTION];
+            return [];
         }
 
         if (highlight.source !== "ast") {
