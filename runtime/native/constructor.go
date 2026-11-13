@@ -363,6 +363,7 @@ func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done 
 	callback.Stack = append([]value.Value{}, st.args...)
 	callback.TraceLabel = st.traceLabel
 	callback.TraceSource = st.traceSource
+	callback.Cancelled = st.cancel
 	message := &object.JobChannelMessage{
 		Job:      nil,
 		Callback: callback,

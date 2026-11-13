@@ -2,6 +2,7 @@ package object
 
 import (
 	"go_js/value"
+	"sync/atomic"
 )
 
 type ObjType uint8
@@ -67,6 +68,7 @@ type Callback struct {
 	TraceID     uint64
 	TraceLabel  string
 	TraceSource string
+	Cancelled   *atomic.Bool
 }
 
 type JobChannelMessage struct {

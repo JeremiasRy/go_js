@@ -2860,6 +2860,13 @@ Run:
 	callback, priority, errDequeue := queue.Dequeue()
 	for errDequeue == nil {
 		callback.MicroTask = priority == queue.MICRO_TASK
+		if callback.Cancelled != nil && callback.Cancelled.Load() {
+			if callback.RootKey != 0 {
+				heap.ClearCallbackRoot(callback.RootKey)
+			}
+			callback, priority, errDequeue = queue.Dequeue()
+			continue
+		}
 		vm.traceJobStart(callback, priority)
 		if callback.Native != nil {
 			callback.Native()
