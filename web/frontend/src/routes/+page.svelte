@@ -60,6 +60,7 @@
     let selectedScriptId = $state<string | null>(null);
     let randomLoading = $state(false);
     let scriptsRequest = 0;
+    let runDots = $state(0);
     let isBusy = $derived(
         pageState === "submitting" || pageState === "running",
     );
@@ -71,14 +72,27 @@
     );
     let statusLabel = $derived(
         pageState === "submitting"
-            ? "Submitting…"
+            ? `Submitting${".".repeat(runDots + 1)}`
             : pageState === "running"
-              ? "Running…"
+              ? `Running${".".repeat(runDots + 1)}`
               : runError !== null
                 ? "Run failed"
                 : "",
     );
     const reveal = new Tween(0, { duration: 350, easing: cubicOut });
+
+    $effect(() => {
+        if (!isBusy) {
+            runDots = 0;
+            return;
+        }
+
+        const interval = setInterval(() => {
+            runDots = (runDots + 1) % 3;
+        }, 350);
+
+        return () => clearInterval(interval);
+    });
 
     $effect(() => {
         reveal.target = showResults ? 1 : 0;
@@ -903,9 +917,17 @@
                     onclick={() => submitCode()}
                     disabled={pageState !== "input" ||
                         serverStatus !== "connected"}
-                    class="bg-[#00ADD8] hover:bg-[#00758D] text-white px-4 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    class="inline-flex min-w-28 items-center justify-center gap-2 bg-[#00ADD8] hover:bg-[#00758D] text-white px-4 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                    Submit
+                    {#if isBusy}
+                        <span
+                            class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                            aria-hidden="true"
+                        ></span>
+                        {pageState === "submitting" ? "Submitting" : "Running"}
+                    {:else}
+                        Submit
+                    {/if}
                 </button>
                 {#if pageState !== "input"}
                     <button
