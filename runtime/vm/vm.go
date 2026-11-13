@@ -125,11 +125,20 @@ type VM struct {
 	withObjects   []value.Value
 	lastJITGC     uint32
 	callCounts    map[*value.ValueChunk]int
+
+	traceID       int
+	traceParentID int
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_INITIAL)
+	traceID := 0
+	if main {
+		traceID = 1
+	} else {
+		traceID = newTraceVMID()
+	}
 
 	return &VM{
 		output:         output,
@@ -143,12 +152,14 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		loopMarks:      map[int][]int{},
 		loopIterators:  map[int]value.Value{},
 		callCounts:     map[*value.ValueChunk]int{},
+		traceID:        traceID,
 	}
 }
 
 func (vm *VM) newSubVM() *VM {
 	sub := NewVM(false, vm.output)
 	sub.callCounts = vm.callCounts
+	sub.traceParentID = vm.traceID
 	return sub
 }
 
@@ -1478,6 +1489,7 @@ func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Valu
 	runner := vm.newSubVM()
 	runner.depth = vm.depth + 1
 	fn := object.NewFunction("native-call", 0, nil)
+	fn.ValueChunk().TraceHidden = true
 	for _, arg := range args {
 		fn.ValueChunk().WriteConstant(arg)
 	}
@@ -3037,8 +3049,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 	for {
 		// time.Sleep(time.Millisecond * 100)
-		code := c.Code[ip]
+		opIp := ip
+		code := c.Code[opIp]
 		ip++
+
+		vm.traceStep(&f, &c, opIp, code)
 
 		if heap.ShouldRunGCCycle() {
 			vm.runGC()

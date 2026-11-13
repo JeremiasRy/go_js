@@ -36,6 +36,7 @@ type ValueChunk struct {
 	Constants    []Value
 	FnName       string
 	ChunkID      string
+	TraceHidden  bool
 }
 
 var nextChunkID atomic.Uint64

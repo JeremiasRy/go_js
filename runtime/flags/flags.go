@@ -22,6 +22,8 @@ var (
 	JITTrace         = false
 	StructuredOutput = true
 	JSONErrors       = false
+	TraceExecution   = false
+	TraceMaxFrames   = 10000
 )
 
 func defaultJITMode() string {
