@@ -1085,11 +1085,7 @@
                     in:fly={{ x: 32, duration: 300, easing: cubicOut }}
                     out:fade={{ duration: 150 }}
                 >
-                    <section
-                        class="{outputExpanded
-                            ? 'flex-1'
-                            : 'shrink-0'} {CARD_CLASS}"
-                    >
+                    <section class="shrink-0 {CARD_CLASS}">
                         <button
                             type="button"
                             class="{CARD_HEADER_CLASS} w-full cursor-pointer text-left hover:text-slate-800"
@@ -1111,7 +1107,7 @@
                         {#if outputExpanded}
                             <div
                                 id="execution-result-panel"
-                                class="flex-1 min-h-0 overflow-auto p-3"
+                                class="max-h-[35vh] overflow-y-auto p-3"
                                 transition:slide={{ duration: 200 }}
                             >
                                 <pre
