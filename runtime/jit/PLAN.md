@@ -541,23 +541,23 @@ reach users).
 
 Goal: replace the unsafe core without changing the supported opcode set.
 
-- [ ] Introduce `JITContext`, `JITActivation`, compiled-chunk cache, and the
+- [x] Introduce `JITContext`, `JITActivation`, compiled-chunk cache, and the
       `runJIT` loop.
-- [ ] Add `jitEnter` assembly and remove the fake `func()` entry path.
-- [ ] Implement the bridge protocol: request IDs, fixed argument area, statuses
+- [x] Add `jitEnter` assembly and remove the fake `func()` entry path.
+- [x] Implement the bridge protocol: request IDs, fixed argument area, statuses
       `DONE`, `DEOPT`, `BRIDGE`, `THROW`.
-- [ ] Implement the deopt state copy to `vm.stack` and the `vm.Call` integration
+- [x] Implement the deopt state copy to `vm.stack` and the `vm.Call` integration
       (including a proper error path/`throwValue`).
-- [ ] Port the current 8 opcodes to the new encoder; unsupported ops become
+- [x] Port the current 8 opcodes to the new encoder; unsupported ops become
       deopt sites instead of compile errors.
-- [ ] Add the guards needed to make the ported subset safe: number/tag checks,
+- [x] Add the guards needed to make the ported subset safe: number/tag checks,
       globals reload/guard, argument padding before entry, zero-argument result
       fix, and correct unordered comparison handling. If an opcode cannot be made
       safe yet, mark it deopt-only rather than porting the old assumption.
-- [ ] Add labels/fixups, frame layout, stack-depth analysis, RW→RX code arena,
+- [x] Add labels/fixups, frame layout, stack-depth analysis, RW→RX code arena,
       page-size handling, and bounds checks.
-- [ ] Key code by chunk; move globals into the context; cache failures.
-- [ ] Preserve structured disassembly.
+- [x] Key code by chunk; move globals into the context; cache failures.
+- [x] Preserve structured disassembly.
 
 Exit criteria: fib still works with JIT force; the known miscompiles are fixed;
 no package-global maps; encoder and activation-layout unit tests pass.
