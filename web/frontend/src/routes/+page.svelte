@@ -981,10 +981,19 @@
                         Results
                     </div>
 
-                    <div
-                        class="p-6 text-slate-500 whitespace-pre-wrap shrink-0"
-                    >
-                        {interpretResult!.result?.output}
+                    <div class="p-2 pb-0 shrink-0">
+                        <div
+                            class="flex max-h-[35vh] min-h-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white"
+                        >
+                            <div
+                                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
+                            >
+                                Execution result
+                            </div>
+                            <pre
+                                class="min-h-0 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-sm text-slate-600">{interpretResult!
+                                    .result?.output || "(no output)"}</pre>
+                        </div>
                     </div>
 
                     <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
