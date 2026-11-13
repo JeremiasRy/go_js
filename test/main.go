@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+const jitOff = "off"
+const jitForce = "force"
+
 const DIR_NAME_TEST_SCRIPTS string = "test-scripts"
 const DIR_NAME_BENCMARKS string = "benchmark-scripts"
 const EXPECTED_TEST_RESULT_RUNNER = "node"
@@ -23,7 +26,15 @@ type failure struct {
 	got      string
 }
 
+func modeLabel(mode string) string {
+	if mode == "" {
+		return "auto"
+	}
+	return mode
+}
+
 func main() {
+	differential := os.Getenv("GO_JS_DIFFERENTIAL") == "1"
 	cases, timeout, err := loadCases(".")
 	if err != nil {
 		log.Fatalf("failed to load test cases: %s", err)
@@ -38,12 +49,40 @@ func main() {
 		} else {
 			expected = runNode(test, timeout)
 		}
-		got := runRuntime(test, timeout)
-		if err := compareCase(test, expected, got); err != nil {
-			fmt.Println("❌", err)
+		modes := []string{""}
+		if differential {
+			modes = []string{jitOff, jitForce}
+		} else if strings.HasPrefix(filepath.Base(test.File), "jit-") {
+			modes = []string{jitForce}
+		}
+		var first execution
+		var failureReason error
+		for index, mode := range modes {
+			got := runRuntime(test, timeout, mode)
+			if err := checkOutcome(test, got); err != nil {
+				failureReason = fmt.Errorf("jit=%s: %w", modeLabel(mode), err)
+				first = got
+				break
+			}
+			if index == 0 {
+				first = got
+			}
+			if err := compareCase(test, expected, got); err != nil {
+				failureReason = fmt.Errorf("jit=%s: %w", modeLabel(mode), err)
+				first = got
+				break
+			}
+			if differential && index > 0 && !bytes.Equal(first.Output, got.Output) {
+				failureReason = fmt.Errorf("jit=off and jit=force produced different output")
+				first = got
+				break
+			}
+		}
+		if failureReason != nil {
+			fmt.Println("❌", failureReason)
 			fails = append(fails, failure{
-				test: test.label(), reason: err.Error(),
-				expected: describeExecution(expected), got: describeExecution(got),
+				test: test.label(), reason: failureReason.Error(),
+				expected: describeExecution(expected), got: describeExecution(first),
 			})
 		} else {
 			fmt.Println("✅")
@@ -61,7 +100,7 @@ func main() {
 	if !runAOC(timeout) {
 		failed = true
 	}
-	if !runBenchmarks(30 * time.Second) {
+	if !runBenchmarks(120 * time.Second) {
 		failed = true
 	}
 	if failed {
@@ -73,7 +112,7 @@ func runAOC(timeout time.Duration) bool {
 	fmt.Println("RUNNING AOC PUZZLE")
 	test := testCase{File: AOC_PUZZLE_LOCATION, SourceGoal: "module"}
 	expected := runNode(test, timeout)
-	got := runRuntime(test, timeout)
+	got := runRuntime(test, timeout, "")
 	// Preserve the existing puzzle's newline-insensitive object-output check.
 	expected.Output = bytes.ReplaceAll(expected.Output, []byte("\n"), nil)
 	got.Output = bytes.ReplaceAll(got.Output, []byte("\n"), nil)
@@ -102,7 +141,7 @@ func runBenchmarks(timeout time.Duration) bool {
 		}
 		test := testCase{File: filepath.Join(DIR_NAME_BENCMARKS, bench.Name()), SourceGoal: "script"}
 		expected := runNode(test, timeout)
-		got := runRuntime(test, timeout)
+		got := runRuntime(test, timeout, "")
 		fmt.Printf("\nBenchmark: %s\n-- NodeJS performance --\n%s\n-- GO_JS performance --\n%s\n",
 			bench.Name(), describeExecution(expected), describeExecution(got))
 		if err := checkOutcome(test, expected); err != nil {

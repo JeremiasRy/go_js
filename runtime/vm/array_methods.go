@@ -488,12 +488,15 @@ func (vm *VM) invokeCallback(fn value.Value, this value.Value, args []value.Valu
 	} else if fnObj, ok := callable.(*object.ObjFunction); ok && vm.main && scriptMode && !fnObj.Strict && callThis == value.UNDEFINED && !fnObj.IsArrow {
 		callThis = vm.ensureGlobalObject()
 	}
-	runner := NewVM(false, vm.output)
+	runner := vm.newSubVM()
 	runner.depth = vm.depth + 1
 	for _, arg := range args {
 		runner.push(arg)
 	}
-	f, c := runner.Call(callable, nil, callThis, len(args), false)
+	f, c, callErr := runner.Call(callable, value.UNDEFINED, nil, callThis, len(args), false)
+	if callErr != nil {
+		return value.UNDEFINED, callErr
+	}
 	return runner.run(f, c)
 }
 

@@ -38,6 +38,15 @@ export type SetHighlightStatusParams = setHighlightFromOpCode | setHighlightFrom
 
 export type PageStatus = "input" | "submitting" | "running" | "error" | "done";
 export type JobStatus = "Success" | "Failed" | "Pending" | "Processing";
+
+export type ScriptJob = {
+  job_id: string;
+  session_id: string;
+  src: string;
+  job_status: JobStatus;
+  created_at: string;
+};
+
 export type FunctionName = string;
 export type DisassembledByteCode =
   { byte_code: { ast_id: number; op: string; op_ptr: number }[]; jit: { inst: string; op_code_ptr: number; ast_id: number }[] }

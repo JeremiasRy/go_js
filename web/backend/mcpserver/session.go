@@ -32,8 +32,10 @@ const (
 var mcpIdleWindow = 60 * time.Second
 
 type JobStore interface {
-	InsertNewJob(src string, ctx context.Context) (uuid.UUID, error)
+	InsertNewJob(sessionID string, src string, ctx context.Context) (uuid.UUID, error)
 	UpdateJob(status db.JobStatus, result string, jobID uuid.UUID, ctx context.Context) error
+	GetJobsBySessionID(sessionID string, ctx context.Context) ([]db.UserScriptJob, error)
+	GetRandomJob(ctx context.Context) (*db.UserScriptJob, error)
 }
 
 type Session struct {
@@ -361,7 +363,7 @@ func (s *Session) handleRunSubmit(message socketMessage) {
 	s.mu.Unlock()
 
 	ctx, cancel := context.WithTimeout(context.Background(), jobInsertTimeout)
-	jobID, err := s.store.InsertNewJob(message.Code, ctx)
+	jobID, err := s.store.InsertNewJob(s.id, message.Code, ctx)
 	cancel()
 	if err != nil {
 		s.failActive(requestID, fmt.Errorf("failed to queue job: %w", err))

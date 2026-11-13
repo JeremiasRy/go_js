@@ -51,10 +51,19 @@ func main() {
 	flag.BoolVar(&flags.StructuredOutput, "structured", false, "Enable structured output")
 	flag.BoolVar(&flags.JSONErrors, "json-errors", false, "Report error classes and phases as JSON on stderr")
 	sourceType := flag.String("source-type", "module", "JavaScript source goal: script or module")
+	jitMode := flag.String("jit", flags.JITMode, "JIT mode: off, auto or force")
+	flag.IntVar(&flags.JITCallThreshold, "jit-call-threshold", flags.JITCallThreshold, "Call count before a function is JIT compiled")
+	flag.IntVar(&flags.JITLoopThreshold, "jit-loop-threshold", flags.JITLoopThreshold, "Backedge count before a hot loop is compiled with OSR")
+	flag.IntVar(&flags.JITMaxCodeBytes, "jit-max-code-bytes", flags.JITMaxCodeBytes, "Maximum executable code cache size in bytes")
+	flag.BoolVar(&flags.JITStats, "jit-stats", false, "Print JIT statistics on exit")
+	flag.BoolVar(&flags.JITTrace, "jit-trace", false, "Trace JIT compilation and execution")
 
 	flag.Parse()
 	if *sourceType != "script" && *sourceType != "module" {
 		diagnostic.Fatal("configuration", "Error", fmt.Errorf("invalid source type %q", *sourceType))
+	}
+	if err := flags.SetJITMode(*jitMode); err != nil {
+		diagnostic.Fatal("configuration", "Error", err)
 	}
 
 	args := flag.Args()
@@ -129,6 +138,10 @@ func main() {
 	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
+
+	if flags.JITStats {
+		virtualMachine.PrintJITStats(os.Stderr)
+	}
 
 	if flags.StructuredOutput {
 		info := map[string]*virtualMachine.DebugInfo{}

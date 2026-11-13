@@ -106,9 +106,13 @@ func decodeReference(result execution) execution {
 	return result
 }
 
-func runRuntime(test testCase, timeout time.Duration) execution {
-	result := execute(timeout, "./"+RUNTIME_BINARY_NAME,
-		"--json-errors", "--source-type="+test.SourceGoal, test.File)
+func runRuntime(test testCase, timeout time.Duration, jitMode string) execution {
+	args := []string{"--json-errors", "--source-type=" + test.SourceGoal}
+	if jitMode != "" {
+		args = append(args, "--jit="+jitMode)
+	}
+	args = append(args, test.File)
+	result := execute(timeout, "./"+RUNTIME_BINARY_NAME, args...)
 	return decodeRuntime(result)
 }
 

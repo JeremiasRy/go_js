@@ -12,18 +12,21 @@
     import { Tween } from "svelte/motion";
     import { cubicOut } from "svelte/easing";
     import { fade, fly } from "svelte/transition";
-    import fibo from "$lib/examples/fibonacci?raw";
+    import { defaultExample, examples, type CodeExample } from "$lib/examples";
     import type {
         AstNode,
         HighlightStatus,
         PageStatus,
         InterpretResult,
+        JobStatus,
+        ScriptJob,
         SetHighlightStatusParams,
     } from "../types";
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
     import Code from "./Code.svelte";
     import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
+    import { fetchRandomScript, fetchSessionScripts } from "$lib/scriptsApi";
     import {
         connectAgentSocket,
         type AgentSocket,
@@ -36,8 +39,11 @@
     const astElements = $state(new Map<number, HTMLElement>());
     const lookUp = $state(new Map<number, AstNode>());
 
+    type EditorTab = "editor" | "examples";
+
     let editorContainer: HTMLElement;
     let view: EditorView;
+    let editorTab = $state<EditorTab>("editor");
     let jobId = $state<null | string>(null);
     let activeRequestId = $state<null | string>(null);
     let pageState = $state<PageStatus>("input");
@@ -50,6 +56,17 @@
     let copyState = $state<"idle" | "copied" | "failed">("idle");
     let socket: AgentSocket | null = null;
     let runTimeout: ReturnType<typeof setTimeout> | null = null;
+    let sessionId = $state<string | null>(null);
+    let scripts = $state<ScriptJob[]>([]);
+    let scriptsLoading = $state(false);
+    let scriptsError = $state<string | null>(null);
+    let selectedScriptId = $state<string | null>(null);
+    let randomLoading = $state(false);
+    let scriptsRequest = 0;
+    let runDots = $state(0);
+    let isBusy = $derived(
+        pageState === "submitting" || pageState === "running",
+    );
     let showResults = $derived(
         pageState === "done" &&
             interpretResult !== null &&
@@ -58,14 +75,27 @@
     );
     let statusLabel = $derived(
         pageState === "submitting"
-            ? "Submitting…"
+            ? `Submitting${".".repeat(runDots + 1)}`
             : pageState === "running"
-              ? "Running…"
+              ? `Running${".".repeat(runDots + 1)}`
               : runError !== null
                 ? "Run failed"
                 : "",
     );
     const reveal = new Tween(0, { duration: 350, easing: cubicOut });
+
+    $effect(() => {
+        if (!isBusy) {
+            runDots = 0;
+            return;
+        }
+
+        const interval = setInterval(() => {
+            runDots = (runDots + 1) % 3;
+        }, 350);
+
+        return () => clearInterval(interval);
+    });
 
     $effect(() => {
         reveal.target = showResults ? 1 : 0;
@@ -155,7 +185,7 @@
 
     onMount(() => {
         view = new EditorView({
-            doc: fibo,
+            doc: defaultExample,
             parent: editorContainer,
             extensions: [
                 basicSetup,
@@ -178,25 +208,46 @@
     });
 
     onMount(() => {
-        const bootstrap = createSessionBootstrap();
-        if (bootstrap === null) {
-            serverStatus = "disconnected";
-            runError =
-                "Could not initialize the editor session. Reload the page to try again.";
-            pageState = "error";
-            return;
-        }
+        let cancelled = false;
 
-        mcpUrl = resolveUrl(bootstrap.mcp_path);
-        socket = connectAgentSocket({
-            websocketPath: bootstrap.ws_path,
-            onMessage: handleServerMessage,
-            onStatus: (status) => {
-                serverStatus = status;
-            },
-        });
+        void (async () => {
+            try {
+                const bootstrap = await createSessionBootstrap();
+                if (cancelled) {
+                    return;
+                }
+                if (bootstrap === null) {
+                    serverStatus = "disconnected";
+                    runError =
+                        "Could not initialize the editor session. Reload the page to try again.";
+                    pageState = "error";
+                    return;
+                }
+
+                mcpUrl = resolveUrl(bootstrap.mcp_path);
+                sessionId = bootstrap.session_id;
+                void loadSessionScripts();
+                socket = connectAgentSocket({
+                    websocketPath: bootstrap.ws_path,
+                    onMessage: handleServerMessage,
+                    onStatus: (status) => {
+                        serverStatus = status;
+                    },
+                });
+            } catch (error) {
+                if (cancelled) {
+                    return;
+                }
+                console.error(error);
+                serverStatus = "disconnected";
+                runError =
+                    "Could not initialize the editor session. Reload the page to try again.";
+                pageState = "error";
+            }
+        })();
 
         return () => {
+            cancelled = true;
             socket?.close();
             socket = null;
             clearRunTimeout();
@@ -320,6 +371,153 @@
         }, 120_000);
     }
 
+    async function loadSessionScripts() {
+        const id = sessionId;
+        if (id === null) {
+            return;
+        }
+
+        const request = ++scriptsRequest;
+        scriptsLoading = true;
+        try {
+            const nextScripts = await fetchSessionScripts(id);
+            if (request !== scriptsRequest) {
+                return;
+            }
+            scripts = nextScripts;
+            scriptsError = null;
+        } catch (error) {
+            if (request !== scriptsRequest) {
+                return;
+            }
+            console.error(error);
+            scriptsError = "Could not load your latest runs.";
+        } finally {
+            if (request === scriptsRequest) {
+                scriptsLoading = false;
+            }
+        }
+    }
+
+    async function loadRandomScript() {
+        if (isBusy || randomLoading) {
+            return;
+        }
+
+        randomLoading = true;
+        try {
+            const script = await fetchRandomScript();
+            if (script === null) {
+                scriptsError = "No scripts in the database yet.";
+                return;
+            }
+            applyScript(script);
+            scriptsError = null;
+        } catch (error) {
+            console.error(error);
+            scriptsError = "Could not fetch a random script.";
+        } finally {
+            randomLoading = false;
+        }
+    }
+
+    function replaceEditorSource(src: string): boolean {
+        if (view === undefined || isBusy) {
+            return false;
+        }
+
+        setEditorTab("editor");
+        resetPage();
+        view.dispatch({
+            changes: {
+                from: 0,
+                to: view.state.doc.length,
+                insert: src,
+            },
+        });
+        view.focus();
+        return true;
+    }
+
+    function applyScript(script: ScriptJob) {
+        if (!replaceEditorSource(script.src)) {
+            return false;
+        }
+
+        selectedScriptId = script.job_id;
+        return true;
+    }
+
+    function loadExample(example: CodeExample) {
+        if (!replaceEditorSource(example.source)) {
+            return;
+        }
+
+        selectedScriptId = null;
+    }
+
+    function runScript(script: ScriptJob) {
+        if (!applyScript(script)) {
+            return;
+        }
+        submitCode();
+    }
+
+    function setEditorTab(tab: EditorTab) {
+        if (editorTab === tab) {
+            return;
+        }
+
+        editorTab = tab;
+        if (tab === "editor") {
+            void tick().then(() => view?.requestMeasure());
+        }
+    }
+
+    function editorTabClass(tab: EditorTab): string {
+        return editorTab === tab
+            ? "cursor-pointer rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+            : "cursor-pointer rounded-md px-3 py-1 text-xs font-medium text-slate-500 hover:text-slate-700";
+    }
+
+    function scriptPreview(src: string): string {
+        const line = src.split("\n").find((value) => value.trim() !== "");
+        return (line ?? "Empty script").trim().slice(0, 90);
+    }
+
+    function formatScriptTime(value: string): string {
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+            return "";
+        }
+
+        return date.toLocaleString(undefined, {
+            month: "short",
+            day: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+        });
+    }
+
+    function statusDotClass(status: JobStatus): string {
+        switch (status) {
+            case "Success":
+                return "bg-emerald-500";
+            case "Failed":
+                return "bg-red-500";
+            case "Processing":
+                return "bg-amber-400";
+            default:
+                return "bg-slate-400";
+        }
+    }
+
+    function scriptButtonClass(jobId: string): string {
+        return selectedScriptId === jobId
+            ? "border-[#00ADD8] bg-cyan-50"
+            : "border-slate-200 bg-white hover:bg-slate-50";
+    }
+
     function handleRunAccepted(message: {
         request_id: string;
         job_id: string;
@@ -336,7 +534,9 @@
 
         activeRequestId = message.request_id;
         jobId = message.job_id;
+        selectedScriptId = message.job_id;
         pageState = "running";
+        void loadSessionScripts();
     }
 
     function handleRunResult(message: {
@@ -357,6 +557,7 @@
         clearRunTimeout();
         activeRequestId = null;
         jobId = null;
+        void loadSessionScripts();
 
         if (message.job_status === "Success") {
             try {
@@ -436,6 +637,7 @@
         }
 
         resetPage();
+        setEditorTab("editor");
         view.dispatch({
             changes: {
                 from: 0,
@@ -628,7 +830,100 @@
         </span>
     </div>
 
-    <div class="flex-1 min-h-0 flex flex-row">
+    <div class="flex-1 min-h-0 flex flex-row gap-3">
+        <aside
+            class="w-64 shrink-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+            aria-label="Latest runs"
+        >
+            <div
+                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2"
+            >
+                <span>Latest runs</span>
+                <button
+                    type="button"
+                    onclick={() => void loadSessionScripts()}
+                    disabled={scriptsLoading || sessionId === null}
+                    class="text-xs font-medium text-[#00758D] hover:text-[#00ADD8] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                    {scriptsLoading ? "Loading…" : "Refresh"}
+                </button>
+            </div>
+
+            <div class="p-3 border-b border-slate-100 shrink-0">
+                <button
+                    type="button"
+                    onclick={() => void loadRandomScript()}
+                    disabled={isBusy || randomLoading}
+                    class="w-full bg-[#00ADD8] hover:bg-[#00758D] text-white px-3 py-2 rounded-lg transition-colors text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                >
+                    {randomLoading
+                        ? "Finding a script…"
+                        : "🎲 Give me a random script"}
+                </button>
+            </div>
+
+            {#if scriptsError}
+                <div
+                    class="mx-3 mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+                    role="status"
+                >
+                    {scriptsError}
+                </div>
+            {/if}
+
+            <div class="flex-1 min-h-0 overflow-y-auto p-2">
+                {#if scripts.length === 0}
+                    <p class="px-2 py-3 text-xs text-slate-500">
+                        {scriptsLoading
+                            ? "Loading runs…"
+                            : "No runs yet. Submit one and it will show up here."}
+                    </p>
+                {:else}
+                    <ul class="flex flex-col gap-1">
+                        {#each scripts as script (script.job_id)}
+                            <li>
+                                <button
+                                    type="button"
+                                    onclick={() => runScript(script)}
+                                    disabled={isBusy}
+                                    class="w-full text-left rounded-lg border px-3 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer {scriptButtonClass(
+                                        script.job_id,
+                                    )}"
+                                >
+                                    <span
+                                        class="flex items-center gap-1.5 text-[11px] font-medium text-slate-500"
+                                    >
+                                        <span
+                                            class="h-1.5 w-1.5 rounded-full {statusDotClass(
+                                                script.job_status,
+                                            )}"
+                                        ></span>
+                                        {script.job_status}
+                                        <span class="ml-auto font-normal">
+                                            {formatScriptTime(
+                                                script.created_at,
+                                            )}
+                                        </span>
+                                    </span>
+                                    <span
+                                        class="mt-1 block truncate font-mono text-xs text-slate-700"
+                                    >
+                                        {scriptPreview(script.src)}
+                                    </span>
+                                    <span
+                                        class="mt-1 block font-mono text-[10px] text-slate-400"
+                                    >
+                                        {script.job_id.slice(0, 8)}
+                                    </span>
+                                </button>
+                            </li>
+                        {/each}
+                    </ul>
+                {/if}
+            </div>
+        </aside>
+
+        <div class="flex-1 min-w-0 flex flex-row">
         <div
             class="basis-0 min-w-0"
             style:flex-grow={1 - reveal.current}
@@ -642,7 +937,30 @@
             <div
                 class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex flex-row items-center justify-between gap-2"
             >
-                <span>Editor</span>
+                <div
+                    class="flex items-center gap-1 rounded-lg bg-slate-200/70 p-1"
+                    role="tablist"
+                    aria-label="Editor panels"
+                >
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={editorTab === "editor"}
+                        class={editorTabClass("editor")}
+                        onclick={() => setEditorTab("editor")}
+                    >
+                        Editor
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={editorTab === "examples"}
+                        class={editorTabClass("examples")}
+                        onclick={() => setEditorTab("examples")}
+                    >
+                        Examples
+                    </button>
+                </div>
                 {#if statusLabel}
                     <span
                         class="text-xs font-medium text-slate-500"
@@ -665,12 +983,56 @@
                 </div>
             {/if}
 
-            <div class="flex-1 min-h-0 overflow-y-auto relative">
+            <div
+                class="flex-1 min-h-0 overflow-y-auto relative"
+                class:hidden={editorTab === "examples"}
+            >
                 <div
                     bind:this={editorContainer}
                     class="absolute inset-0 p-2"
                 ></div>
             </div>
+
+            {#if editorTab === "examples"}
+                <div class="flex-1 min-h-0 overflow-y-auto p-4">
+                    <div class="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                        {#each examples as example (example.id)}
+                            <button
+                                type="button"
+                                onclick={() => loadExample(example)}
+                                disabled={isBusy}
+                                class="group flex cursor-pointer flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-4 text-left transition-colors hover:border-[#00ADD8] hover:bg-cyan-50 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                                <span
+                                    class="flex w-full items-start justify-between gap-3"
+                                >
+                                    <span
+                                        class="text-sm font-semibold text-slate-700 group-hover:text-[#00758D]"
+                                    >
+                                        {example.title}
+                                    </span>
+                                    <span
+                                        class="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500"
+                                    >
+                                        {example.source.split("\n").length}
+                                        lines
+                                    </span>
+                                </span>
+                                <span
+                                    class="text-xs leading-relaxed text-slate-500"
+                                >
+                                    {example.description}
+                                </span>
+                                <span
+                                    class="mt-auto font-mono text-[11px] text-slate-400"
+                                >
+                                    Click to load into the editor
+                                </span>
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+            {/if}
 
             <div
                 class="p-4 border-t border-slate-100 flex flex-row flex-wrap gap-2 justify-between shrink-0"
@@ -679,9 +1041,17 @@
                     onclick={() => submitCode()}
                     disabled={pageState !== "input" ||
                         serverStatus !== "connected"}
-                    class="bg-[#00ADD8] hover:bg-[#00758D] text-white px-4 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                    class="inline-flex min-w-28 items-center justify-center gap-2 bg-[#00ADD8] hover:bg-[#00758D] text-white px-4 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
-                    Submit
+                    {#if isBusy}
+                        <span
+                            class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                            aria-hidden="true"
+                        ></span>
+                        {pageState === "submitting" ? "Submitting" : "Running"}
+                    {:else}
+                        Submit
+                    {/if}
                 </button>
                 {#if pageState !== "input"}
                     <button
@@ -716,10 +1086,19 @@
                         Results
                     </div>
 
-                    <div
-                        class="p-6 text-slate-500 whitespace-pre-wrap shrink-0"
-                    >
-                        {interpretResult!.result?.output}
+                    <div class="p-2 pb-0 shrink-0">
+                        <div
+                            class="flex max-h-[35vh] min-h-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white"
+                        >
+                            <div
+                                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
+                            >
+                                Execution result
+                            </div>
+                            <pre
+                                class="min-h-0 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-sm text-slate-600">{interpretResult!
+                                    .result?.output || "(no output)"}</pre>
+                        </div>
                     </div>
 
                     <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
@@ -762,5 +1141,6 @@
             style:flex-grow={1 - reveal.current}
             aria-hidden="true"
         ></div>
+        </div>
     </div>
 </div>
