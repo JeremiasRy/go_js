@@ -54,8 +54,10 @@
         }
     });
 
-    const currentJobFlash = $derived(
-        frame?.event?.type === "job_start" || frame?.event?.type === "job_end",
+    const phaseLabel = $derived(
+        eventLoop.phase === "executing" && eventLoop.current_job
+            ? `executing ${eventLoop.current_job.kind === "micro_task" ? "microtask" : "task"}`
+            : eventLoop.phase,
     );
 
     const timerFlash = $derived(
@@ -73,23 +75,6 @@
                 return "border-red-200 bg-red-50 text-red-600";
             default:
                 return "border-slate-200 bg-slate-50 text-slate-500";
-        }
-    }
-
-    function sourceClasses(source: string | undefined): string {
-        switch (source) {
-            case "main":
-                return "bg-slate-200 text-slate-600";
-            case "setTimeout":
-            case "setInterval":
-                return "bg-amber-100 text-amber-700";
-            case "await":
-                return "bg-cyan-100 text-cyan-700";
-            case "promise":
-            case "queueMicrotask":
-                return "bg-violet-100 text-violet-700";
-            default:
-                return "bg-slate-100 text-slate-500";
         }
     }
 
@@ -113,7 +98,7 @@
             <span
                 class="rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide {phaseClasses.badge}"
             >
-                {eventLoop.phase}
+                {phaseLabel}
             </span>
         </div>
         <span class="text-[10px] text-slate-400">
@@ -139,7 +124,7 @@
                 <div class="rounded-md bg-slate-50 px-2 py-1">
                     <p class="text-slate-400">phase</p>
                     <p class="truncate font-semibold text-slate-700">
-                        {eventLoop.phase}
+                        {phaseLabel}
                     </p>
                 </div>
                 <div class="rounded-md bg-slate-50 px-2 py-1">
@@ -162,59 +147,6 @@
                     </p>
                 </div>
             </div>
-        </div>
-
-        <div
-            class="shrink-0 rounded-lg border p-2 transition-all {eventLoop.current_job
-                ? 'border-cyan-200 bg-cyan-50/60'
-                : 'border-slate-200 bg-slate-50/60'} {currentJobFlash
-                ? 'job-flash'
-                : ''}"
-        >
-            <div class="flex items-center justify-between gap-2">
-                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                    Current job
-                </span>
-                {#if eventLoop.current_job}
-                    <span
-                        class="rounded-full bg-cyan-500 px-1.5 py-0.5 text-[8px] font-semibold uppercase text-white"
-                    >
-                        {eventLoop.current_job.kind === "micro_task"
-                            ? "microtask"
-                            : "task"}
-                    </span>
-                {/if}
-            </div>
-            {#if eventLoop.current_job}
-                <p class="mt-1 truncate text-xs font-semibold text-slate-700">
-                    {eventLoop.current_job.label}
-                </p>
-                <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1">
-                    {#if eventLoop.current_job.source}
-                        <span
-                            class="rounded px-1 py-0.5 text-[9px] font-medium {sourceClasses(
-                                eventLoop.current_job.source,
-                            )}"
-                        >
-                            {eventLoop.current_job.source}
-                        </span>
-                    {/if}
-                    {#if eventLoop.current_job.fn}
-                        <span
-                            class="max-w-36 truncate rounded bg-white px-1 py-0.5 font-mono text-[9px] text-slate-400 ring-1 ring-slate-100"
-                        >
-                            {eventLoop.current_job.fn}
-                        </span>
-                    {/if}
-                    <span class="ml-auto font-mono text-[9px] text-slate-300"
-                        >{eventLoop.current_job.id}</span
-                    >
-                </div>
-            {:else}
-                <p class="mt-1 text-xs text-slate-400">
-                    No job running — waiting for the next callback.
-                </p>
-            {/if}
         </div>
 
         <div
@@ -286,21 +218,8 @@
 </div>
 
 <style>
-    .job-flash {
-        animation: job-flash 450ms ease-out;
-    }
-
     .timer-flash {
         animation: timer-flash 450ms ease-out;
-    }
-
-    @keyframes job-flash {
-        0% {
-            box-shadow: 0 0 0 2px rgb(6 182 212 / 50%);
-        }
-        100% {
-            box-shadow: 0 0 0 0 rgb(6 182 212 / 0%);
-        }
     }
 
     @keyframes timer-flash {

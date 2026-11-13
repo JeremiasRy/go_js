@@ -10,8 +10,8 @@
         SetHighlightStatusParams,
         VMState,
     } from "../types";
-    import Code from "./Code.svelte";
     import ExecutionEventLoop from "./ExecutionEventLoop.svelte";
+    import ExecutionOpcodes from "./ExecutionOpcodes.svelte";
     import ExecutionQueues from "./ExecutionQueues.svelte";
     import ExecutionStack from "./ExecutionStack.svelte";
 
@@ -446,58 +446,47 @@
             {/if}
         </div>
 
-        <div
-            class="grid min-h-0 flex-1 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] grid-rows-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-2 p-2"
-        >
-            <section
-                class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
+        <div class="flex min-h-0 flex-1 flex-col gap-2 p-2">
+            <div
+                class="grid min-h-0 flex-[1] grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2"
             >
-                <ExecutionQueues {queues} {eventLoop} frame={currentFrame} />
-            </section>
-
-            <section
-                class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
-            >
-                <ExecutionEventLoop
-                    {eventLoop}
-                    frame={currentFrame}
-                    outputText={currentOutput}
-                    {atEnd}
-                />
-            </section>
-
-            <section
-                class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
-            >
-                <div
-                    class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2"
+                <section
+                    class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
                 >
-                    <span class="text-xs font-semibold text-slate-600"
-                        >Op codes</span
-                    >
-                    {#if currentVm}
-                        <span
-                            class="font-mono text-[9px] text-slate-400"
-                        >
-                            {currentVm.chunk_id} · {currentVm.op}
-                        </span>
-                    {/if}
-                </div>
-                <div class="flex min-h-0 flex-1 flex-col p-2">
-                    <Code
-                        {chunks}
-                        {highlight}
-                        {setHighlight}
-                        scrollBehavior="auto"
-                        expandAll
+                    <ExecutionQueues
+                        {queues}
+                        {eventLoop}
+                        frame={currentFrame}
                     />
-                </div>
-            </section>
+                </section>
+
+                <section
+                    class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
+                >
+                    <ExecutionEventLoop
+                        {eventLoop}
+                        frame={currentFrame}
+                        outputText={currentOutput}
+                        {atEnd}
+                    />
+                </section>
+            </div>
 
             <section
-                class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
             >
                 <ExecutionStack vm={currentVm} frame={currentFrame} />
+            </section>
+
+            <section
+                class="flex min-h-0 flex-[1] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+            >
+                <ExecutionOpcodes
+                    {chunks}
+                    {highlight}
+                    {setHighlight}
+                    vm={currentVm}
+                />
             </section>
         </div>
     {/if}
