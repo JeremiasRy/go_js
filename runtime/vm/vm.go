@@ -124,6 +124,7 @@ type VM struct {
 	loopIterators map[int]value.Value
 	withObjects   []value.Value
 	lastJITGC     uint32
+	callCounts    map[*value.ValueChunk]int
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -141,7 +142,14 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		catchValues:    map[int]value.Value{},
 		loopMarks:      map[int][]int{},
 		loopIterators:  map[int]value.Value{},
+		callCounts:     map[*value.ValueChunk]int{},
 	}
+}
+
+func (vm *VM) newSubVM() *VM {
+	sub := NewVM(false, vm.output)
+	sub.callCounts = vm.callCounts
+	return sub
 }
 
 func (vm *VM) currentFrame() CallFrame {
@@ -861,7 +869,7 @@ func (vm *VM) generatorResume(generator *native.ObjGenerator, input value.Value,
 	}
 
 	generator.Running = true
-	runner := NewVM(false, vm.output)
+	runner := vm.newSubVM()
 	dummy := object.NewFunction("generator-caller", 0, nil)
 	dummy.ValueChunk().EmitByte(chunk.OP_RETURN)
 	dummyIp := 0
@@ -1046,7 +1054,7 @@ func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget 
 		instance.SetPrototypeValue(prototype)
 	}
 	instanceValue := heap.EncodeObject(instance)
-	runner := NewVM(false, vm.output)
+	runner := vm.newSubVM()
 	for _, arg := range args {
 		runner.push(arg)
 	}
@@ -1179,7 +1187,7 @@ func (vm *VM) callClassConstructor(constructor value.Value, this value.Value, ar
 	if !ok {
 		return value.UNDEFINED, fmt.Errorf("Value is not a constructor")
 	}
-	runner := NewVM(false, vm.output)
+	runner := vm.newSubVM()
 	for _, arg := range args {
 		runner.push(arg)
 	}
@@ -1467,7 +1475,7 @@ func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Valu
 	if vm.depth >= FRAMES_MAX {
 		return value.UNDEFINED, &JSException{Name: "RangeError", Message: "Maximum call stack size exceeded"}
 	}
-	runner := NewVM(false, vm.output)
+	runner := vm.newSubVM()
 	runner.depth = vm.depth + 1
 	fn := object.NewFunction("native-call", 0, nil)
 	for _, arg := range args {
@@ -1516,7 +1524,7 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 		gen.Args = append([]value.Value{}, args...)
 		return value.EncodeHandle(heap.Allocate(gen)), nil
 	}
-	runner := NewVM(false, vm.output)
+	runner := vm.newSubVM()
 	runner.depth = vm.depth + 1
 	for _, arg := range args {
 		runner.push(arg)
@@ -2719,7 +2727,9 @@ func (vm *VM) findArgStart() []value.Value {
 func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this value.Value, argCount int, calledWithSpread bool) (f CallFrame, c value.ValueChunk, err error) {
 	localStart := max(vm.stackTop-argCount, 0)
 	returnIp := 0
-	callCount := jitContext().NoteCall(fn.ValueChunk())
+	chunk := fn.ValueChunk()
+	vm.callCounts[chunk]++
+	callCount := vm.callCounts[chunk]
 
 	if currentIp != nil {
 		returnIp = *currentIp
@@ -2731,7 +2741,7 @@ func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this 
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if currentIp != nil && !calledWithSpread && callCount > jitCallThreshold() && jitContext().CanCompile(fn) {
+	if flags.EnableJIT && currentIp != nil && !calledWithSpread && callCount > jitCallThreshold() && jitContext().CanCompile(fn) {
 		vm.padMissingArguments(fn, f.localStart)
 		outcome, jitErr := vm.runJIT(&f, &c, currentIp, callee)
 		if jitErr != nil {
@@ -3026,9 +3036,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 	for {
 		// time.Sleep(time.Millisecond * 100)
-		if ip < 0 || ip >= len(c.Code) {
-			return value.UNDEFINED, fmt.Errorf("instruction pointer %d out of range for %s (len %d)", ip, c.FnName, len(c.Code))
-		}
 		code := c.Code[ip]
 		ip++
 
@@ -8302,7 +8309,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								callable, ok := executorObj.(object.Callable)
 								return callable, ok
 							}(); ok {
-								runner := NewVM(false, vm.output)
+								runner := vm.newSubVM()
 								runner.push(value.EncodeHandle(heap.Allocate(resolve)))
 								runner.push(value.EncodeHandle(heap.Allocate(reject)))
 								f, c, callErr := runner.Call(executor, value.UNDEFINED, nil, value.UNDEFINED, 2, false)
@@ -9111,7 +9118,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					return value.UNDEFINED, fmt.Errorf("failed to parser module %e", err)
 				}
 
-				importer := NewVM(false, vm.output)
+				importer := vm.newSubVM()
 
 				f, c, callErr := importer.Call(module, value.UNDEFINED, nil, value.UNDEFINED, 0, false)
 				if callErr != nil {

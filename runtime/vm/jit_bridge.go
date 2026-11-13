@@ -156,6 +156,11 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				return jitDeoptimized, fmt.Errorf("jit: deopt inside a direct-recursion frame (ip %d)", act.BytecodeIP)
 			}
 			ip := int(act.BytecodeIP)
+			if jitTrace {
+				n := int(act.SP)
+				if n > 6 { n = 6 }
+				fmt.Fprintf(os.Stderr, "JIT deopt fn=%s ip=%d sp=%d vals=%x\n", c.FnName, ip, act.SP, act.Buffer[:n])
+			}
 			ctx.Stats().NoteDeopt("runtime")
 			if ctx.NoteDeopt(c) {
 				ctx.BlacklistChunk(c)

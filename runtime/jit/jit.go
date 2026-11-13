@@ -73,6 +73,7 @@ const (
 	ReqSuperCall
 	ReqGetMember
 	ReqSetMemberReturn
+	ReqSetObjectMember
 	ReqSetMemberKeep
 	ReqSetMemberStrictReturn
 	ReqDelete
@@ -355,12 +356,12 @@ type Context struct {
 	blacklisted       map[loopKey]bool
 	deopts            map[*value.ValueChunk]int
 	blacklistedChunks map[*value.ValueChunk]bool
-	callCounts        map[*value.ValueChunk]int
 	codeBytes         int
 	maxCodeBytes      int
 	stacks            StackPool
 	stats             Stats
 	activations       sync.Pool
+	eligibility       sync.Map
 }
 
 func NewContext(maxCodeBytes int) *Context {
@@ -374,7 +375,6 @@ func NewContext(maxCodeBytes int) *Context {
 		blacklisted:       map[loopKey]bool{},
 		deopts:            map[*value.ValueChunk]int{},
 		blacklistedChunks: map[*value.ValueChunk]bool{},
-		callCounts:        map[*value.ValueChunk]int{},
 		maxCodeBytes:      maxCodeBytes,
 	}
 	ctx.activations.New = func() any { return &Activation{} }
@@ -411,19 +411,6 @@ func (ctx *Context) PrintStats(w io.Writer) {
 	ctx.stats.mu.Unlock()
 }
 
-// NoteCall counts an invocation of a chunk and reports the new count. Counts
-// are shared across function clones and sub-VMs.
-func (ctx *Context) NoteCall(chunk *value.ValueChunk) int {
-	if chunk == nil {
-		return 0
-	}
-	ctx.mu.Lock()
-	ctx.callCounts[chunk]++
-	count := ctx.callCounts[chunk]
-	ctx.mu.Unlock()
-	return count
-}
-
 // NoteBackedge counts a backward branch and reports whether the loop is hot
 // enough to attempt OSR.
 func (ctx *Context) NoteBackedge(chunk *value.ValueChunk, ip, threshold int) bool {
@@ -453,6 +440,7 @@ func (ctx *Context) NoteDeopt(chunk *value.ValueChunk) bool {
 }
 
 func (ctx *Context) BlacklistChunk(chunk *value.ValueChunk) {
+	ctx.eligibility.Store(chunk, false)
 	ctx.mu.Lock()
 	ctx.blacklistedChunks[chunk] = true
 	for key := range ctx.backedges {
@@ -464,6 +452,7 @@ func (ctx *Context) BlacklistChunk(chunk *value.ValueChunk) {
 }
 
 func (ctx *Context) BlacklistChunkOSR(chunk *value.ValueChunk) {
+	ctx.eligibility.Store(chunk, false)
 	ctx.mu.Lock()
 	for key := range ctx.backedges {
 		if key.chunk == chunk {
@@ -562,6 +551,15 @@ func (ctx *Context) CanCompile(fn object.Callable) bool {
 	if c == nil || len(c.Code) == 0 {
 		return false
 	}
+	if cached, ok := ctx.eligibility.Load(c); ok {
+		return cached.(bool)
+	}
+	eligible := ctx.checkEligible(fn, c)
+	ctx.eligibility.Store(c, eligible)
+	return eligible
+}
+
+func (ctx *Context) checkEligible(fn object.Callable, c *value.ValueChunk) bool {
 	ctx.mu.Lock()
 	blacklisted := ctx.blacklistedChunks[c]
 	ctx.mu.Unlock()
@@ -571,10 +569,7 @@ func (ctx *Context) CanCompile(fn object.Callable) bool {
 	if fn.HasArguments() || fn.HasRestParameter() {
 		return false
 	}
-	if hasInterpreterOnlyOps(c.Code) {
-		return false
-	}
-	return true
+	return !hasInterpreterOnlyOps(c.Code)
 }
 
 func hasInterpreterOnlyOps(code []byte) bool {

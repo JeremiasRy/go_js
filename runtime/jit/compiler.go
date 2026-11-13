@@ -440,9 +440,9 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		cs.pushReg(RAX)
 	case chunk.OP_DUP2:
 		cs.loadTop(RAX, 1)
+		cs.loadTop(RCX, 0)
 		cs.pushReg(RAX)
-		cs.loadTop(RAX, 0)
-		cs.pushReg(RAX)
+		cs.pushReg(RCX)
 	case chunk.OP_PUSH_CURRENT:
 		cs.loadTop(RAX, 0)
 		cs.pushReg(RAX)
@@ -686,7 +686,9 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		cs.bridge(ip, ReqPushElement)
 	case chunk.OP_GET_OBJECT_MEMBER:
 		cs.bridge(ip, ReqGetMember)
-	case chunk.OP_SET_OBJECT_MEMBER, chunk.OP_SET_MEMBER_RETURN:
+	case chunk.OP_SET_OBJECT_MEMBER:
+		cs.bridge(ip, ReqSetObjectMember)
+	case chunk.OP_SET_MEMBER_RETURN:
 		cs.bridge(ip, ReqSetMemberReturn)
 	case chunk.OP_SET_MEMBER_KEEP:
 		cs.bridge(ip, ReqSetMemberKeep)

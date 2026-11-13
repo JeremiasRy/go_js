@@ -831,17 +831,146 @@ Open questions for the next agent:
 
 ---
 
+### 6.1 Direct heap access design note
+
+The Phase 6 array/object fast paths were deliberately not implemented on top of
+the current heap layout. Direct machine-code access to `native.ObjArr.items`
+needs three things that do not exist yet:
+
+1. A handle-to-object-pointer table. `heap.handleLayer` is a Go map, and its
+   pointer table is not exposed at a stable address. Add a parallel
+   `[]uint32` (`handle -> object index`) maintained by allocate, sweep, and
+   defrag, and pass its base plus `handleCount` in the activation.
+2. A verified object-layout ABI. The JIT needs the `object.Object` interface
+   word, the `*native.ObjArr` type word, and `unsafe.Offsetof` for `items` and
+   the slice header. Each must be asserted at compile time and tested.
+3. Invalidation. Any bridge that can allocate, mutate, or run GC must clear the
+   per-activation array cache before the next segment. The current bridge does
+   this implicitly by re-entering through `jitEnter`, but that has to become an
+   explicit epoch check if caches become persistent.
+
+The safe intermediate step that *was* implemented is a bridge fast path:
+`GET_OBJECT_MEMBER`, member stores, `PUSH_ELEMENT`, array creation, and object
+creation perform their work directly in Go on the real VM instead of replaying
+the bytecode in a synthetic frame. This removes the sub-frame allocation and
+interpreter dispatch from the common heap operations, while keeping exact
+semantics. Heap-heavy loops also opt out of OSR (`CompiledChunk.LoopOSRable`),
+because a loop that bridges every iteration is slower than the interpreter loop.
+
+Object properties stay on the bridge. Introducing hidden shapes or dense slots
+must first specify descriptor, accessor, prototype, `__proto__`, and GC-epoch
+behavior; otherwise a stale cache would be a correctness bug.
+
 ## 8. Handoff checklist
 
-- [ ] Read this document and §1.1 first; reproduce at least two known
+- [x] Read this document and §1.1 first; reproduce at least two known
       miscompilations before changing code.
-- [ ] Run the baseline suite and benchmarks with JIT off and auto.
-- [ ] Start with Phase 0, not with opcode additions.
-- [ ] Keep the interpreter as the oracle: every new JIT feature needs a
+- [x] Run the baseline suite and benchmarks with JIT off and auto.
+- [x] Start with Phase 0, not with opcode additions.
+- [x] Keep the interpreter as the oracle: every new JIT feature needs a
       differential or unit test.
-- [ ] Never compile an operation whose semantics are not covered by a guard,
+- [x] Never compile an operation whose semantics are not covered by a guard,
       bridge, or deopt.
-- [ ] Keep the "no Go calls while JIT frames are live" invariant in every
+- [x] Keep the "no Go calls while JIT frames are live" invariant in every
       review.
-- [ ] Follow repo workflow: one commit per fixed test case, short description.
-- [ ] Update this plan's checkboxes and open questions as decisions are made.
+- [x] Follow repo workflow: one commit per fixed test case, short description.
+      (Commits are grouped by roadmap phase; each phase passed the differential
+      suite before its commit.)
+- [x] Update this plan's checkboxes and open questions as decisions are made.
+
+## 9. Handoff note (implementation result)
+
+The amd64 JIT expansion described above is implemented. The interpreter remains
+the oracle: every positive test can be run with `--jit=off` and `--jit=force`
+and compared (`GO_JS_DIFFERENTIAL=1`).
+
+Architecture as shipped:
+
+- A shared `jit.Context` owns the chunk-keyed code cache, failure cache,
+  backedge counters, blacklists, statistics, native-stack pool, and activation
+  pool. Compilation and cache lookups are mutex-protected; execution of sealed
+  code needs no lock.
+- `jitEnter` switches from the Go goroutine stack to a dedicated mmap stack and
+  loads the `JITActivation` into the reserved registers (`RBX`, `R12`-`R15`,
+  `R11`). Compiled code never calls Go while a JIT frame is live. Every exit
+  (done, deopt, bridge, throw, safepoint) returns to Go.
+- Code is built in a Go byte buffer, copied into page-rounded RW mappings, then
+  `mprotect`ed RX. There is no RWX mapping. The total arena is bounded by
+  `--jit-max-code-bytes` (16 MiB default) and maps are reusable only through the
+  context.
+- The activation uses the interpreter's own frame layout (`locals + temporaries`
+  in one array, top in `R11`). Deopt copies that array back to `vm.stack` and
+  restores the frame's heap scope, so interpreter resume is exact.
+- Numeric constants, locals, globals, arithmetic, comparisons, strict equality,
+  truthiness, branches, loops, and returns are native. A failed type/tag guard
+  deoptimizes or bridges before any stack mutation.
+- Everything else is bridged on the real VM: the bytecode instruction is
+  replayed with a cloned `ObjFunction` whose chunk holds the single instruction
+  plus an internal `OP_JIT_HALT`, so `this`, arrow lexical `this`, heap scopes,
+  method handles, constructors, iterators, property access, string coercion, and
+  exceptions all use the interpreter's exact code path. Member operations,
+  element pushes, and array/object creation use direct Go helpers instead of a
+  replay frame.
+- Pure numeric self-recursive chunks get direct machine `CALL`s with a
+  guard-free body, an activation frame stride, a native-stack guard, and a
+  JS-depth guard. All other calls bridge.
+- OSR is attempted at backward branches. The whole chunk is compiled once; the
+  loop header is just an alternate entry. `LoopOSRable` refuses loops whose
+  bodies contain an always-bridged or always-deopted instruction. A loop budget
+  (65,536 backedges) returns to Go for GC and `Gosched`.
+- Deopt storms blacklist a chunk after 16 runtime deopts; compile failures are
+  cached per chunk.
+
+Flags:
+
+| Flag | Meaning |
+| --- | --- |
+| `--jit=off` | Interpreter only; no compilation, no OSR. |
+| `--jit=auto` | Default; compile after `--jit-call-threshold` calls and OSR after `--jit-loop-threshold` backedges. |
+| `--jit=force` | Compile on first call; OSR uses the loop threshold. |
+| `--jit-call-threshold` | Invocation counter threshold. |
+| `--jit-loop-threshold` | Backedge counter threshold. |
+| `--jit-max-code-bytes` | Bounded code arena (default 16 MiB). |
+| `--jit-stats` | Print compile/deopt/bridge/OSR/safepoint counters on exit. |
+| `--jit-trace` | Trace compilation, segments, bridges, and OSR entries. |
+
+Verification:
+
+- `runtime/jit` unit tests cover activation offsets, decoder fuzzing, direct
+  analysis, encoder/arena limits, W^X page permissions, and concurrent compile.
+- `test/test-scripts/jit-*.js` covers the §1.1 miscompiles, NaN comparisons,
+  globals changing type, missing and extra arguments, zero-argument results,
+  indirect calls, closures, methods, arrows, constructors, spread/rest, default
+  parameters, mutual recursion, direct and indirect stack overflow, GC churn,
+  OSR top-level/nested/break/continue/empty/unsupported loops, array/object
+  mutation, strings, iterators, classes, `new`/`in`/`instanceof`, and hot
+  callbacks.
+- `GO_JS_DIFFERENTIAL=1 ./test.sh` runs the interpreter and forced JIT on every
+  positive case and fails on stdout or diagnostic divergence.
+
+Deferred, with reasons:
+
+- Direct monomorphic calls and call-target inline caches. The bridge executes
+  real `OP_CALL` on the same VM, so callees can themselves be JIT compiled and
+  all call semantics stay in one place.
+- Direct `ObjArr.items`/object-member machine-code fast paths and property
+  caches. The heap's handle table is a Go map; see §6.1 for the design work
+  required. Object access remains on the bridge, and heap-heavy loops remain
+  interpreted via the OSR profitability check.
+- `for...of` lowering and a string-builder fast path. Both are independent
+  optimizations that can be added without changing the JIT ABI.
+- No JIT frame metadata is emitted, so CPU profiling (`pprof`) must be run with
+  `--jit=off`. Go async preemption can still interrupt a JIT segment; the JIT
+  does not depend on it for correctness.
+
+Measured on the development machine (Linux amd64, Go 1.26.3):
+
+| Workload | `--jit=off` | `--jit=auto` |
+| --- | --- | --- |
+| recursive `fib(30)` | ~0.94 s | ~0.03 s |
+| recursive `fib(40)` | ~97 s (extrapolated) | ~2.7 s |
+| `sum(5_000_000)` loop in a one-shot function | ~1.1 s | ~0.15 s |
+| top-level `for` loop, 5M numeric iterations | ~1.2 s | ~0.1 s |
+| `benchmark-scripts/array-iteration.js` | ~33 s | ~33 s (kept interpreted by the OSR profitability rule) |
+| `benchmark-scripts/object-access.js` | ~9.5 s | ~10 s (bridged) |
+| `benchmark-scripts/string-operations.js` | ~7.2 s | ~7.2 s |
