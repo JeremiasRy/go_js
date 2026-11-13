@@ -11,7 +11,7 @@
     import { onMount, tick } from "svelte";
     import { Tween } from "svelte/motion";
     import { cubicOut } from "svelte/easing";
-    import { fade, fly } from "svelte/transition";
+    import { fade, fly, slide } from "svelte/transition";
     import { defaultExample, examples, type CodeExample } from "$lib/examples";
     import type {
         AstNode,
@@ -64,6 +64,7 @@
     let randomLoading = $state(false);
     let scriptsRequest = 0;
     let runDots = $state(0);
+    let outputExpanded = $state(true);
     let isBusy = $derived(
         pageState === "submitting" || pageState === "running",
     );
@@ -571,6 +572,7 @@
                     node: interpretDetails.ast,
                     target: lookUp,
                 });
+                outputExpanded = true;
                 pageState = "done";
             } catch (error) {
                 console.error(error);
@@ -1076,34 +1078,46 @@
         >
             {#if showResults}
                 <div
-                    class="flex flex-col w-full flex-1 min-h-0"
+                    class="flex w-full flex-1 min-h-0 flex-col gap-2 p-2"
                     in:fly={{ x: 32, duration: 300, easing: cubicOut }}
                     out:fade={{ duration: 150 }}
                 >
                     <div
-                        class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
+                        class="shrink-0 rounded-lg border border-slate-200 bg-white p-2"
                     >
-                        Results
-                    </div>
-
-                    <div class="p-2 pb-0 shrink-0">
-                        <div
-                            class="flex max-h-[35vh] min-h-0 flex-col overflow-hidden rounded-md border border-slate-200 bg-white"
+                        <button
+                            type="button"
+                            class="flex w-full cursor-pointer items-center justify-between gap-2 text-left text-sm font-semibold text-slate-600 hover:text-slate-800"
+                            aria-expanded={outputExpanded}
+                            aria-controls="execution-result-panel"
+                            onclick={() => (outputExpanded = !outputExpanded)}
                         >
-                            <div
-                                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0"
+                            <span>Execution result</span>
+                            <span
+                                class="inline-block transition-transform {outputExpanded
+                                    ? 'rotate-90'
+                                    : ''}"
+                                aria-hidden="true"
                             >
-                                Execution result
+                                ▸
+                            </span>
+                        </button>
+
+                        {#if outputExpanded}
+                            <div
+                                id="execution-result-panel"
+                                transition:slide={{ duration: 200 }}
+                            >
+                                <pre
+                                    class="mt-2 max-h-[30vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 p-3 font-mono text-sm text-slate-600">{interpretResult!
+                                        .result?.output || "(no output)"}</pre>
                             </div>
-                            <pre
-                                class="min-h-0 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-sm text-slate-600">{interpretResult!
-                                    .result?.output || "(no output)"}</pre>
-                        </div>
+                        {/if}
                     </div>
 
-                    <div class="flex flex-row w-full p-2 gap-2 flex-1 min-h-0">
+                    <div class="flex w-full flex-1 min-h-0 flex-row gap-2">
                         <div
-                            class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
+                            class="w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
                         >
                             <div
                                 class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
@@ -1118,7 +1132,7 @@
                             />
                         </div>
                         <div
-                            class="p-2 w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
+                            class="w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
                         >
                             <div
                                 class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
