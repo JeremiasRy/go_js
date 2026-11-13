@@ -2,20 +2,19 @@
     import { tick, untrack } from "svelte";
     import { slide } from "svelte/transition";
     import type {
-        DebugInfo,
         DisassembledChunk,
         HighlightStatus,
         SetHighlightStatusParams,
     } from "../types";
 
     type PropsType = {
-        debugInfo: DebugInfo;
+        chunks: DisassembledChunk[];
         setHighlight: (opts: SetHighlightStatusParams) => void;
         highlight: HighlightStatus | null;
     };
     const opElements = new Map<number, HTMLElement>();
     const opByPtr = new Map<string, HTMLElement>();
-    const { debugInfo, setHighlight, highlight }: PropsType = $props();
+    const { chunks, setHighlight, highlight }: PropsType = $props();
 
     const MAIN_FUNCTION = "PROGRAM_MAIN";
     const EXPAND_DURATION = 200;
@@ -119,7 +118,7 @@
     }
 
     const chunkEntries = $derived(
-        [...(debugInfo?.chunks ?? [])]
+        [...(chunks ?? [])]
             .filter((chunk) => !chunk.hidden)
             .sort(compareChunks),
     );

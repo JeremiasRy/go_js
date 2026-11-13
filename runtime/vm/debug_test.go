@@ -88,7 +88,8 @@ func TestStructuredOutUsesVersionedDebugInfoAndExecutionPlaceholder(t *testing.T
 	out := StructuredOut{
 		FormatVersion: StructuredOutputFormatVersion,
 		Output:        "hello\n",
-		DebugInfo:     info,
+		DebugInfo:     info.Legacy,
+		DebugChunks:   info.Chunks,
 		Execution:     NewExecutionPlaceholder(),
 	}
 
@@ -98,11 +99,10 @@ func TestStructuredOutUsesVersionedDebugInfoAndExecutionPlaceholder(t *testing.T
 	}
 
 	var decoded struct {
-		FormatVersion int `json:"format_version"`
-		DebugInfo     struct {
-			Chunks []ChunkInfo `json:"chunks"`
-		} `json:"debug_info"`
-		Execution struct {
+		FormatVersion int                        `json:"format_version"`
+		DebugInfo     map[string]LegacyDebugInfo `json:"debug_info"`
+		DebugChunks   []ChunkInfo                `json:"debug_chunks"`
+		Execution     struct {
 			Status string `json:"status"`
 			Frames []any  `json:"frames"`
 		} `json:"execution"`
@@ -114,8 +114,11 @@ func TestStructuredOutUsesVersionedDebugInfoAndExecutionPlaceholder(t *testing.T
 	if decoded.FormatVersion != StructuredOutputFormatVersion {
 		t.Fatalf("expected format version %d, got %d", StructuredOutputFormatVersion, decoded.FormatVersion)
 	}
-	if len(decoded.DebugInfo.Chunks) != 1 {
-		t.Fatalf("expected one debug chunk, got %d", len(decoded.DebugInfo.Chunks))
+	if len(decoded.DebugChunks) != 1 {
+		t.Fatalf("expected one debug chunk, got %d", len(decoded.DebugChunks))
+	}
+	if len(decoded.DebugInfo) != 1 {
+		t.Fatalf("expected one legacy debug entry, got %d", len(decoded.DebugInfo))
 	}
 	if decoded.Execution.Status != "not_requested" {
 		t.Fatalf("expected execution placeholder, got %q", decoded.Execution.Status)

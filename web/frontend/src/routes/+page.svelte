@@ -15,6 +15,7 @@
     import { defaultExample, examples, type CodeExample } from "$lib/examples";
     import type {
         AstNode,
+        DisassembledChunk,
         HighlightStatus,
         PageStatus,
         InterpretResult,
@@ -24,6 +25,7 @@
     } from "../types";
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
+    import { normalizeDebugChunks } from "$lib/debugInfo";
     import Code from "./Code.svelte";
     import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
     import { fetchRandomScript, fetchSessionScripts } from "$lib/scriptsApi";
@@ -53,6 +55,7 @@
     let activeRequestId = $state<null | string>(null);
     let pageState = $state<PageStatus>("input");
     let interpretResult = $state<InterpretResult | null>(null);
+    let debugChunks = $state<DisassembledChunk[]>([]);
     let runError = $state<string | null>(null);
     let serverStatus = $state<ConnectionStatus>("connecting");
     let mcpStatus = $state<MCPStatus>("waiting");
@@ -570,6 +573,7 @@
             try {
                 const interpretDetails = JSON.parse(atob(message.result));
                 runError = null;
+                debugChunks = normalizeDebugChunks(interpretDetails);
                 interpretResult = {
                     jobStatus: "Success",
                     result: interpretDetails,
@@ -583,6 +587,7 @@
             } catch (error) {
                 console.error(error);
                 runError = "The interpreter returned an invalid result.";
+                debugChunks = [];
                 interpretResult = {
                     jobStatus: "Failed",
                     result: null,
@@ -749,6 +754,7 @@
         jobId = null;
         activeRequestId = null;
         interpretResult = null;
+        debugChunks = [];
         runError = null;
         highlight = null;
         astElements.clear();
@@ -1141,8 +1147,7 @@
                                 class="flex flex-1 min-h-0 flex-col p-2"
                             >
                                 <Code
-                                    debugInfo={interpretResult!.result!
-                                        .debug_info}
+                                    chunks={debugChunks}
                                     {highlight}
                                     {setHighlight}
                                 />

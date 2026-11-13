@@ -68,6 +68,11 @@ export type DisassembledChunk = {
   jit: DisassembledJit[];
 };
 
+export type LegacyDisassembledChunk = {
+  byte_code: DisassembledOp[];
+  jit: DisassembledJit[];
+};
+
 export type DebugInfo = {
   chunks: DisassembledChunk[];
 };
@@ -94,7 +99,8 @@ export type ExecutionInfo = {
 export type InterpretDetails = {
   format_version: number;
   output: string;
-  debug_info: DebugInfo;
+  debug_info?: Record<string, LegacyDisassembledChunk> | DebugInfo;
+  debug_chunks?: DisassembledChunk[];
   ast: AstNode;
   execution?: ExecutionInfo;
 };

@@ -164,10 +164,9 @@ func encodedResult(output string) string {
 	payload, _ := json.Marshal(map[string]any{
 		"format_version": 2,
 		"output":         output,
-		"debug_info": map[string]any{
-			"chunks": []any{},
-		},
-		"ast": map[string]any{},
+		"debug_info":     map[string]any{},
+		"debug_chunks":   []any{},
+		"ast":            map[string]any{},
 		"execution": map[string]any{
 			"schema_version": 1,
 			"status":         "not_requested",

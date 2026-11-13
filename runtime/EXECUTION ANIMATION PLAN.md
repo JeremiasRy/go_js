@@ -1,6 +1,6 @@
 # Execution Animation Plan
 
-**Status:** message format v2 is implemented (stable chunk ids, `debug_info.chunks`,
+**Status:** message format v2 is implemented (stable chunk ids, `debug_chunks`,
 and the `execution` placeholder). Execution capture and animation playback are still
 pending.
 **Scope:** `runtime/` execution tracing plus the web demo plumbing needed to return and play the trace.
@@ -10,12 +10,14 @@ pending.
 Already landed for the unified message:
 
 - every `value.ValueChunk` has a stable `ChunkID` (`c1`, `c2`, ...),
-- `debug_info` is now `{ chunks: [...] }` with `id`, `name`, `kind`, `hidden`,
-  `byte_code`, and `jit`,
+- `debug_chunks` is the canonical array of chunk metadata with `id`, `name`, `kind`,
+  `hidden`, `byte_code`, and `jit`,
+- `debug_info` is kept as a legacy name-keyed projection for older frontend bundles;
+  new frontend code prefers `debug_chunks`,
 - the structured response has `format_version: 2` and an `execution` placeholder with
   `status: "not_requested"` and `frames: []`,
-- the frontend uses chunk ids for expansion/highlighting and still displays the same
-  function names, panels, toggles, and JIT/bytecode views.
+- the frontend uses chunk ids for expansion/highlighting, accepts old and new payloads,
+  and still displays the same function names, panels, toggles, and JIT/bytecode views.
 
 The animation work below still needs the capture hooks and playback UI.
 
@@ -37,14 +39,15 @@ scope; a JIT call is a single "Executing JIT..." placeholder followed by its res
 2. **Trace is opt-in.** Add `--trace-execution`. The normal interpreter and the test
    suite pay nothing when it is off. The web backend passes the flag.
 3. **One versioned message.** The structured response has a top-level
-   `format_version: 2`, `debug_info: { chunks: [...] }` with a stable `id` per
-   bytecode chunk, and an `execution` object. Until the animation is implemented,
-   `execution` is an explicit placeholder with `status: "not_requested"` and
-   `frames: []`. Frames will reference the same `chunk.id` used by `debug_info`.
+   `format_version: 2`, a canonical `debug_chunks` array with a stable `id` per
+   bytecode chunk, an `execution` object, and a legacy `debug_info` map keyed by
+   function name for older clients. Until the animation is implemented, `execution`
+   is an explicit placeholder with `status: "not_requested"` and `frames: []`.
+   Frames will reference the same `chunk.id` used by `debug_chunks`.
 4. **Capture at instruction boundaries.** A normal frame is captured immediately
    before executing the bytecode instruction at `op_ptr`. The next frame shows the
    effects of that instruction. `op_ptr` is the raw byte offset used by the matching
-   `debug_info.chunks[].byte_code[].op_ptr`, so frontend highlighting already works.
+   `debug_chunks[].byte_code[].op_ptr`, so frontend highlighting already works.
 5. **Event-loop transitions are first-class frames.** Queue enqueue, timer scheduling,
    `await` suspension, job start/end, waiting, and JIT entry/exit produce synthetic
    frames. This is what makes `setTimeout` and `await` visible even when no bytecode
@@ -101,10 +104,10 @@ Important points:
 
 - `ip` is a **byte offset** into `c.Code`, not an instruction index. Operands advance
   it. Jump targets are byte offsets.
-- `debug_info.chunks[].byte_code[].op_ptr` is the byte offset of the opcode start.
+- `debug_chunks[].byte_code[].op_ptr` is the byte offset of the opcode start.
   The animation frame must use that same value. Capture `opIp := ip` before `ip++`.
 - Every `value.ValueChunk` now has a stable `ChunkID` (`"c1"`, `"c2"`, ...), and
-  `debug_info.chunks[].id` is that value. Animation frames will use it directly.
+  `debug_chunks[].id` is that value. Animation frames will use it directly.
 - `vm.stack` is one contiguous array shared by all call frames. `f.localStart` for the
   active frame is the base of its locals/operands.
 - `vm.stackTop` is authoritative; values above it are stale and must not be captured.
@@ -223,7 +226,8 @@ The animation contract is deliberately small:
 out := virtualMachine.StructuredOut{
     FormatVersion: virtualMachine.StructuredOutputFormatVersion,
     Output:        output.String(),
-    DebugInfo:     info,
+    DebugInfo:     info.Legacy,   // legacy name-keyed projection
+    DebugChunks:   info.Chunks,   // canonical chunk list
     Ast:           ast,
     Execution:     virtualMachine.NewExecutionPlaceholder(),
 }
@@ -231,9 +235,10 @@ out := virtualMachine.StructuredOut{
 ```
 
 `runtime/vm/debug.go` defines `StructuredOut`, `DebugInfo`, and the chunk list.
-`DebugInfo.AddCallable` walks every chunk reachable from constants and emits bytecode/JIT
-disassembly keyed by the chunk's stable `ChunkID`. Setup and module-wrapper chunks are
-marked `hidden`.
+`DebugInfo.AddCallable` walks every chunk reachable from constants and emits
+bytecode/JIT disassembly keyed by the chunk's stable `ChunkID`. Setup and module-wrapper
+chunks are marked `hidden`. `Finalize` also builds the legacy `debug_info` map so older
+frontend bundles keep working during rollout.
 
 `execution` is currently a placeholder:
 
@@ -350,7 +355,7 @@ of every VM record helper.
 
 - `chunk_id` is the stable identity of a `*value.ValueChunk`. Chunks receive
   `"c1"`, `"c2"`, ... when they are created (`value.NewChunk`), and the same id is
-  emitted in `debug_info.chunks[].id`. It disambiguates duplicate `fn` names and is
+  emitted in `debug_chunks[].id`. It disambiguates duplicate `fn` names and is
   what animation frames will reference.
 - `fn` remains the human-readable function name (`PROGRAM_MAIN`, `MODULE ...`,
   `ANONYMOYS_FN`, etc.) and is used only for display. Duplicate names are legal now;
@@ -393,13 +398,17 @@ The unified structured message:
 export interface InterpretDetails {
   format_version: 2;
   output: string;
-  debug_info: DebugInfo;
+  debug_info?: LegacyDebugInfo;      // old name-keyed projection
+  debug_chunks?: DisassembledChunk[]; // canonical chunk list
   ast: AstNode;
   execution: ExecutionInfo;
 }
 
-export interface DebugInfo {
-  chunks: DisassembledChunk[];
+export type LegacyDebugInfo = Record<string, LegacyDisassembledChunk>;
+
+export interface LegacyDisassembledChunk {
+  byte_code: DisassembledOp[];
+  jit: DisassembledJit[];
 }
 
 export interface DisassembledChunk {
@@ -444,10 +453,15 @@ export interface ExecutionLimits {
 }
 ```
 
-`debug_info.chunks` is the single source of function identity. Animation frames carry a
+`debug_chunks` is the single source of function identity. Animation frames carry a
 `chunk_id` that must match one of these `id` values. `name` is display-only and may
 repeat. `hidden` chunks are filtered by the frontend; the setup chunk and module-import
 wrapper are hidden.
+
+`debug_info` is a compatibility projection keyed by function name and keeps the old
+`{ byte_code, jit }` shape. It is emitted so a stale frontend bundle can still render
+during rollout. New code must not rely on it for identity; duplicate names collapse in
+that projection.
 
 `execution` is always present in `format_version: 2`. Until the animation work lands,
 it is an explicit placeholder with `status: "not_requested"` and `frames: []`.
@@ -463,16 +477,20 @@ The decoded structured response therefore looks like:
   "format_version": 2,
   "output": "A\nB\n",
   "debug_info": {
-    "chunks": [
-      {
-        "id": "c2",
-        "name": "PROGRAM_MAIN",
-        "kind": "main",
-        "byte_code": [ { "op": "0000 | OP_CONSTANT \\n0004 | 0 \\n", "ast_id": 1, "op_ptr": 0 } ],
-        "jit": []
-      }
-    ]
+    "PROGRAM_MAIN": {
+      "byte_code": [ { "op": "0000 | OP_CONSTANT \\n0004 | 0 \\n", "ast_id": 1, "op_ptr": 0 } ],
+      "jit": []
+    }
   },
+  "debug_chunks": [
+    {
+      "id": "c2",
+      "name": "PROGRAM_MAIN",
+      "kind": "main",
+      "byte_code": [ { "op": "0000 | OP_CONSTANT \\n0004 | 0 \\n", "ast_id": 1, "op_ptr": 0 } ],
+      "jit": []
+    }
+  ],
   "ast": { "id": 1, "type": "Program", "start": 0, "end": 20, "ast_train": [] },
   "execution": {
     "schema_version": 1,
@@ -487,11 +505,13 @@ The decoded structured response therefore looks like:
 }
 ```
 
-Migration note for the frontend: the old `debug_info[name]` map is gone. Find a chunk
-with `debug_info.chunks.find((chunk) => chunk.id === chunkId)`, use `chunk.name` only
-for display, and filter `chunk.hidden`. Highlight identity is `chunkId`, never the
-function name. Duplicate anonymous functions intentionally produce multiple visible
-chunks.
+Migration note for the frontend: prefer `debug_chunks`. If it is absent, accept a
+`debug_info.chunks` array from the intermediate format, then fall back to converting the
+old name-keyed `debug_info` map. Find a chunk with
+`debug_chunks.find((chunk) => chunk.id === chunkId)`, use `chunk.name` only for display,
+and filter `chunk.hidden`. Highlight identity is `chunkId`, never the function name.
+Duplicate anonymous functions intentionally produce multiple visible chunks in
+`debug_chunks`.
 
 ### 4.2 Frame
 
@@ -524,11 +544,11 @@ export interface VMState {
   id: number;                // root VM = 1, sub-VMs get new ids
   parent_id?: number;        // set for callValue sub-VMs
   active_frame: number;      // index into frames; -1 if none
-  op_ptr: number;            // byte offset, matches debug_info.chunks[].byte_code[].op_ptr
+  op_ptr: number;            // byte offset, matches debug_chunks[].byte_code[].op_ptr
   op: string;                // mnemonic, e.g. "OP_AWAIT"
   ast_id: number;            // c.AstId[op_ptr], matches AST highlighting
   fn: string;                // top frame display name
-  chunk_id: string;          // stable id from debug_info.chunks[].id
+  chunk_id: string;          // stable id from debug_chunks[].id
   frames: VMStackFrame[];
   frames_omitted?: number;   // bottom frames omitted by the call-depth cap
   stack: ValueView[];        // bottom -> top, may be capped to the top N
@@ -1443,18 +1463,19 @@ Extend `StructuredOut`:
 
 ```go
 type StructuredOut struct {
-    FormatVersion int            `json:"format_version"`
-    Output        string         `json:"output"`
-    DebugInfo     *DebugInfo     `json:"debug_info"`
-    Ast           *parser.Node   `json:"ast"`
-    Execution     *ExecutionInfo `json:"execution"`
+    FormatVersion int                         `json:"format_version"`
+    Output        string                      `json:"output"`
+    DebugInfo     map[string]*LegacyDebugInfo `json:"debug_info"`
+    DebugChunks   []*ChunkInfo                `json:"debug_chunks"`
+    Ast           *parser.Node                `json:"ast"`
+    Execution     *ExecutionInfo              `json:"execution"`
 }
 ```
 
-`DebugInfo` is the versioned chunk list from §4.1. It replaces the old
-`map[string]*DebugInfo` keyed by function name. `ExecutionInfo` is the placeholder now;
-when the animation lands it grows real frames while keeping `schema_version`,
-`status`, `frames`, and the limit metadata.
+`debug_chunks` is the canonical chunk list from §4.1. `debug_info` is the legacy
+name-keyed projection that keeps old frontend bundles working. `ExecutionInfo` is the
+placeholder now; when the animation lands it grows real frames while keeping
+`schema_version`, `status`, `frames`, and the limit metadata.
 
 Do not key anything by `name`; use `chunk.id`. Function names are display-only and may
 repeat.
@@ -1572,10 +1593,15 @@ const interpretDetails = JSON.parse(atob(message.result)) as InterpretDetails;
 ```
 
 Update `web/frontend/src/types.ts` with the interfaces from §4. `format_version`,
-`debug_info.chunks`, and `execution` are part of `format_version: 2`. The current
+`debug_chunks`, and `execution` are part of `format_version: 2`. The current
 placeholder has `execution.status: "not_requested"`, so the frontend must check the
-status before trying to play frames. `Code.svelte` filters chunks with `hidden: true`;
-setup and module-wrapper chunks are not shown.
+status before trying to play frames. `Code.svelte` takes a normalized `chunks` array and
+filters chunks with `hidden: true`; setup and module-wrapper chunks are not shown.
+
+Use `normalizeDebugChunks(details)` from `$lib/debugInfo` so the page accepts:
+1. `debug_chunks` (canonical),
+2. `debug_info.chunks` (intermediate format),
+3. the old name-keyed `debug_info` map.
 
 ### 8.2 UI pieces
 
@@ -1608,7 +1634,7 @@ setHighlight({
 ```
 
 `frame.vm.op_ptr` is already in the units used by `Code.svelte` and
-`debug_info.chunks[].byte_code`, and `frame.vm.chunk_id` is the exact chunk id, so no
+`debug_chunks[].byte_code`, and `frame.vm.chunk_id` is the exact chunk id, so no
 name-based lookup is needed. For JIT exit frames, either keep the bytecode highlight at
 the entry `op_ptr` or switch to the assembly view only on manual pause.
 
@@ -1686,7 +1712,7 @@ package with `./go_js` and `--structured --trace-execution`.
 Required cases:
 
 1. **Simple script**: boot, main enqueue, job start, step frames, job end, end.
-   Every `step.vm.chunk_id` exists in `debug_info.chunks`, and every
+   Every `step.vm.chunk_id` exists in `debug_chunks`, and every
    `step.vm.op_ptr` matches an `op_ptr` in that chunk's `byte_code`.
 2. **setTimeout vs promise**: assert a task enqueue for the timer and a microtask
    enqueue for the promise reaction; assert the microtask `job_start` appears before
@@ -1750,7 +1776,7 @@ Recommended commits, smallest risk first:
    Verify the existing test suite still passes.
 3. **VM step capture + flag + structured output field.** Animation now has `step`
    frames but no queue events. Add an integration test that `vm.chunk_id` and `op_ptr`
-   agree with `debug_info.chunks`.
+   agree with `debug_chunks`.
 4. **Job boundaries, boot/waiting/end, output deltas.** Add main enqueue/job start/end
    and end frame.
 5. **Queue enqueue events + timer events.** Add deterministic pending log and timer
@@ -1783,8 +1809,8 @@ produce a valid `execution` object before any frontend work starts.
 | Tracing slows the web run past the 10 s microVM timeout | Keep tracing opt-in, cap frames early, avoid recursive displays, measure a few examples. |
 | Huge structured response/base64 | Frame/queue/stack caps; `truncated` metadata; consider a larger `--trace-max-frames` only for local use. |
 | Errors produce no trace | V1 only animates successful runs. A later change should return errors through structured output instead of `os.Exit`. |
-| Duplicate function names collide | `debug_info.chunks` is keyed by stable `chunk_id`; `name` is display-only. Frames must always carry the chunk id. |
-| Old `debug_info` keyed by function name | Replaced by `format_version: 2` and `debug_info.chunks`; frontend uses chunk ids for expansion/highlighting. |
+| Duplicate function names collide | `debug_chunks` is keyed by stable `chunk_id`; `name` is display-only. Frames must always carry the chunk id. |
+| Old `debug_info` keyed by function name | Kept as a legacy projection for old frontend bundles; new code uses `debug_chunks` and chunk ids for expansion/highlighting. |
 | Sub-VM stacks look like the main stack | Include `vm.id`/`parent_id`; render a sub-VM badge and do not merge stacks. |
 | Timers never removed from `timerRegistry` | Track fired/cancelled state; snapshots show `fired` rather than `pending`. |
 | Frontend scrolls code on every tick | Separate animation highlight from the existing scroll effect; follow on pause/manual step. |
@@ -1805,7 +1831,7 @@ produce a valid `execution` object before any frontend work starts.
    Recommended: defer until the basic animation is working.
 4. Should the frontend auto-pause on interesting events or only annotate them? This is a
    product decision; the data supports either.
-5. Should hidden chunks stay in `debug_info.chunks` with `hidden: true`, or be removed
+5. Should hidden chunks stay in `debug_chunks` with `hidden: true`, or be removed
    entirely? Keeping them is better for debugging module wrappers and setup, and the
    frontend already filters them.
 6. Should the web always trace, or should it be a per-run toggle? Always-on for the
@@ -1816,12 +1842,12 @@ produce a valid `execution` object before any frontend work starts.
 ## 13. Handoff checklist
 
 The message-format work is already landed (`format_version: 2`, stable chunk ids,
-`debug_info.chunks`, execution placeholder, frontend chunk-id highlighting). The
+`debug_chunks`, execution placeholder, frontend chunk-id highlighting). The
 unchecked items below are the animation work.
 
 - [ ] Read §1 and confirm the current queue/`await`/`setTimeout` behaviour in the tree.
 - [ ] Add the `trace` package and its schema tests before touching the VM.
-- [x] Add `format_version: 2`, stable chunk ids, `debug_info.chunks`, and the
+- [x] Add `format_version: 2`, stable chunk ids, `debug_chunks`, and the
       `execution` placeholder.
 - [x] Add frontend types and chunk-id expansion/highlighting while preserving the
       existing panels and toggles.

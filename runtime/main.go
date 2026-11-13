@@ -164,7 +164,8 @@ func main() {
 		out := virtualMachine.StructuredOut{
 			FormatVersion: virtualMachine.StructuredOutputFormatVersion,
 			Output:        output.String(),
-			DebugInfo:     info,
+			DebugInfo:     info.Legacy,
+			DebugChunks:   info.Chunks,
 			Ast:           ast,
 			Execution:     virtualMachine.NewExecutionPlaceholder(),
 		}
