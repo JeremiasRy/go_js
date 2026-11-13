@@ -517,18 +517,21 @@ phase's correctness gates pass.
 
 Goal: make JIT behavior testable before changing the compiler.
 
-- [ ] Add runtime options: `--jit=off|auto|force`, `--jit-call-threshold`,
+- [x] Add runtime options: `--jit=off|auto|force`, `--jit-call-threshold`,
       `--jit-loop-threshold`, `--jit-max-code-bytes`, `--jit-stats`.
-- [ ] Expose the existing `flags.EnableJIT` through those options
+- [x] Expose the existing `flags.EnableJIT` through those options
       (`ECMASCRIPT_ROADMAP.md` M0 item 5).
-- [ ] Add the known-miscompile cases from §1.1 as tests under
+- [x] Add the known-miscompile cases from §1.1 as tests under
       `test/test-scripts/jit/` and/or Go tests.
-- [ ] Add a differential runner mode: execute the same case with JIT off and
+- [x] Add a differential runner mode: execute the same case with JIT off and
       JIT forced, compare stdout/diagnostics, and fail on divergence.
-- [ ] Record baseline timings for fib, a numeric loop, array iteration, object
-      access, and string concatenation.
-- [ ] Decide the default: until Phase 2 is complete, keep JIT out of the default
+      (`GO_JS_DIFFERENTIAL=1 ./test.sh`; `jit-*` scripts always run forced.)
+- [x] Record baseline timings for fib, a numeric loop, array iteration, object
+      access, and string concatenation. See `runtime/jit/BASELINE.md`.
+- [x] Decide the default: until Phase 2 is complete, keep JIT out of the default
       CI path or set `auto` with the existing conservative eligibility.
+      Decision: default remains `auto` with the existing conservative
+      eligibility; the differential suite is opt-in until Phase 2 is green.
 
 Exit criteria: `./test.sh` still passes; the differential harness runs; the
 current miscompiles are documented as failing (or JIT is disabled so they cannot

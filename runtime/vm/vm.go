@@ -28,7 +28,13 @@ import (
 
 const STACK_INITIAL = 1024
 const FRAMES_MAX = 1024
-const IS_HOT_PATH = 4096
+
+func jitCallThreshold() int {
+	if flags.JITMode == flags.JITForce {
+		return 1
+	}
+	return flags.JITCallThreshold
+}
 
 var ROOT_SCRIPT_LOCATION string
 var globals = make([]value.Value, 30)
@@ -2703,7 +2709,7 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if currentIp != nil && !calledWithSpread && vm.callCounts[fn] > IS_HOT_PATH && jit.IsJittable(fn, globals) {
+	if currentIp != nil && !calledWithSpread && vm.callCounts[fn] > jitCallThreshold() && jit.IsJittable(fn, globals) {
 		if flags.Debug {
 			fmt.Println("-- CALLING JIT FUNCTION --")
 		}
