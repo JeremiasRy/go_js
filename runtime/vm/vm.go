@@ -6679,6 +6679,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if len(args) > 0 {
 							id, _ := vm.toNumber(args[0])
 							native.CancelTimer(int(id))
+							vm.traceTimerCancelled(int(id))
 						}
 						vm.push(value.UNDEFINED)
 					}

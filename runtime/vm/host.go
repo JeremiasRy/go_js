@@ -215,6 +215,7 @@ func (vm *VM) callHostFunction(fn *native.HostFunction, thisCtx value.Value, arg
 		if len(args) > 0 {
 			id, _ := vm.toNumber(args[0])
 			native.CancelTimer(int(id))
+			vm.traceTimerCancelled(int(id))
 		}
 		return value.UNDEFINED, nil
 	case native.HOST_SET_IMMEDIATE:
@@ -234,6 +235,7 @@ func (vm *VM) callHostFunction(fn *native.HostFunction, thisCtx value.Value, arg
 		if len(args) > 0 {
 			id, _ := vm.toNumber(args[0])
 			native.CancelTimer(int(id))
+			vm.traceTimerCancelled(int(id))
 		}
 		return value.UNDEFINED, nil
 	case native.HOST_PROCESS_CWD:
@@ -784,13 +786,15 @@ func (vm *VM) scheduleTimer(fn *native.SetTimeout, callback, thisCtx value.Value
 	}
 	fn.Set(delay, callbackFn, thisCtx, args)
 	name := fn.Name()
-	fn.SetTraceMetadata(fmt.Sprintf("%s(%dms) callback", name, delay), name)
+	label := fmt.Sprintf("%s(%dms) callback", name, delay)
+	fn.SetTraceMetadata(label, name)
 	clone := fn.Clone()
 	key := heap.NewCallbackRoot()
 	clone.SetRootKey(key)
 	roots := append([]value.Value{callback, thisCtx}, args...)
 	heap.StoreCallbackRoot(key, roots...)
 	id := native.RegisterTimer(clone)
+	vm.traceTimerScheduled(id, delay, label, fn.Repeats())
 	eventloop.Dispatch(clone)
 	return id, nil
 }

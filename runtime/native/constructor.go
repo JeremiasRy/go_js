@@ -307,6 +307,10 @@ func (st *SetTimeout) Name() string {
 	return st.name
 }
 
+func (st *SetTimeout) Repeats() bool {
+	return st.interval
+}
+
 func (st *SetTimeout) SetTraceMetadata(label, source string) {
 	st.traceLabel = label
 	st.traceSource = source

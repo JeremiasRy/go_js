@@ -227,6 +227,46 @@ func (vm *VM) traceEvent(event trace.Event, note string) {
 	})
 }
 
+func (vm *VM) traceTimerScheduled(id, delay int, label string, repeats bool) {
+	if !trace.Enabled() {
+		return
+	}
+	timer := &trace.TimerItem{
+		ID:      id,
+		DelayMS: delay,
+		Label:   label,
+		Repeats: repeats,
+		State:   "pending",
+	}
+	vm.traceEvent(trace.Event{
+		Type:   "timer_scheduled",
+		Timer:  timer,
+		Detail: "scheduled " + label,
+	}, "scheduled "+label)
+}
+
+func (vm *VM) traceTimerCancelled(id int) {
+	if !trace.Enabled() {
+		return
+	}
+	info, found := native.TimerInfoFor(id)
+	if !found {
+		return
+	}
+	timer := &trace.TimerItem{
+		ID:      info.ID,
+		DelayMS: info.DelayMS,
+		Label:   info.Label,
+		Repeats: info.Repeats,
+		State:   info.State,
+	}
+	vm.traceEvent(trace.Event{
+		Type:   "timer_cancelled",
+		Timer:  timer,
+		Detail: "cancelled " + timer.Label,
+	}, "cancelled "+timer.Label)
+}
+
 func (vm *VM) flushTraceEvents() {
 	if !trace.Enabled() {
 		return
