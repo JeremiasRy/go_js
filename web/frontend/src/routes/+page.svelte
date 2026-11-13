@@ -39,6 +39,11 @@
     const astElements = $state(new Map<number, HTMLElement>());
     const lookUp = $state(new Map<number, AstNode>());
 
+    const CARD_CLASS =
+        "min-h-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden";
+    const CARD_HEADER_CLASS =
+        "bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2";
+
     type EditorTab = "editor" | "examples";
 
     let editorContainer: HTMLElement;
@@ -834,12 +839,10 @@
 
     <div class="flex-1 min-h-0 flex flex-row gap-3">
         <aside
-            class="w-64 shrink-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+            class="w-64 shrink-0 {CARD_CLASS}"
             aria-label="Latest runs"
         >
-            <div
-                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2"
-            >
+            <div class={CARD_HEADER_CLASS}>
                 <span>Latest runs</span>
                 <button
                     type="button"
@@ -933,11 +936,11 @@
         ></div>
 
         <div
-            class="basis-0 min-w-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
+            class="basis-0 min-w-0 {CARD_CLASS}"
             style:flex-grow={2 - reveal.current}
         >
             <div
-                class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex flex-row items-center justify-between gap-2"
+                class="{CARD_HEADER_CLASS} flex-row"
             >
                 <div
                     class="flex items-center gap-1 rounded-lg bg-slate-200/70 p-1"
@@ -1068,7 +1071,7 @@
         </div>
 
         <div
-            class="basis-0 min-w-0 overflow-hidden bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col {showResults
+            class="basis-0 min-w-0 min-h-0 flex flex-col {showResults
                 ? ''
                 : 'pointer-events-none'}"
             style:flex-grow={2 * reveal.current}
@@ -1078,16 +1081,14 @@
         >
             {#if showResults}
                 <div
-                    class="flex w-full flex-1 min-h-0 flex-col gap-2 p-2"
+                    class="flex w-full flex-1 min-h-0 flex-col gap-3"
                     in:fly={{ x: 32, duration: 300, easing: cubicOut }}
                     out:fade={{ duration: 150 }}
                 >
-                    <div
-                        class="shrink-0 rounded-lg border border-slate-200 bg-white p-2"
-                    >
+                    <section class="flex-1 {CARD_CLASS}">
                         <button
                             type="button"
-                            class="flex w-full cursor-pointer items-center justify-between gap-2 text-left text-sm font-semibold text-slate-600 hover:text-slate-800"
+                            class="{CARD_HEADER_CLASS} w-full cursor-pointer text-left hover:text-slate-800"
                             aria-expanded={outputExpanded}
                             aria-controls="execution-result-panel"
                             onclick={() => (outputExpanded = !outputExpanded)}
@@ -1106,45 +1107,46 @@
                         {#if outputExpanded}
                             <div
                                 id="execution-result-panel"
+                                class="flex-1 min-h-0 overflow-auto p-3"
                                 transition:slide={{ duration: 200 }}
                             >
                                 <pre
-                                    class="mt-2 max-h-[30vh] overflow-auto whitespace-pre-wrap break-words rounded-md bg-slate-50 p-3 font-mono text-sm text-slate-600">{interpretResult!
+                                    class="whitespace-pre-wrap break-words font-mono text-sm text-slate-600">{interpretResult!
                                         .result?.output || "(no output)"}</pre>
                             </div>
                         {/if}
-                    </div>
+                    </section>
 
-                    <div class="flex w-full flex-1 min-h-0 flex-row gap-2">
-                        <div
-                            class="w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
+                    <div class="flex min-h-0 flex-1 flex-row gap-3">
+                        <section
+                            class="flex min-w-0 flex-1 flex-col {CARD_CLASS}"
                         >
-                            <div
-                                class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
-                            >
-                                ECMATree
+                            <div class={CARD_HEADER_CLASS}>ECMATree</div>
+                            <div class="flex-1 min-h-0 overflow-y-auto p-2">
+                                <AstTree
+                                    node={interpretResult!.result!.ast}
+                                    {highlight}
+                                    {setHighlight}
+                                    {registerThySelf}
+                                />
                             </div>
-                            <AstTree
-                                node={interpretResult!.result!.ast}
-                                {highlight}
-                                {setHighlight}
-                                {registerThySelf}
-                            />
-                        </div>
-                        <div
-                            class="w-1/2 min-w-0 min-h-0 flex flex-col gap-2"
+                        </section>
+
+                        <section
+                            class="flex min-w-0 flex-1 flex-col {CARD_CLASS}"
                         >
+                            <div class={CARD_HEADER_CLASS}>Byte Code</div>
                             <div
-                                class="bg-slate-100 px-4 py-2 border-slate-200 rounded-md text-sm font-semibold text-slate-600 shrink-0"
+                                class="flex flex-1 min-h-0 flex-col p-2"
                             >
-                                Byte Code
+                                <Code
+                                    debugInfo={interpretResult!.result!
+                                        .debug_info}
+                                    {highlight}
+                                    {setHighlight}
+                                />
                             </div>
-                            <Code
-                                debugInfo={interpretResult!.result!.debug_info}
-                                {highlight}
-                                {setHighlight}
-                            />
-                        </div>
+                        </section>
                     </div>
                 </div>
             {/if}
