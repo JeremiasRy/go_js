@@ -13,16 +13,17 @@
         setHighlight: (opts: SetHighlightStatusParams) => void;
         highlight: HighlightStatus | null;
     };
-    const byteOpElements = new Map<number, HTMLElement>();
-    const byteOpByPtr = new Map<string, HTMLElement>();
-    const asmOpElements = new Map<number, HTMLElement>();
-    const asmOpByPtr = new Map<string, HTMLElement>();
+    const opElements = new Map<number, HTMLElement>();
+    const opByPtr = new Map<string, HTMLElement>();
     const { debugInfo, setHighlight, highlight }: PropsType = $props();
 
     const MAIN_FUNCTION = "PROGRAM_MAIN";
     const EXPAND_DURATION = 200;
 
+    type CodeView = "bytecode" | "jit";
+
     let expandedFunctions = $state<string[]>([]);
+    let codeViews = $state<Record<string, CodeView>>({});
 
     const sameFunctions = (a: string[], b: string[]) => {
         return a.length === b.length && a.every((fn) => b.includes(fn));
@@ -32,6 +33,24 @@
         expandedFunctions = expandedFunctions.includes(fn)
             ? expandedFunctions.filter((name) => name !== fn)
             : [...expandedFunctions, fn];
+    }
+
+    function codeViewFor(fn: string, hasJit: boolean): CodeView {
+        if (!hasJit) {
+            return "bytecode";
+        }
+
+        return codeViews[fn] ?? "jit";
+    }
+
+    function setCodeView(fn: string, view: CodeView) {
+        codeViews = { ...codeViews, [fn]: view };
+    }
+
+    function codeViewButtonClass(isActive: boolean): string {
+        return isActive
+            ? "cursor-pointer rounded-md bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+            : "cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700";
     }
 
     const ptrKey = (fn: string, ptr: number) => `${fn}:${ptr}`;
@@ -58,30 +77,9 @@
 
     let codeScrollContainer: HTMLElement;
 
-    const clamp = (value: number, min: number, max: number) => {
-        return Math.min(Math.max(value, min), max);
-    };
-
-    const getScrollContainer = (element: HTMLElement) => {
-        return element.closest<HTMLElement>("[data-code-scroll]");
-    };
-
-    const getTargetTop = (container: HTMLElement, target: HTMLElement) => {
-        const containerRect = container.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-
-        return targetRect.top - containerRect.top + container.scrollTop;
-    };
-
-    const getMaxScroll = (container: HTMLElement) => {
-        return Math.max(0, container.scrollHeight - container.clientHeight);
-    };
-
     function rebuildElementMaps() {
-        byteOpElements.clear();
-        byteOpByPtr.clear();
-        asmOpElements.clear();
-        asmOpByPtr.clear();
+        opElements.clear();
+        opByPtr.clear();
 
         if (!codeScrollContainer) {
             return;
@@ -90,7 +88,7 @@
         const expanded = new Set(expandedFunctions);
 
         for (const row of codeScrollContainer.querySelectorAll<HTMLElement>(
-            "[data-byte-row]",
+            "[data-code-row]",
         )) {
             const fn = row.dataset.fn;
             if (fn === undefined || !expanded.has(fn)) {
@@ -100,100 +98,14 @@
             const astId = Number(row.dataset.astId);
             const key = ptrKey(fn, Number(row.dataset.opPtr));
 
-            if (!byteOpByPtr.has(key)) {
-                byteOpByPtr.set(key, row);
+            if (!opByPtr.has(key)) {
+                opByPtr.set(key, row);
             }
 
-            if (!byteOpElements.has(astId)) {
-                byteOpElements.set(astId, row);
-            }
-        }
-
-        for (const row of codeScrollContainer.querySelectorAll<HTMLElement>(
-            "[data-jit-row]",
-        )) {
-            const fn = row.dataset.fn;
-            if (fn === undefined || !expanded.has(fn)) {
-                continue;
-            }
-
-            const astId = Number(row.dataset.astId);
-            const key = ptrKey(fn, Number(row.dataset.opCodePtr));
-
-            if (!asmOpByPtr.has(key)) {
-                asmOpByPtr.set(key, row);
-            }
-
-            if (!asmOpElements.has(astId)) {
-                asmOpElements.set(astId, row);
+            if (!opElements.has(astId)) {
+                opElements.set(astId, row);
             }
         }
-    }
-
-    function scrollRootToTarget(
-        column: HTMLElement,
-        target: HTMLElement,
-        commonOffset: number,
-    ) {
-        if (!codeScrollContainer) {
-            return;
-        }
-
-        const rootRect = codeScrollContainer.getBoundingClientRect();
-        const columnRect = column.getBoundingClientRect();
-        const columnTopInRoot =
-            columnRect.top - rootRect.top + codeScrollContainer.scrollTop;
-        const targetTopInRoot = columnTopInRoot + commonOffset;
-        const targetHeight = target.getBoundingClientRect().height;
-        const rootTarget =
-            targetTopInRoot +
-            targetHeight / 2 -
-            codeScrollContainer.clientHeight / 2;
-
-        codeScrollContainer.scrollTo({
-            top: rootTarget,
-            behavior: "smooth",
-        });
-    }
-
-    function alignColumns(bytecodeTarget: HTMLElement, jitTarget: HTMLElement) {
-        const bytecodeScroll = getScrollContainer(bytecodeTarget);
-        const jitScroll = getScrollContainer(jitTarget);
-
-        if (
-            !bytecodeScroll ||
-            !jitScroll ||
-            bytecodeScroll.parentElement !== jitScroll.parentElement
-        ) {
-            scrollTo(earliestElement([bytecodeTarget, jitTarget]));
-            return;
-        }
-
-        const bytecodeTop = getTargetTop(bytecodeScroll, bytecodeTarget);
-        const jitTop = getTargetTop(jitScroll, jitTarget);
-        const bytecodeMaxScroll = getMaxScroll(bytecodeScroll);
-        const jitMaxScroll = getMaxScroll(jitScroll);
-
-        const lower = Math.max(
-            bytecodeTop - bytecodeMaxScroll,
-            jitTop - jitMaxScroll,
-        );
-        const upper = Math.min(bytecodeTop, jitTop);
-        const preferred =
-            Math.min(bytecodeScroll.clientHeight, jitScroll.clientHeight) / 2;
-        const commonOffset =
-            lower <= upper ? clamp(preferred, lower, upper) : (lower + upper) / 2;
-
-        bytecodeScroll.scrollTo({
-            top: clamp(bytecodeTop - commonOffset, 0, bytecodeMaxScroll),
-            behavior: "smooth",
-        });
-        jitScroll.scrollTo({
-            top: clamp(jitTop - commonOffset, 0, jitMaxScroll),
-            behavior: "smooth",
-        });
-
-        scrollRootToTarget(bytecodeScroll, bytecodeTarget, commonOffset);
     }
 
     const isNotInternalSetup = ([fnName]: [string, DisassembledByteCode]) => {
@@ -258,22 +170,12 @@
 
         rebuildElementMaps();
 
-        let bytecodeTarget: HTMLElement | null = null;
-        let jitTarget: HTMLElement | null = null;
+        let target: HTMLElement | null = null;
 
         if (currentHighlight.source === "ast") {
-            bytecodeTarget = earliestElement(
+            target = earliestElement(
                 currentHighlight.astIds
-                    .map((n) => byteOpElements.get(n))
-                    .filter(
-                        (element): element is HTMLElement =>
-                            element !== undefined &&
-                            element.offsetParent !== null,
-                    ),
-            );
-            jitTarget = earliestElement(
-                currentHighlight.astIds
-                    .map((n) => asmOpElements.get(n))
+                    .map((n) => opElements.get(n))
                     .filter(
                         (element): element is HTMLElement =>
                             element !== undefined &&
@@ -281,25 +183,17 @@
                     ),
             );
         } else {
-            const key = ptrKey(currentHighlight.fn, currentHighlight.opCodePtr);
-            bytecodeTarget = byteOpByPtr.get(key) ?? null;
-            jitTarget = asmOpByPtr.get(key) ?? null;
+            target =
+                opByPtr.get(
+                    ptrKey(currentHighlight.fn, currentHighlight.opCodePtr),
+                ) ?? null;
         }
 
-        if (bytecodeTarget && !bytecodeTarget.offsetParent) {
-            bytecodeTarget = null;
+        if (target && !target.offsetParent) {
+            target = null;
         }
 
-        if (jitTarget && !jitTarget.offsetParent) {
-            jitTarget = null;
-        }
-
-        if (bytecodeTarget && jitTarget) {
-            alignColumns(bytecodeTarget, jitTarget);
-            return;
-        }
-
-        scrollTo(bytecodeTarget ?? jitTarget);
+        scrollTo(target);
     }
 
     $effect(() => {
@@ -398,12 +292,13 @@
             fn,
             getPtr: getJitPtr,
         })}
+        {@const view = codeViewFor(fn, jit.length > 0)}
         <div class="rounded-lg border border-slate-200 bg-white p-2">
             <button
                 type="button"
                 class="flex w-full cursor-pointer items-center justify-between gap-2 text-left text-sm font-semibold text-slate-600 hover:text-slate-800"
                 aria-expanded={isExpanded}
-                aria-controls={`bytecode-panel-${fnIndex}`}
+                aria-controls={`code-panel-${fnIndex}`}
                 onclick={() => toggleFunction(fn)}
             >
                 <span class="flex min-w-0 items-center gap-2">
@@ -430,16 +325,64 @@
 
             {#if isExpanded}
                 <div
-                    id={`bytecode-panel-${fnIndex}`}
+                    id={`code-panel-${fnIndex}`}
                     transition:slide={{ duration: EXPAND_DURATION }}
                 >
-                    <div
-                        class="flex flex-row w-full gap-2 max-h-[800px] pt-2"
-                    >
+                    {#if jit.length > 0}
                         <div
-                            data-code-scroll
-                            class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md p-1.5"
+                            class="mt-2 flex items-center gap-1 rounded-lg bg-slate-100 p-1"
+                            role="group"
+                            aria-label={`${fn} code view`}
                         >
+                            <button
+                                type="button"
+                                aria-pressed={view === "bytecode"}
+                                class={codeViewButtonClass(
+                                    view === "bytecode",
+                                )}
+                                onclick={() => setCodeView(fn, "bytecode")}
+                            >
+                                Bytecode
+                            </button>
+                            <button
+                                type="button"
+                                aria-pressed={view === "jit"}
+                                class={codeViewButtonClass(view === "jit")}
+                                onclick={() => setCodeView(fn, "jit")}
+                            >
+                                JIT assembly
+                            </button>
+                        </div>
+                    {/if}
+
+                    <div
+                        class="mt-2 max-h-[800px] overflow-y-auto rounded-md p-1.5"
+                    >
+                        {#if view === "jit"}
+                            {#each jit as { inst, op_code_ptr, ast_id }, i}
+                                <p
+                                    ondblclick={() => {
+                                        setHighlight({
+                                            astId: ast_id,
+                                            source: "asm",
+                                            opCodePtr: op_code_ptr,
+                                            fn,
+                                        });
+                                    }}
+                                    data-code-row
+                                    data-fn={fn}
+                                    data-ast-id={ast_id}
+                                    data-op-ptr={op_code_ptr}
+                                    class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap ast-{Number(
+                                        ast_id,
+                                    )} op-{Number(
+                                        op_code_ptr,
+                                    )} {jitHighlightClasses[i]}"
+                                >
+                                    {formatAssemblyInstruction(inst)}
+                                </p>
+                            {/each}
+                        {:else}
                             {#each byte_code as { op, ast_id, op_ptr }, i}
                                 <p
                                     ondblclick={() => {
@@ -450,7 +393,7 @@
                                             fn,
                                         });
                                     }}
-                                    data-byte-row
+                                    data-code-row
                                     data-fn={fn}
                                     data-ast-id={ast_id}
                                     data-op-ptr={op_ptr}
@@ -461,36 +404,6 @@
                                     {op}
                                 </p>
                             {/each}
-                        </div>
-                        {#if jit.length > 0}
-                            <div
-                                data-code-scroll
-                                class="flex-1 min-w-0 overflow-hidden overflow-y-auto rounded-md p-1.5"
-                            >
-                                {#each jit as { inst, op_code_ptr, ast_id }, i}
-                                    <p
-                                        ondblclick={() => {
-                                            setHighlight({
-                                                astId: ast_id,
-                                                source: "asm",
-                                                opCodePtr: op_code_ptr,
-                                                fn,
-                                            });
-                                        }}
-                                        data-jit-row
-                                        data-fn={fn}
-                                        data-ast-id={ast_id}
-                                        data-op-code-ptr={op_code_ptr}
-                                        class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap ast-{Number(
-                                            ast_id,
-                                        )} op-{Number(
-                                            op_code_ptr,
-                                        )} {jitHighlightClasses[i]}"
-                                    >
-                                        {formatAssemblyInstruction(inst)}
-                                    </p>
-                                {/each}
-                            </div>
                         {/if}
                     </div>
                 </div>
