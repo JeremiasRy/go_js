@@ -2,14 +2,14 @@
     import { tick, untrack } from "svelte";
     import { slide } from "svelte/transition";
     import type {
-        DisassembledByteCode,
-        FunctionName,
+        DebugInfo,
+        DisassembledChunk,
         HighlightStatus,
         SetHighlightStatusParams,
     } from "../types";
 
     type PropsType = {
-        debugInfo: Record<FunctionName, DisassembledByteCode>;
+        debugInfo: DebugInfo;
         setHighlight: (opts: SetHighlightStatusParams) => void;
         highlight: HighlightStatus | null;
     };
@@ -22,29 +22,39 @@
 
     type CodeView = "bytecode" | "jit";
 
-    let expandedFunctions = $state<string[]>([]);
+    let expandedChunks = $state<string[]>([]);
     let codeViews = $state<Record<string, CodeView>>({});
 
-    const sameFunctions = (a: string[], b: string[]) => {
-        return a.length === b.length && a.every((fn) => b.includes(fn));
-    };
-
-    function toggleFunction(fn: string) {
-        expandedFunctions = expandedFunctions.includes(fn)
-            ? expandedFunctions.filter((name) => name !== fn)
-            : [...expandedFunctions, fn];
+    function compareChunks(a: DisassembledChunk, b: DisassembledChunk) {
+        if (a.name !== b.name) {
+            return a.name < b.name ? -1 : 1;
+        }
+        if (a.id !== b.id) {
+            return a.id < b.id ? -1 : 1;
+        }
+        return 0;
     }
 
-    function codeViewFor(fn: string, hasJit: boolean): CodeView {
+    const sameChunks = (a: string[], b: string[]) => {
+        return a.length === b.length && a.every((chunk) => b.includes(chunk));
+    };
+
+    function toggleChunk(chunkId: string) {
+        expandedChunks = expandedChunks.includes(chunkId)
+            ? expandedChunks.filter((id) => id !== chunkId)
+            : [...expandedChunks, chunkId];
+    }
+
+    function codeViewFor(chunkId: string, hasJit: boolean): CodeView {
         if (!hasJit) {
             return "bytecode";
         }
 
-        return codeViews[fn] ?? "jit";
+        return codeViews[chunkId] ?? "jit";
     }
 
-    function setCodeView(fn: string, view: CodeView) {
-        codeViews = { ...codeViews, [fn]: view };
+    function setCodeView(chunkId: string, view: CodeView) {
+        codeViews = { ...codeViews, [chunkId]: view };
     }
 
     function codeViewButtonClass(isActive: boolean): string {
@@ -53,7 +63,7 @@
             : "cursor-pointer rounded-md px-2.5 py-1 text-xs font-medium text-slate-500 hover:text-slate-700";
     }
 
-    const ptrKey = (fn: string, ptr: number) => `${fn}:${ptr}`;
+    const ptrKey = (chunkId: string, ptr: number) => `${chunkId}:${ptr}`;
 
     const earliestElement = (elements: HTMLElement[]) => {
         return elements.reduce<HTMLElement | null>((earliest, current) => {
@@ -85,18 +95,18 @@
             return;
         }
 
-        const expanded = new Set(expandedFunctions);
+        const expanded = new Set(expandedChunks);
 
         for (const row of codeScrollContainer.querySelectorAll<HTMLElement>(
             "[data-code-row]",
         )) {
-            const fn = row.dataset.fn;
-            if (fn === undefined || !expanded.has(fn)) {
+            const chunkId = row.dataset.chunkId;
+            if (chunkId === undefined || !expanded.has(chunkId)) {
                 continue;
             }
 
             const astId = Number(row.dataset.astId);
-            const key = ptrKey(fn, Number(row.dataset.opPtr));
+            const key = ptrKey(chunkId, Number(row.dataset.opPtr));
 
             if (!opByPtr.has(key)) {
                 opByPtr.set(key, row);
@@ -108,59 +118,69 @@
         }
     }
 
-    const isNotInternalSetup = ([fnName]: [string, DisassembledByteCode]) => {
-        return fnName !== "INTERNAL_SETUP";
-    };
-
-    const functionEntries = $derived(
-        Object.entries(debugInfo).filter(isNotInternalSetup),
+    const chunkEntries = $derived(
+        [...(debugInfo?.chunks ?? [])]
+            .filter((chunk) => !chunk.hidden)
+            .sort(compareChunks),
     );
 
-    const astToFunctions = $derived.by(() => {
+    const mainChunk = $derived(
+        chunkEntries.find((chunk) => chunk.name === MAIN_FUNCTION) ??
+            chunkEntries[0] ??
+            null,
+    );
+
+    const astToChunks = $derived.by(() => {
         const map = new Map<number, Set<string>>();
 
-        const add = (astId: number, fn: string) => {
-            let functions = map.get(astId);
-            if (functions === undefined) {
-                functions = new Set<string>();
-                map.set(astId, functions);
+        const add = (astId: number, chunkId: string) => {
+            let chunks = map.get(astId);
+            if (chunks === undefined) {
+                chunks = new Set<string>();
+                map.set(astId, chunks);
             }
-            functions.add(fn);
+            chunks.add(chunkId);
         };
 
-        for (const [fn, { byte_code, jit }] of functionEntries) {
-            for (const { ast_id } of byte_code) {
-                add(ast_id, fn);
+        for (const chunk of chunkEntries) {
+            for (const { ast_id } of chunk.byte_code) {
+                add(ast_id, chunk.id);
             }
 
-            for (const { ast_id } of jit) {
-                add(ast_id, fn);
+            for (const { ast_id } of chunk.jit) {
+                add(ast_id, chunk.id);
             }
         }
 
         return map;
     });
 
-    const affectedFunctions = $derived.by(() => {
+    const affectedChunks = $derived.by(() => {
         if (highlight === null) {
             return [];
         }
 
         if (highlight.source !== "ast") {
-            return functionEntries.some(([fn]) => fn === highlight.fn)
-                ? [highlight.fn]
-                : [MAIN_FUNCTION];
+            return chunkEntries.some((chunk) => chunk.id === highlight.chunkId)
+                ? [highlight.chunkId]
+                : mainChunk
+                  ? [mainChunk.id]
+                  : [];
         }
 
         const affected = new Set<string>();
 
         for (const astId of highlight.astIds) {
-            for (const fn of astToFunctions.get(astId) ?? []) {
-                affected.add(fn);
+            for (const chunkId of astToChunks.get(astId) ?? []) {
+                affected.add(chunkId);
             }
         }
 
-        return affected.size > 0 ? [...affected] : [MAIN_FUNCTION];
+        return affected.size > 0
+            ? [...affected]
+            : mainChunk
+              ? [mainChunk.id]
+              : [];
     });
 
     function scrollToHighlight(currentHighlight: HighlightStatus | null) {
@@ -185,7 +205,10 @@
         } else {
             target =
                 opByPtr.get(
-                    ptrKey(currentHighlight.fn, currentHighlight.opCodePtr),
+                    ptrKey(
+                        currentHighlight.chunkId,
+                        currentHighlight.opCodePtr,
+                    ),
                 ) ?? null;
         }
 
@@ -198,11 +221,11 @@
 
     $effect(() => {
         const currentHighlight = highlight;
-        const affected = affectedFunctions;
-        const previous = untrack(() => expandedFunctions);
-        const expansionChanged = !sameFunctions(previous, affected);
+        const affected = affectedChunks;
+        const previous = untrack(() => expandedChunks);
+        const expansionChanged = !sameChunks(previous, affected);
 
-        expandedFunctions = [...affected];
+        expandedChunks = [...affected];
 
         let cancelled = false;
         let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -248,24 +271,24 @@
 
     const highlightedPointer = $derived(
         highlight !== null && highlight.source !== "ast"
-            ? { fn: highlight.fn, ptr: highlight.opCodePtr }
+            ? { chunkId: highlight.chunkId, ptr: highlight.opCodePtr }
             : null,
     );
 
     function buildHighlightClasses<T extends { ast_id: number }>({
         items,
-        fn,
+        chunkId,
         getPtr,
     }: {
         items: T[];
-        fn: string;
+        chunkId: string;
         getPtr: (item: T) => number;
     }) {
         return items.map((item) => {
             const byAst = highlightedAstIds.has(item.ast_id);
             const byPointer =
                 highlightedPointer !== null &&
-                highlightedPointer.fn === fn &&
+                highlightedPointer.chunkId === chunkId &&
                 highlightedPointer.ptr === getPtr(item);
 
             return byAst || byPointer ? "highlight" : "";
@@ -280,32 +303,32 @@
     bind:this={codeScrollContainer}
     class="flex flex-1 min-h-0 flex-col gap-2 overflow-y-auto"
 >
-    {#each functionEntries as [fn, { byte_code, jit }], fnIndex}
-        {@const isExpanded = expandedFunctions.includes(fn)}
+    {#each chunkEntries as chunk, chunkIndex (chunk.id)}
+        {@const isExpanded = expandedChunks.includes(chunk.id)}
         {@const byteHighlightClasses = buildHighlightClasses({
-            items: byte_code,
-            fn,
+            items: chunk.byte_code,
+            chunkId: chunk.id,
             getPtr: getOpCodePtr,
         })}
         {@const jitHighlightClasses = buildHighlightClasses({
-            items: jit,
-            fn,
+            items: chunk.jit,
+            chunkId: chunk.id,
             getPtr: getJitPtr,
         })}
-        {@const view = codeViewFor(fn, jit.length > 0)}
+        {@const view = codeViewFor(chunk.id, chunk.jit.length > 0)}
         <div class="rounded-lg border border-slate-200 bg-white p-2">
             <button
                 type="button"
                 class="flex w-full cursor-pointer items-center justify-between gap-2 text-left text-sm font-semibold text-slate-600 hover:text-slate-800"
                 aria-expanded={isExpanded}
-                aria-controls={`code-panel-${fnIndex}`}
-                onclick={() => toggleFunction(fn)}
+                aria-controls={`code-panel-${chunkIndex}`}
+                onclick={() => toggleChunk(chunk.id)}
             >
                 <span class="flex min-w-0 items-center gap-2">
                     <span class="truncate">
-                        {fn === MAIN_FUNCTION ? "Main" : fn}
+                        {chunk.name === MAIN_FUNCTION ? "Main" : chunk.name}
                     </span>
-                    {#if jit.length > 0}
+                    {#if chunk.jit.length > 0}
                         <span
                             class="shrink-0 rounded-full border border-amber-200 bg-amber-100 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-amber-700"
                         >
@@ -325,14 +348,14 @@
 
             {#if isExpanded}
                 <div
-                    id={`code-panel-${fnIndex}`}
+                    id={`code-panel-${chunkIndex}`}
                     transition:slide={{ duration: EXPAND_DURATION }}
                 >
-                    {#if jit.length > 0}
+                    {#if chunk.jit.length > 0}
                         <div
                             class="mt-2 flex items-center gap-1 rounded-lg bg-slate-100 p-1"
                             role="group"
-                            aria-label={`${fn} code view`}
+                            aria-label={`${chunk.name} code view`}
                         >
                             <button
                                 type="button"
@@ -340,7 +363,8 @@
                                 class={codeViewButtonClass(
                                     view === "bytecode",
                                 )}
-                                onclick={() => setCodeView(fn, "bytecode")}
+                                onclick={() =>
+                                    setCodeView(chunk.id, "bytecode")}
                             >
                                 Bytecode
                             </button>
@@ -348,7 +372,7 @@
                                 type="button"
                                 aria-pressed={view === "jit"}
                                 class={codeViewButtonClass(view === "jit")}
-                                onclick={() => setCodeView(fn, "jit")}
+                                onclick={() => setCodeView(chunk.id, "jit")}
                             >
                                 JIT assembly
                             </button>
@@ -359,18 +383,18 @@
                         class="mt-2 max-h-[800px] overflow-y-auto rounded-md p-1.5"
                     >
                         {#if view === "jit"}
-                            {#each jit as { inst, op_code_ptr, ast_id }, i}
+                            {#each chunk.jit as { inst, op_code_ptr, ast_id }, i}
                                 <p
                                     ondblclick={() => {
                                         setHighlight({
                                             astId: ast_id,
                                             source: "asm",
                                             opCodePtr: op_code_ptr,
-                                            fn,
+                                            chunkId: chunk.id,
                                         });
                                     }}
                                     data-code-row
-                                    data-fn={fn}
+                                    data-chunk-id={chunk.id}
                                     data-ast-id={ast_id}
                                     data-op-ptr={op_code_ptr}
                                     class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap ast-{Number(
@@ -383,18 +407,18 @@
                                 </p>
                             {/each}
                         {:else}
-                            {#each byte_code as { op, ast_id, op_ptr }, i}
+                            {#each chunk.byte_code as { op, ast_id, op_ptr }, i}
                                 <p
                                     ondblclick={() => {
                                         setHighlight({
                                             astId: ast_id,
                                             source: "op_code",
                                             opCodePtr: op_ptr,
-                                            fn,
+                                            chunkId: chunk.id,
                                         });
                                     }}
                                     data-code-row
-                                    data-fn={fn}
+                                    data-chunk-id={chunk.id}
                                     data-ast-id={ast_id}
                                     data-op-ptr={op_ptr}
                                     class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap {Number(

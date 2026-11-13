@@ -19,7 +19,6 @@ import (
 var (
 	sharedJITOnce    sync.Once
 	sharedJITContext *jit.Context
-
 )
 
 func PrintJITStats(w io.Writer) {
@@ -365,6 +364,7 @@ func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 		AstId:     make([]int, len(code)),
 		Constants: c.Constants,
 		FnName:    jitBridgeFnName,
+		ChunkID:   value.NextChunkID(),
 	}
 	var bridgeFn object.Callable = object.NewFunction(jitBridgeFnName, 0, rc)
 	if real, ok := act.Fn.(*object.ObjFunction); ok {

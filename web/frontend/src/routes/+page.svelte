@@ -127,7 +127,8 @@
         }
 
         return (
-            highlight.fn === opts.fn && highlight.opCodePtr === opts.opCodePtr
+            highlight.chunkId === opts.chunkId &&
+            highlight.opCodePtr === opts.opCodePtr
         );
     };
 
@@ -143,7 +144,7 @@
                 astId: opts.astId,
                 astIds: [opts.astId],
                 opCodePtr: opts.opCodePtr,
-                fn: opts.fn,
+                chunkId: opts.chunkId,
             };
             return;
         }
@@ -152,7 +153,7 @@
             source: opts.source,
             astId: opts.astId,
             astIds: [opts.astId, ...(lookUp?.get(opts.astId)?.ast_train ?? [])],
-            fn: opts.source === "op_code" ? opts.fn : "",
+            chunkId: opts.source === "op_code" ? opts.chunkId : "",
             opCodePtr: opts.source === "op_code" ? opts.opCodePtr : -1,
         };
     };

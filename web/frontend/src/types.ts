@@ -12,21 +12,21 @@ export type HighlightStatus = {
   astId: number;
   astIds: number[];
   opCodePtr: number;
-  fn: string;
+  chunkId: string;
 }
 
 type setHighlightFromOpCode = {
   source: "op_code";
   astId: number;
   opCodePtr: number;
-  fn: string;
+  chunkId: string;
 }
 
 type setHighlightFromAsm = {
   source: "asm";
   astId: number;
   opCodePtr: number;
-  fn: string;
+  chunkId: string;
 }
 
 type setHighlightFromAst = {
@@ -47,18 +47,59 @@ export type ScriptJob = {
   created_at: string;
 };
 
-export type FunctionName = string;
-export type DisassembledByteCode =
-  { byte_code: { ast_id: number; op: string; op_ptr: number }[]; jit: { inst: string; op_code_ptr: number; ast_id: number }[] }
+export type DisassembledOp = {
+  ast_id: number;
+  op: string;
+  op_ptr: number;
+};
 
+export type DisassembledJit = {
+  inst: string;
+  op_code_ptr: number;
+  ast_id: number;
+};
+
+export type DisassembledChunk = {
+  id: string;
+  name: string;
+  kind?: string;
+  hidden?: boolean;
+  byte_code: DisassembledOp[];
+  jit: DisassembledJit[];
+};
+
+export type DebugInfo = {
+  chunks: DisassembledChunk[];
+};
+
+export type ExecutionLimits = {
+  max_frames: number;
+  max_stack: number;
+  max_queue_items: number;
+  max_timers: number;
+  max_value_chars: number;
+};
+
+export type ExecutionInfo = {
+  schema_version: number;
+  status: "not_requested" | "complete" | "truncated" | "error" | string;
+  frames: unknown[];
+  truncated: boolean;
+  total_frames: number;
+  dropped_frames: number;
+  duration_ms: number;
+  limits: ExecutionLimits;
+};
 
 export type InterpretDetails = {
+  format_version: number;
   output: string;
-  debug_info: Record<FunctionName, DisassembledByteCode>;
+  debug_info: DebugInfo;
   ast: AstNode;
+  execution?: ExecutionInfo;
 };
+
 export type InterpretResult = {
   jobStatus: JobStatus;
   result: InterpretDetails | null;
 };
-

@@ -3,6 +3,8 @@ package value
 import (
 	"go_js/chunk"
 	"math"
+	"strconv"
+	"sync/atomic"
 )
 
 const UN_INITIALIZED_COMPTIME_AST_ID = -1
@@ -33,6 +35,13 @@ type ValueChunk struct {
 	AstId        []int
 	Constants    []Value
 	FnName       string
+	ChunkID      string
+}
+
+var nextChunkID atomic.Uint64
+
+func NextChunkID() string {
+	return "c" + strconv.FormatUint(nextChunkID.Add(1), 10)
 }
 
 func NewChunk(fnName string) *ValueChunk {
@@ -41,6 +50,7 @@ func NewChunk(fnName string) *ValueChunk {
 		Code:      []uint8{},
 		Constants: []Value{},
 		FnName:    fnName,
+		ChunkID:   NextChunkID(),
 	}
 }
 
