@@ -14,7 +14,6 @@ import (
 	"go_js/jit"
 	"go_js/native"
 	"go_js/object"
-	"go_js/trace"
 	"go_js/value"
 )
 
@@ -124,7 +123,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	}
 
 	jitChunk := *c
-	tracingJIT := trace.Enabled()
+	tracingJIT := vm.traceEnabled
 	jitStart := time.Now()
 	if tracingJIT {
 		vm.traceJITEnter(jitFn, &jitChunk, 0, "call")

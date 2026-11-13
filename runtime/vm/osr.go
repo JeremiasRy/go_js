@@ -7,7 +7,6 @@ import (
 
 	"go_js/flags"
 	"go_js/jit"
-	"go_js/trace"
 	"go_js/value"
 )
 
@@ -117,7 +116,7 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 		fmt.Fprintf(os.Stderr, "OSR enter ip=%d sp=%d frame=%d fn=%s\n", target, top, vm.frameCount, c.FnName)
 	}
 	jitChunk := *c
-	tracingJIT := trace.Enabled()
+	tracingJIT := vm.traceEnabled
 	jitStart := time.Now()
 	if tracingJIT {
 		vm.traceJITEnter(jitFn, &jitChunk, target, "osr")

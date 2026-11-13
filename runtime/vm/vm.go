@@ -129,6 +129,7 @@ type VM struct {
 
 	traceID       int
 	traceParentID int
+	traceEnabled  bool
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -161,6 +162,7 @@ func (vm *VM) newSubVM() *VM {
 	sub := NewVM(false, vm.output)
 	sub.callCounts = vm.callCounts
 	sub.traceParentID = vm.traceID
+	sub.traceEnabled = vm.traceEnabled
 	return sub
 }
 

@@ -53,6 +53,7 @@ func (vm *VM) BeginTrace(limits trace.Limits) {
 		return
 	}
 	trace.Enable(limits)
+	vm.traceEnabled = true
 	trace.SetBooted(false)
 	queues := queue.Snapshot()
 	loop := vm.loopState(queues, false)
@@ -66,7 +67,7 @@ func (vm *VM) BeginTrace(limits trace.Limits) {
 }
 
 func (vm *VM) FinishTrace(output string) *trace.Execution {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return trace.NewExecutionPlaceholder()
 	}
 	vm.flushTraceEvents()
@@ -86,12 +87,13 @@ func (vm *VM) FinishTrace(output string) *trace.Execution {
 	}
 	trace.AppendFrame(frame, len(output), output)
 	execution := trace.ExecutionInfo()
+	vm.traceEnabled = false
 	trace.Disable()
 	return execution
 }
 
 func (vm *VM) traceStep(f *CallFrame, c *value.ValueChunk, opIp int, code uint8) {
-	if !trace.Enabled() || c == nil || c.TraceHidden {
+	if !vm.traceEnabled || c == nil || c.TraceHidden {
 		return
 	}
 
@@ -110,7 +112,7 @@ func (vm *VM) traceStep(f *CallFrame, c *value.ValueChunk, opIp int, code uint8)
 }
 
 func (vm *VM) traceJobStart(callback object.Callback, priority queue.TaskPriority) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	vm.flushTraceEvents()
@@ -159,7 +161,7 @@ func (vm *VM) traceJobStart(callback object.Callback, priority queue.TaskPriorit
 }
 
 func (vm *VM) traceJobEnd() {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	vm.flushTraceEvents()
@@ -191,7 +193,7 @@ func (vm *VM) traceJobEnd() {
 }
 
 func (vm *VM) traceWaiting() {
-	if !trace.Enabled() || !trace.IsBooted() {
+	if !vm.traceEnabled || !trace.IsBooted() {
 		return
 	}
 	vm.flushTraceEvents()
@@ -210,7 +212,7 @@ func (vm *VM) traceWaiting() {
 }
 
 func (vm *VM) traceEvent(event trace.Event, note string) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	vm.flushTraceEvents()
@@ -228,7 +230,7 @@ func (vm *VM) traceEvent(event trace.Event, note string) {
 }
 
 func (vm *VM) traceTimerScheduled(id, delay int, label string, repeats bool) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	timer := &trace.TimerItem{
@@ -246,7 +248,7 @@ func (vm *VM) traceTimerScheduled(id, delay int, label string, repeats bool) {
 }
 
 func (vm *VM) traceTimerCancelled(id int) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	info, found := native.TimerInfoFor(id)
@@ -268,7 +270,7 @@ func (vm *VM) traceTimerCancelled(id int) {
 }
 
 func (vm *VM) flushTraceEvents() {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	events := trace.TakeQueueEvents()
@@ -296,7 +298,7 @@ func (vm *VM) flushTraceEvents() {
 }
 
 func (vm *VM) appendTraceFrame(frame trace.Frame) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	length := 0
@@ -662,7 +664,7 @@ func jitNoteView() trace.ValueView {
 }
 
 func (vm *VM) traceJITEnter(fn string, c *value.ValueChunk, entryIP int, mode string) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	vm.flushTraceEvents()
@@ -709,7 +711,7 @@ func (vm *VM) traceJITEnter(fn string, c *value.ValueChunk, entryIP int, mode st
 }
 
 func (vm *VM) traceJITExit(fn string, fallback *value.ValueChunk, entryIP int, mode, status string, result value.Value, duration time.Duration, opIP int) {
-	if !trace.Enabled() {
+	if !vm.traceEnabled {
 		return
 	}
 	vm.flushTraceEvents()
