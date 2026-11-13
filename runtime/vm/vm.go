@@ -9,7 +9,6 @@ import (
 	"go_js/eventloop"
 	"go_js/flags"
 	"go_js/heap"
-	"go_js/jit"
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
@@ -86,8 +85,10 @@ func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp 
 }
 
 type JSException struct {
-	Name    string
-	Message string
+	Name     string
+	Message  string
+	Value    value.Value
+	HasValue bool
 }
 
 func (e *JSException) Error() string {
@@ -861,20 +862,26 @@ func (vm *VM) generatorResume(generator *native.ObjGenerator, input value.Value,
 	dummy := object.NewFunction("generator-caller", 0, nil)
 	dummy.ValueChunk().EmitByte(chunk.OP_RETURN)
 	dummyIp := 0
-	runner.Call(dummy, nil, value.UNDEFINED, 0, false)
+	_, _, _ = runner.Call(dummy, value.UNDEFINED, nil, value.UNDEFINED, 0, false)
 
 	if !generator.Started {
 		generator.Started = true
 		for _, arg := range generator.Args {
 			runner.push(arg)
 		}
-		f, c := runner.Call(generator, &dummyIp, value.UNDEFINED, len(generator.Args), false)
+		f, c, callErr := runner.Call(generator, value.UNDEFINED, &dummyIp, value.UNDEFINED, len(generator.Args), false)
+		if callErr != nil {
+			return value.UNDEFINED, callErr
+		}
 		result, err := runner.run(f, c)
 		generator.Running = false
 		return result, err
 	}
 
-	f, c := runner.Call(generator, &dummyIp, value.UNDEFINED, 0, false)
+	f, c, callErr := runner.Call(generator, value.UNDEFINED, &dummyIp, value.UNDEFINED, 0, false)
+	if callErr != nil {
+		return value.UNDEFINED, callErr
+	}
 	runner.stackTop = f.localStart
 	for _, local := range generator.Locals {
 		runner.push(local)
@@ -1040,7 +1047,10 @@ func (vm *VM) construct(callable object.Callable, args []value.Value, newTarget 
 	for _, arg := range args {
 		runner.push(arg)
 	}
-	f, c := runner.Call(callable, nil, instanceValue, len(args), false)
+	f, c, callErr := runner.Call(callable, value.UNDEFINED, nil, instanceValue, len(args), false)
+	if callErr != nil {
+		return value.UNDEFINED, callErr
+	}
 	f.newTarget = newTarget
 	runner.frames[runner.frameCount-1].newTarget = newTarget
 	result, err := runner.run(f, c)
@@ -1170,7 +1180,10 @@ func (vm *VM) callClassConstructor(constructor value.Value, this value.Value, ar
 	for _, arg := range args {
 		runner.push(arg)
 	}
-	f, c := runner.Call(callable, nil, this, len(args), false)
+	f, c, callErr := runner.Call(callable, value.UNDEFINED, nil, this, len(args), false)
+	if callErr != nil {
+		return value.UNDEFINED, callErr
+	}
 	f.newTarget = newTarget
 	runner.frames[runner.frameCount-1].newTarget = newTarget
 	return runner.run(f, c)
@@ -1461,7 +1474,10 @@ func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Valu
 	fn.ValueChunk().WriteConstant(target)
 	fn.ValueChunk().WriteConstant(value.TAG_METHOD_HANDLE)
 	fn.ValueChunk().EmitBytes(chunk.OP_CALL, uint8(len(args)), 0, chunk.OP_RETURN)
-	frame, code := runner.Call(fn, nil, value.UNDEFINED, 0, false)
+	frame, code, callErr := runner.Call(fn, value.UNDEFINED, nil, value.UNDEFINED, 0, false)
+	if callErr != nil {
+		return value.UNDEFINED, callErr
+	}
 	return runner.run(frame, code)
 }
 
@@ -1502,7 +1518,10 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 	for _, arg := range args {
 		runner.push(arg)
 	}
-	f, c := runner.Call(callable, nil, this, len(args), false)
+	f, c, err := runner.Call(callable, fn, nil, this, len(args), false)
+	if err != nil {
+		return value.UNDEFINED, err
+	}
 	return runner.run(f, c)
 }
 
@@ -2643,7 +2662,7 @@ func (vm *VM) throwValue(v value.Value, f *CallFrame, c *value.ValueChunk, ip *i
 				}
 			}
 		}
-		return &JSException{Name: name, Message: native.String(v)}
+		return &JSException{Name: name, Message: native.String(v), Value: v, HasValue: true}
 	}
 	state := vm.exceptionStack[len(vm.exceptionStack)-1]
 	vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
@@ -2694,7 +2713,7 @@ func (vm *VM) findArgStart() []value.Value {
 }
 
 // I think an opts struct would be good refactor here...
-func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCount int, calledWithSpread bool) (f CallFrame, c value.ValueChunk) {
+func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this value.Value, argCount int, calledWithSpread bool) (f CallFrame, c value.ValueChunk, err error) {
 	localStart := max(vm.stackTop-argCount, 0)
 	returnIp := 0
 	vm.callCounts[fn]++
@@ -2709,36 +2728,14 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if currentIp != nil && !calledWithSpread && vm.callCounts[fn] > jitCallThreshold() && jit.IsJittable(fn, globals) {
-		if flags.Debug {
-			fmt.Println("-- CALLING JIT FUNCTION --")
+	if currentIp != nil && !calledWithSpread && vm.callCounts[fn] > jitCallThreshold() && jitContext().CanCompile(fn) {
+		vm.padMissingArguments(fn, f.localStart)
+		outcome, jitErr := vm.runJIT(&f, &c, currentIp, callee)
+		if jitErr != nil {
+			return f, c, jitErr
 		}
-
-		err := jit.JITFunction(&vm.stack[f.localStart], &globals[0], fn)
-
-		if err == nil {
-			if currentIp != nil {
-				*currentIp = f.returnIp
-			}
-
-			vm.frameCount--
-
-			f = vm.currentFrame()
-			c = *f.fn.ValueChunk()
-
-			// jitted function writes to the start of locals, if this is more than one we need to pop the arguments
-			if argCount > 0 {
-				vm.popN(argCount - 1)
-			}
-
-			if flags.Debug {
-				fmt.Println("-- JIT CALL DONE --")
-			}
-			return
-		}
-
-		if flags.Debug {
-			fmt.Printf("failed to run JIT code %s\n", err.Error())
+		if outcome != jitUnavailable {
+			return f, c, nil
 		}
 	}
 
@@ -2812,19 +2809,23 @@ func (vm *VM) Call(fn object.Callable, currentIp *int, this value.Value, argCoun
 	}
 
 	if !fn.HasRestParameter() && !calledWithSpread {
-		for vm.stackTop < f.localStart+fn.GetArity() {
-			missing := value.UNDEFINED
-			if objFn, ok := fn.(*object.ObjFunction); ok {
-				index := vm.stackTop - f.localStart
-				if index >= 0 && index < len(objFn.DefaultParams) && objFn.DefaultParams[index] {
-					missing = value.UNINITIALIZED
-				}
-			}
-			vm.push(missing)
-		}
+		vm.padMissingArguments(fn, f.localStart)
 	}
 
-	return
+	return f, c, nil
+}
+
+func (vm *VM) padMissingArguments(fn object.Callable, localStart int) {
+	for vm.stackTop < localStart+fn.GetArity() {
+		missing := value.UNDEFINED
+		if objFn, ok := fn.(*object.ObjFunction); ok {
+			index := vm.stackTop - localStart
+			if index >= 0 && index < len(objFn.DefaultParams) && objFn.DefaultParams[index] {
+				missing = value.UNINITIALIZED
+			}
+		}
+		vm.push(missing)
+	}
 }
 
 func (vm *VM) Run(wg *sync.WaitGroup) {
@@ -2863,7 +2864,11 @@ Run:
 			f = vm.currentFrame()
 			c = *f.fn.ValueChunk()
 		} else {
-			f, c = vm.Call(callback.Fn, nil, callback.ThisCtx, argCount, false)
+			var callErr error
+			f, c, callErr = vm.Call(callback.Fn, value.UNDEFINED, nil, callback.ThisCtx, argCount, false)
+			if callErr != nil {
+				diagnostic.Fatal("runtime", "Error", callErr)
+			}
 		}
 		_, err := vm.run(f, c)
 		if callback.RootKey != 0 {
@@ -3018,6 +3023,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 	for {
 		// time.Sleep(time.Millisecond * 100)
+		if ip < 0 || ip >= len(c.Code) {
+			return value.UNDEFINED, fmt.Errorf("instruction pointer %d out of range for %s (len %d)", ip, c.FnName, len(c.Code))
+		}
 		code := c.Code[ip]
 		ip++
 
@@ -4760,7 +4768,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						for _, arg := range allArgs {
 							vm.push(arg)
 						}
-						f, c = vm.Call(callable, &ip, vm.normalizeThis(callable, fn.This), len(allArgs), false)
+						var callErr error
+						f, c, callErr = vm.Call(callable, callee, &ip, vm.normalizeThis(callable, fn.This), len(allArgs), false)
+						if callErr != nil {
+							return value.UNDEFINED, callErr
+						}
 					}
 				case *native.ObjAsyncFunction:
 					{
@@ -4775,7 +4787,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.stackTop++
 						}
 
-						f, c = vm.Call(fn.Clone(), &ip, value.UNDEFINED, argCount, calledWithSpread)
+						var callErr error
+						f, c, callErr = vm.Call(fn.Clone(), callee, &ip, value.UNDEFINED, argCount, calledWithSpread)
+						if callErr != nil {
+							return value.UNDEFINED, callErr
+						}
 					}
 				case *native.ObjGenerator:
 					{
@@ -4795,7 +4811,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if vm.main && scriptMode && fn.ValueChunk().FnName == object.MAIN_FN_NAME {
 							callThis = vm.ensureGlobalObject()
 						}
-						f, c = vm.Call(fn, &ip, callThis, argCount, calledWithSpread)
+						var callErr error
+						f, c, callErr = vm.Call(fn, callee, &ip, callThis, argCount, calledWithSpread)
+						if callErr != nil {
+							return value.UNDEFINED, callErr
+						}
 					}
 				case *native.Resolve:
 					{
@@ -4807,7 +4827,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn.SetPromise(promise)
 						vm.push(value.EncodeHandle(heap.Allocate(promise)))
 
-						f, c = vm.Call(fn, &ip, value.UNDEFINED, 0, calledWithSpread)
+						var callErr error
+						f, c, callErr = vm.Call(fn, value.UNDEFINED, &ip, value.UNDEFINED, 0, calledWithSpread)
+						if callErr != nil {
+							return value.UNDEFINED, callErr
+						}
 						vm.push(v)
 					}
 				case *native.Then:
@@ -6980,7 +7004,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							for _, arg := range allArgs {
 								vm.push(arg)
 							}
-							f, c = vm.Call(boundCallable, &ip, vm.normalizeThis(boundCallable, bound.This), len(allArgs), false)
+							var callErr error
+							f, c, callErr = vm.Call(boundCallable, callee, &ip, vm.normalizeThis(boundCallable, bound.This), len(allArgs), false)
+							if callErr != nil {
+								return value.UNDEFINED, callErr
+							}
 							break
 						}
 						if _, ok := obj.(object.Callable); !ok {
@@ -7065,7 +7093,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						for _, arg := range rest {
 							vm.push(arg)
 						}
-						f, c = vm.Call(callable, &ip, thisArg, len(rest), false)
+						var callErr error
+						f, c, callErr = vm.Call(callable, callee, &ip, thisArg, len(rest), false)
+						if callErr != nil {
+							return value.UNDEFINED, callErr
+						}
 					}
 				case *native.FunctionApply:
 					{
@@ -7125,7 +7157,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						for _, arg := range rest {
 							vm.push(arg)
 						}
-						f, c = vm.Call(callable, &ip, thisArg, len(rest), false)
+						var callErr error
+						f, c, callErr = vm.Call(callable, callee, &ip, thisArg, len(rest), false)
+						if callErr != nil {
+							return value.UNDEFINED, callErr
+						}
 					}
 				case *native.FunctionBind:
 					{
@@ -7430,7 +7466,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					callThis = vm.ensureGlobalObject()
 				}
 				calledWithSpread := spread == 1
-				f, c = vm.Call(fn, &ip, callThis, argCount, calledWithSpread)
+				var callErr error
+				f, c, callErr = vm.Call(fn, callee, &ip, callThis, argCount, calledWithSpread)
+				if callErr != nil {
+					return value.UNDEFINED, callErr
+				}
+			}
+		case chunk.OP_JIT_HALT:
+			{
+				return value.UNDEFINED, nil
 			}
 		case chunk.OP_RETURN:
 			{
@@ -8194,7 +8238,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								runner := NewVM(false, vm.output)
 								runner.push(value.EncodeHandle(heap.Allocate(resolve)))
 								runner.push(value.EncodeHandle(heap.Allocate(reject)))
-								f, c := runner.Call(executor, nil, value.UNDEFINED, 2, false)
+								f, c, callErr := runner.Call(executor, value.UNDEFINED, nil, value.UNDEFINED, 2, false)
+								if callErr != nil {
+									return value.UNDEFINED, callErr
+								}
 								_, err := runner.run(f, c)
 								if err != nil {
 									name := "Error"
@@ -8999,7 +9046,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 				importer := NewVM(false, vm.output)
 
-				f, c := importer.Call(module, nil, value.UNDEFINED, 0, false)
+				f, c, callErr := importer.Call(module, value.UNDEFINED, nil, value.UNDEFINED, 0, false)
+				if callErr != nil {
+					return value.UNDEFINED, callErr
+				}
 				importer.run(f, c)
 
 				imports[str] = value.EncodeHandle(heap.Allocate(importer.exports))

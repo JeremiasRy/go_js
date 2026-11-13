@@ -2,12 +2,12 @@ package vm
 
 import (
 	"fmt"
+	"go_js/jit"
 	"strings"
 
 	"go_js/chunk"
 	"go_js/compiler"
 	"go_js/heap"
-	"go_js/jit"
 	"go_js/native"
 	"go_js/object"
 	"go_js/parser"
@@ -276,7 +276,7 @@ func structureOutput(c *value.ValueChunk, r map[string]*DebugInfo, seen map[*val
 		sb.Reset()
 	}
 
-	if found, disassembly := jit.GetJittedDisassemblyForChunk(c); found {
+	if found, disassembly := jitContext().Disassembly(c); found {
 		info.Jit = disassembly
 	}
 

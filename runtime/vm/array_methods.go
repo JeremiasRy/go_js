@@ -493,7 +493,10 @@ func (vm *VM) invokeCallback(fn value.Value, this value.Value, args []value.Valu
 	for _, arg := range args {
 		runner.push(arg)
 	}
-	f, c := runner.Call(callable, nil, callThis, len(args), false)
+	f, c, callErr := runner.Call(callable, value.UNDEFINED, nil, callThis, len(args), false)
+	if callErr != nil {
+		return value.UNDEFINED, callErr
+	}
 	return runner.run(f, c)
 }
 
