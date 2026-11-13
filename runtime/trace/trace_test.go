@@ -150,6 +150,48 @@ func TestExecutionJSONShape(t *testing.T) {
 	}
 }
 
+func TestTruncationPreservesOutputOnEndFrame(t *testing.T) {
+	recorder := NewRecorder(Limits{MaxFrames: 2})
+	recorder.AppendFrame(stepFrame("stored"), 5, "hello")
+	recorder.AppendFrame(stepFrame("dropped"), 10, "hello worl")
+	recorder.AppendFrame(stepFrame("dropped"), 10, "hello worl")
+	recorder.AppendFrame(Frame{Kind: "end"}, 10, "hello worl")
+
+	execution := recorder.Execution()
+	if len(execution.Frames) != 2 {
+		t.Fatalf("expected 2 stored frames, got %d", len(execution.Frames))
+	}
+	if execution.Frames[0].Output == nil || execution.Frames[0].Output.Delta != "hello" {
+		t.Fatalf("expected first delta to be hello, got %+v", execution.Frames[0].Output)
+	}
+	end := execution.Frames[1]
+	if end.Kind != "end" {
+		t.Fatalf("expected end frame, got %q", end.Kind)
+	}
+	if end.Output == nil || end.Output.Delta != " worl" {
+		t.Fatalf("expected end frame to carry the truncated output, got %+v", end.Output)
+	}
+}
+
+func TestMaxFramesOneStillKeepsEndFrame(t *testing.T) {
+	recorder := NewRecorder(Limits{MaxFrames: 1})
+	for i := 0; i < 5; i++ {
+		recorder.AppendFrame(stepFrame("step"), 0, "")
+	}
+	recorder.AppendFrame(Frame{Kind: "end"}, 5, "hello")
+
+	execution := recorder.Execution()
+	if len(execution.Frames) != 1 {
+		t.Fatalf("expected exactly the end frame, got %d frames", len(execution.Frames))
+	}
+	if execution.Frames[0].Kind != "end" {
+		t.Fatalf("expected end frame, got %q", execution.Frames[0].Kind)
+	}
+	if execution.TotalFrames != 6 || execution.DroppedFrames != 5 {
+		t.Fatalf("unexpected totals: total=%d dropped=%d", execution.TotalFrames, execution.DroppedFrames)
+	}
+}
+
 func TestQueueEventWithEmptySnapshotAndNoVMIsSafe(t *testing.T) {
 	recorder := NewRecorder(DefaultLimits())
 	recorder.RecordQueueEvent(QueueEvent{})

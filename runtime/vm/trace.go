@@ -596,7 +596,7 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 	}
 
 	view.Type = "object"
-	view.Display = truncateDisplay(obj.String(), maxChars)
+	view.Display = "[Object object]"
 	return view
 }
 
@@ -650,7 +650,7 @@ func truncateDisplay(display string, maxChars int) string {
 }
 
 func quotedDisplay(display string, maxChars int) string {
-	return truncateDisplay(strconv.Quote(truncateDisplay(display, maxChars)), maxChars+2)
+	return truncateDisplay(strconv.Quote(truncateDisplay(display, maxChars)), maxChars)
 }
 
 func jitNoteView() trace.ValueView {
