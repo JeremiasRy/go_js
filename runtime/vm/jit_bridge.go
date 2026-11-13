@@ -3,6 +3,7 @@ package vm
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sync"
 
 	"go_js/chunk"
@@ -75,6 +76,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	act.Values = &buffer[0]
 	act.Globals = vm.globalsBase()
 	act.GlobalsCount = int64(globalsCount)
+	act.GlobalSync = vm.globalSyncBase()
 	if len(c.Constants) > 0 {
 		act.Constants = &c.Constants[0]
 	}
@@ -84,6 +86,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	act.Status = jit.StatusDone
 	act.Depth = int64(vm.frameCount)
 	act.DirectDepth = 1
+	act.LoopBudget = jit.DefaultLoopBudget
 	act.SelfValue = callee
 	act.Chunk = c
 	act.Fn = f.fn
@@ -166,7 +169,13 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				return jitDeoptimized, fmt.Errorf("jit: bridge inside a direct-recursion frame (ip %d, request %d)", act.BytecodeIP, act.Request)
 			}
 			vm.copyActivationToStack(act, localStart)
-			next, bridgeErr := vm.handleBridge(act, localStart)
+			var next int
+			var bridgeErr error
+			if act.Request == jit.ReqSafepoint {
+				next, bridgeErr = vm.handleSafepoint(act)
+			} else {
+				next, bridgeErr = vm.handleBridge(act, localStart)
+			}
 			if bridgeErr != nil {
 				var jsErr *JSException
 				if asJSException(bridgeErr, &jsErr) && jsErr.HasValue {
@@ -179,6 +188,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			}
 			act.Globals = vm.globalsBase()
 			act.GlobalsCount = int64(globalsCount)
+			act.GlobalSync = vm.globalSyncBase()
 			entry, ok = cc.Entry(next)
 			if !ok {
 				vm.copyActivationToStack(act, localStart)
@@ -224,6 +234,16 @@ func (vm *VM) resumeAfterJITThrow(f *CallFrame, c *value.ValueChunk, currentIp *
 	return jitResumed, nil
 }
 
+func (vm *VM) globalSyncBase() *uint64 {
+	for len(globalSync) < globalsCount {
+		globalSync = append(globalSync, 0)
+	}
+	if len(globalSync) == 0 {
+		return nil
+	}
+	return &globalSync[0]
+}
+
 func (vm *VM) globalsBase() *value.Value {
 	if len(globals) == 0 {
 		return nil
@@ -267,6 +287,9 @@ func (vm *VM) syncActivationFromStack(act *jit.Activation, localStart int) {
 func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 	c := *act.Chunk
 	ip := int(act.BytecodeIP)
+	if jitTrace {
+		fmt.Fprintf(os.Stderr, "BRIDGE ip=%d req=%d gc=%d\n", ip, act.Request, act.GlobalsCount)
+	}
 	next, ok := jit.InstructionEnd(c.Code, ip)
 	if !ok {
 		return 0, fmt.Errorf("jit: invalid bridge bytecode ip %d", ip)
@@ -317,6 +340,23 @@ func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 		return 0, runErr
 	}
 	return next, nil
+}
+
+// handleSafepoint runs deferred runtime work (notably a GC cycle) at a
+// compiled loop backedge and returns the bytecode IP to resume at.
+func (vm *VM) handleSafepoint(act *jit.Activation) (int, error) {
+	handles := heap.HandleCount()
+	if handles != vm.lastJITGC && heap.ShouldRunGCCycle() {
+		vm.runGC()
+		vm.lastJITGC = handles
+	}
+	runtime.Gosched()
+	act.LoopBudget = jit.DefaultLoopBudget
+	act.Globals = vm.globalsBase()
+	act.GlobalsCount = int64(globalsCount)
+	act.GlobalSync = vm.globalSyncBase()
+	jitContext().Stats().NoteSafepoint()
+	return int(act.BytecodeIP), nil
 }
 
 func (vm *VM) bridgeGetMember(act *jit.Activation) error {

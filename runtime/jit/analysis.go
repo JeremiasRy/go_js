@@ -236,7 +236,7 @@ func analyzeDirect(ch *value.ValueChunk, arity int) directInfo {
 				break
 			}
 			st.push(tNumber)
-		case chunk.OP_NEGATE, chunk.OP_TO_NUMBER:
+		case chunk.OP_NEGATE, chunk.OP_TO_NUMBER, chunk.OP_UPDATE:
 			t, popped := st.pop()
 			if !popped || t != tNumber {
 				ok = false

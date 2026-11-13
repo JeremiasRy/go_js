@@ -566,27 +566,27 @@ no package-global maps; encoder and activation-layout unit tests pass.
 
 Goal: compile ordinary numeric JavaScript, not just fib.
 
-- [ ] Locals: `DEFINE_LOCAL_SLOT`, `GET_LOCAL`, `SET_LOCAL`, `POP_LOCAL`,
+- [x] Locals: `DEFINE_LOCAL_SLOT`, `GET_LOCAL`, `SET_LOCAL`, `POP_LOCAL`,
       `GET_LOCAL_RAW`, plus stack ops `POP`, `DUP`, `DUP2`, `POP_BELOW2`,
       `PUSH_CURRENT`.
-- [ ] Constants/immediates: number, boolean, null, undefined; `PUSH_UNDEFINED`,
+- [x] Constants/immediates: number, boolean, null, undefined; `PUSH_UNDEFINED`,
       `NILL`, `UNDEFINED`, `PUSH_UNINITIALIZED` (deopt/throw when read).
-- [ ] Arithmetic: `ADD`, `SUBTRACT`, `MULTIPLY`, `DIVIDE`, `MODULO`,
+- [x] Arithmetic: `ADD`, `SUBTRACT`, `MULTIPLY`, `DIVIDE`, `MODULO`,
       `EXPONENTIATION`, `NEGATE`; numeric guards; bridge non-number `ADD`.
-- [ ] Comparisons: `<`, `<=`, `>`, `>=`, `STRICT_EQUALS`, `STRICT_NOT_EQUALS`,
+- [x] Comparisons: `<`, `<=`, `>`, `>=`, `STRICT_EQUALS`, `STRICT_NOT_EQUALS`,
       `EQUALS`, `NOT_EQUALS` for number/bool/null/undefined; NaN/unordered
       handling; bridge object/string comparisons.
-- [ ] Bitwise: `B_AND`, `B_OR`, `B_XOR`, `BITWISE_NOT`, shifts; use a bridge for
+- [x] Bitwise: `B_AND`, `B_OR`, `B_XOR`, `BITWISE_NOT`, shifts; use a bridge for
       ToInt32/ToUint32 until an exact inline sequence is tested.
-- [ ] Truthiness/jumps: `JUMP`, `JUMP_IF_FALSE`, `JUMP_IF_TRUE`, `NOT`,
+- [x] Truthiness/jumps: `JUMP`, `JUMP_IF_FALSE`, `JUMP_IF_TRUE`, `NOT`,
       `LOGICAL_AND`, `LOGICAL_OR`, nullish variants where cheap; objects are
       always truthy, strings need a length check or bridge.
-- [ ] `UPDATE`, `TO_NUMBER`, `VOID`, simple `TYPEOF`.
-- [ ] Global reads with guards; global writes via bridge. Do not cache global
+- [x] `UPDATE`, `TO_NUMBER`, `VOID`, simple `TYPEOF`.
+- [x] Global reads with guards; global writes via bridge. Do not cache global
       values or types across calls.
-- [ ] Correct NaN canonicalization/comparison; add the NaN regression.
-- [ ] Correct zero-argument result handling; add the arity regression.
-- [ ] Self-recursion only for functions proven pure numeric; all other `OP_CALL`
+- [x] Correct NaN canonicalization/comparison; add the NaN regression.
+- [x] Correct zero-argument result handling; add the arity regression.
+- [x] Self-recursion only for functions proven pure numeric; all other `OP_CALL`
       goes through the bridge.
 
 Exit criteria: the `sum` example compiles and runs correctly; all numeric
@@ -597,14 +597,14 @@ miscompiles remain.
 
 Goal: accelerate hot loops in `main` and one-shot callbacks.
 
-- [ ] Add backedge counters (per chunk/IP) and a configurable loop threshold.
-- [ ] Build an OSR entry that copies live state from `vm.stack` into the
+- [x] Add backedge counters (per chunk/IP) and a configurable loop threshold.
+- [x] Build an OSR entry that copies live state from `vm.stack` into the
       activation and starts at the loop header.
-- [ ] Compile reachable blocks from the loop header; handle loop exits,
+- [x] Compile reachable blocks from the loop header; handle loop exits,
       `break`/`continue`, and `return`.
-- [ ] Implement continuous backedge safepoints/budget.
-- [ ] Add deopt-storm detection and per-chunk blacklisting.
-- [ ] Add tests for nested loops, loop-local variables, loop exit values, empty
+- [x] Implement continuous backedge safepoints/budget.
+- [x] Add deopt-storm detection and per-chunk blacklisting.
+- [x] Add tests for nested loops, loop-local variables, loop exit values, empty
       loop bodies, and loops with a non-OSR-able branch.
 
 Exit criteria: a top-level numeric loop runs in JIT; fib and the numeric loop

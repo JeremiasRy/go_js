@@ -21,6 +21,7 @@ type compileState struct {
 	deoptLocs  map[int]Label
 	bridgeLocs map[int]Label
 	bridgeReqs map[int]Request
+	safepoints map[int]Label
 	exitLabel  Label
 	throwLabel Label
 	reasons    map[string]int
@@ -91,6 +92,7 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 		deoptLocs:  map[int]Label{},
 		bridgeLocs: map[int]Label{},
 		bridgeReqs: map[int]Request{},
+		safepoints: map[int]Label{},
 		reasons:    map[string]int{},
 		direct:     direct,
 		frameSlots: frameSlots,
@@ -159,6 +161,19 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 		asm.CmpRR(RSP, R14)
 		asm.Jcc(CondBE, cs.stackOverflowLabel())
 		asm.Jmp(cs.fastBody)
+	}
+	for target, l := range cs.safepoints {
+		asm.Bind(l)
+		asm.MovImm64(RAX, uint64(ReqSafepoint))
+		asm.MovStore(RBX, ActivationRequest, RAX)
+		asm.MovImm64(RAX, uint64(int64(target)))
+		asm.MovStore(RBX, ActivationBytecodeIP, RAX)
+		asm.MovImm64(RAX, uint64(StatusBridge))
+		asm.MovStore(RBX, ActivationStatus, RAX)
+		asm.MovStore(RBX, ActivationSP, R11)
+		asm.MovRR(RSP, RBP)
+		asm.Pop(RBP)
+		asm.Ret()
 	}
 	for _, instr := range instructions {
 		if instr.IP == 0 {
@@ -432,7 +447,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.Pop(RBP)
 		asm.Ret()
 	case chunk.OP_JUMP:
-		asm.Jmp(cs.ipLabels[instr.Operands[0]])
+		cs.emitJump(instr.Operands[0], instr.IP)
 	case chunk.OP_JUMP_IF_FALSE, chunk.OP_JUMP_IF_TRUE:
 		cs.loadTop(RAX, 0)
 		cs.emitTruthiness(RAX, ip)
@@ -447,7 +462,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.Jmp(cs.ipLabels[instr.NextIP])
 		asm.Bind(falsy)
 		asm.DecRR(R11)
-		asm.Jmp(cs.ipLabels[instr.Operands[0]])
+		cs.emitJump(instr.Operands[0], instr.IP)
 	case chunk.OP_JUMP_IF_NULLISH, chunk.OP_JUMP_IF_NOT_NULLISH:
 		cs.loadTop(RAX, 0)
 		jump := asm.NewLabel()
@@ -466,7 +481,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.Bind(jump)
 		asm.DecRR(R11)
 		if instr.Op == chunk.OP_JUMP_IF_NULLISH {
-			asm.Jmp(cs.ipLabels[instr.Operands[0]])
+			cs.emitJump(instr.Operands[0], instr.IP)
 		} else {
 			asm.Jmp(cs.ipLabels[instr.NextIP])
 		}
@@ -480,7 +495,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.CmpRR(RAX, RDX)
 		asm.Jcc(CondE, jump)
 		asm.DecRR(R11)
-		asm.Jmp(cs.ipLabels[instr.Operands[0]])
+		cs.emitJump(instr.Operands[0], instr.IP)
 		asm.Bind(jump)
 		asm.DecRR(R11)
 		asm.Jmp(cs.ipLabels[instr.NextIP])
@@ -547,7 +562,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.Jcc(CondE, cs.deoptLabel(ip, "uninitialized-global"))
 		cs.pushReg(RAX)
 	case chunk.OP_SET_GLOBAL:
-		cs.bridge(ip, ReqSetGlobal)
+		cs.emitSetGlobal(instr)
 	case chunk.OP_DEFINE_GLOBAL:
 		cs.bridge(ip, ReqDefineGlobal)
 	case chunk.OP_GET_GLOBAL_BY_NAME:
@@ -611,7 +626,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 	case chunk.OP_TYPEOF:
 		cs.bridge(ip, ReqTypeof)
 	case chunk.OP_UPDATE:
-		cs.bridge(ip, ReqUpdate)
+		cs.emitUpdate(instr)
 	case chunk.OP_B_AND:
 		cs.bridge(ip, ReqBitAnd)
 	case chunk.OP_B_OR:
@@ -730,6 +745,71 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		cs.deopt(ip, "unsupported-opcode")
 	}
 	return nil
+}
+
+func (cs *compileState) emitJump(target, from int) {
+	if target < from {
+		cs.emitBackedge(target)
+		return
+	}
+	cs.asm.Jmp(cs.ipLabels[target])
+}
+
+func (cs *compileState) emitBackedge(target int) {
+	asm := cs.asm
+	skip := asm.NewLabel()
+	asm.DecLoad(RBX, ActivationLoopBudget)
+	asm.Jcc(CondG, skip)
+	asm.Jmp(cs.safepointLabel(target))
+	asm.Bind(skip)
+	asm.Jmp(cs.ipLabels[target])
+}
+
+func (cs *compileState) safepointLabel(target int) Label {
+	if l, ok := cs.safepoints[target]; ok {
+		return l
+	}
+	l := cs.asm.NewLabel()
+	cs.safepoints[target] = l
+	return l
+}
+
+func (cs *compileState) emitSetGlobal(instr Instruction) {
+	asm := cs.asm
+	bridge := cs.bridgeLabel(instr.IP, ReqSetGlobal)
+	cs.loadTop(RAX, 0)
+	asm.MovRR(RCX, RAX)
+	asm.ShiftImm(5, RCX, 48)
+	asm.CmpImm32(RCX, 0xfffc)
+	asm.Jcc(CondAE, bridge)
+	slot := int64(instr.Operands[0])
+	asm.MovLoad(RCX, RBX, ActivationGlobalsCount)
+	asm.MovImm64(RDX, uint64(slot))
+	asm.CmpRR(RCX, RDX)
+	asm.Jcc(CondLE, bridge)
+	asm.MovLoad(RDX, RBX, ActivationGlobalSync)
+	asm.MovLoad(RCX, RDX, int32(slot*8))
+	asm.TestRR(RCX, RCX)
+	asm.Jcc(CondNE, bridge)
+	asm.DecRR(R11)
+	asm.MovStore(R12, int32(slot*8), RAX)
+}
+
+func (cs *compileState) emitUpdate(instr Instruction) {
+	asm := cs.asm
+	if !cs.direct {
+		cs.loadTop(RAX, 0)
+		cs.isNumberJump(RAX, cs.bridgeLabel(instr.IP, ReqUpdate))
+	}
+	asm.MovSDLoadR11(XMM0, R15, -8)
+	asm.MovImm64(RDX, 0x3FF0000000000000)
+	asm.MovQFromGPR(XMM1, RDX)
+	if instr.Operands[0] == 1 {
+		asm.SubSD(XMM0, XMM1)
+	} else {
+		asm.AddSD(XMM0, XMM1)
+	}
+	asm.MovSDStoreR11(R15, -8, XMM0)
 }
 
 func (cs *compileState) emitNumericBinary(instr Instruction, req Request, op func()) {

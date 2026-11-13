@@ -470,6 +470,12 @@ func (a *Assembler) MovLoadImm(dst, base Reg, disp int32) {
 	a.MovLoad(dst, base, disp)
 }
 
+func (a *Assembler) MovZXLoadIndex8(dst, base, index Reg, scale byte, disp int32) {
+	a.emitREX(false, dst, index, base)
+	a.emit(0x0F, 0xB6)
+	a.memIndexDisp32(dst, base, index, scale, disp)
+}
+
 func (a *Assembler) MovLoadIndex(dst, base, index Reg, scale byte, disp int32) {
 	a.emitREX(true, dst, index, base)
 	a.emit(0x8B)
@@ -487,6 +493,20 @@ func (a *Assembler) MovSDLoadIndex(dst, base, index Reg, scale byte, disp int32)
 	a.emitREX(false, dst, index, base)
 	a.emit(0x0F, 0x10)
 	a.memIndexDisp32(dst, base, index, scale, disp)
+}
+
+func (a *Assembler) MovSDLoadR11(dst, base Reg, disp int32) {
+	a.emit(0xF2)
+	a.emitREX(false, dst, R11, base)
+	a.emit(0x0F, 0x10)
+	a.memIndexDisp32(dst, base, R11, 3, disp)
+}
+
+func (a *Assembler) MovSDStoreR11(base Reg, disp int32, src Reg) {
+	a.emit(0xF2)
+	a.emitREX(false, src, R11, base)
+	a.emit(0x0F, 0x11)
+	a.memIndexDisp32(src, base, R11, 3, disp)
 }
 
 func (a *Assembler) MovSDStoreIndex(base, index Reg, scale byte, disp int32, src Reg) {

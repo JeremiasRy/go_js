@@ -30,4 +30,6 @@ func TestActivationLayout(t *testing.T) {
 	check("GoSP", unsafe.Offsetof(a.GoSP), ActivationGoSP)
 	check("GlobalsCount", unsafe.Offsetof(a.GlobalsCount), ActivationGlobalsCount)
 	check("DirectDepth", unsafe.Offsetof(a.DirectDepth), ActivationDirectDepth)
+	check("GlobalSync", unsafe.Offsetof(a.GlobalSync), ActivationGlobalSync)
+	check("LoopBudget", unsafe.Offsetof(a.LoopBudget), ActivationLoopBudget)
 }

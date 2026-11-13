@@ -38,6 +38,7 @@ func jitCallThreshold() int {
 var ROOT_SCRIPT_LOCATION string
 var globals = make([]value.Value, 30)
 var globalsCount = 0
+var globalSync = make([]uint64, 30)
 var globalVarSlots = map[string]int{}
 var globalVarNames = map[int]string{}
 var imports = make(map[string]value.Value)
@@ -123,6 +124,7 @@ type VM struct {
 	loopMarks     map[int][]int
 	loopIterators map[int]value.Value
 	withObjects   []value.Value
+	lastJITGC     uint32
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -188,6 +190,9 @@ func (vm *VM) addGlobal(v value.Value) {
 		globals = append(globals, v)
 	} else {
 		globals[globalsCount] = v
+	}
+	for len(globalSync) <= globalsCount {
+		globalSync = append(globalSync, 0)
 	}
 	globalsCount++
 }
@@ -4005,6 +4010,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if !truthyValue(v) {
+					if jump < ip {
+						done, result, err := vm.tryOSR(&f, &c, &ip, jump)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						if done {
+							return result, nil
+						}
+						continue
+					}
 					ip = jump
 				}
 			}
@@ -4014,6 +4029,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if truthyValue(v) {
+					if jump < ip {
+						done, result, err := vm.tryOSR(&f, &c, &ip, jump)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						if done {
+							return result, nil
+						}
+						continue
+					}
 					ip = jump
 				}
 			}
@@ -4023,6 +4048,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if v == value.NULL || v == value.UNDEFINED {
+					if jump < ip {
+						done, result, err := vm.tryOSR(&f, &c, &ip, jump)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						if done {
+							return result, nil
+						}
+						continue
+					}
 					ip = jump
 				}
 			}
@@ -4032,6 +4067,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if v != value.UNDEFINED && v != value.UNINITIALIZED {
+					if jump < ip {
+						done, result, err := vm.tryOSR(&f, &c, &ip, jump)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						if done {
+							return result, nil
+						}
+						continue
+					}
 					ip = jump
 				}
 			}
@@ -4041,12 +4086,32 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				jump := c.ReadInt(&ip)
 
 				if v != value.NULL && v != value.UNDEFINED {
+					if jump < ip {
+						done, result, err := vm.tryOSR(&f, &c, &ip, jump)
+						if err != nil {
+							return value.UNDEFINED, err
+						}
+						if done {
+							return result, nil
+						}
+						continue
+					}
 					ip = jump
 				}
 			}
 		case chunk.OP_JUMP:
 			{
 				jump := c.ReadInt(&ip)
+				if jump < ip {
+					done, result, err := vm.tryOSR(&f, &c, &ip, jump)
+					if err != nil {
+						return value.UNDEFINED, err
+					}
+					if done {
+						return result, nil
+					}
+					continue
+				}
 				ip = jump
 			}
 		case chunk.OP_DEFINE_HEAP_VAR:
@@ -4238,6 +4303,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if nameString, ok := vm.valueAsString(name); ok {
 					globalVarSlots[nameString] = int(global)
 					globalVarNames[int(global)] = nameString
+					for len(globalSync) <= int(global) {
+						globalSync = append(globalSync, 0)
+					}
+					globalSync[global] = 1
 				}
 				if obj, ok := globalObj.(*native.ObjObject); ok {
 					obj.DefineNonConfigurableMember(name, v)
