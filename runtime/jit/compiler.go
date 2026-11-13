@@ -4,6 +4,7 @@ package jit
 
 import (
 	"fmt"
+	"os"
 
 	"go_js/chunk"
 	"go_js/value"
@@ -23,6 +24,10 @@ type compileState struct {
 	exitLabel  Label
 	throwLabel Label
 	reasons    map[string]int
+	direct     bool
+	fastBody   Label
+	fastThunk  Label
+	frameSlots int
 }
 
 func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChunk, error) {
@@ -56,8 +61,21 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 		}
 	}
 
+	analysis := analyzeDirect(ch, arity)
+	direct := analysis.ok
+	if os.Getenv("JIT_TRACE") == "1" {
+		fmt.Fprintf(os.Stderr, "JIT compile fn=%s arity=%d direct=%v maxTop=%d len=%d fail=%d/%d\n", ch.FnName, arity, direct, analysis.maxTop, len(ch.Code), analysis.failIP, analysis.failOp)
+	}
 	frameSlots := arity + 3*len(ch.Code) + 32
-	if localCount+32 > frameSlots {
+	if direct {
+		frameSlots = analysis.maxTop + 1
+		if localCount > frameSlots {
+			frameSlots = localCount
+		}
+		if arity+1 > frameSlots {
+			frameSlots = arity + 1
+		}
+	} else if localCount+32 > frameSlots {
 		frameSlots = localCount + 32
 	}
 
@@ -74,16 +92,21 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 		bridgeLocs: map[int]Label{},
 		bridgeReqs: map[int]Request{},
 		reasons:    map[string]int{},
+		direct:     direct,
+		frameSlots: frameSlots,
 	}
 	for _, instr := range instructions {
 		cs.ipLabels[instr.IP] = asm.NewLabel()
+		cs.entryLabels[instr.IP] = asm.NewLabel()
 	}
 	cs.ipLabels[len(ch.Code)] = asm.NewLabel()
 	cs.exitLabel = asm.NewLabel()
 	cs.throwLabel = asm.NewLabel()
+	cs.fastBody = asm.NewLabel()
+	cs.fastThunk = asm.NewLabel()
 
-	cs.emitPrologue()
 	asm.Bind(cs.entryLabels[0])
+	cs.emitPrologue()
 	for _, instr := range instructions {
 		cs.bind(instr.IP)
 		asm.Mark(instr.IP, ch.AstId[instr.IP])
@@ -129,6 +152,14 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 		asm.Ret()
 	}
 
+	if direct {
+		asm.Bind(cs.fastThunk)
+		asm.Push(RBP)
+		asm.MovRR(RBP, RSP)
+		asm.CmpRR(RSP, R14)
+		asm.Jcc(CondBE, cs.stackOverflowLabel())
+		asm.Jmp(cs.fastBody)
+	}
 	for _, instr := range instructions {
 		if instr.IP == 0 {
 			continue
@@ -155,6 +186,12 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 		FrameSlots: frameSlots,
 		MaxSP:      frameSlots,
 		Arity:      arity,
+		Direct:     direct,
+	}
+	if direct {
+		if off, ok := asm.labels[cs.fastThunk]; ok {
+			cc.FastEntry = uintptr(off)
+		}
 	}
 	for ip, l := range cs.entryLabels {
 		if off, ok := asm.labels[l]; ok {
@@ -173,6 +210,14 @@ func (cs *compileState) emitPrologue() {
 	asm.Jcc(CondBE, cs.stackOverflowLabel())
 	asm.CmpLoadImm32(RBX, ActivationDepth, MaxJITFrames)
 	asm.Jcc(CondGE, cs.stackOverflowLabel())
+	if cs.direct {
+		guard := cs.deoptLabel(0, "entry-arg-not-number")
+		for i := 0; i < cs.arity; i++ {
+			asm.MovLoad(RAX, R15, int32(i*8))
+			cs.isNumberJump(RAX, guard)
+		}
+	}
+	asm.Bind(cs.fastBody)
 }
 
 func (cs *compileState) stackOverflowLabel() Label {
@@ -281,6 +326,26 @@ func (cs *compileState) boolFromRCX() {
 // emitTruthiness leaves 1 in RCX when r is truthy and 0 otherwise.
 func (cs *compileState) emitTruthiness(r Reg, ip int) {
 	asm := cs.asm
+	if cs.direct {
+		trueLabel := asm.NewLabel()
+		doneLabel := asm.NewLabel()
+		asm.MovImm32(RCX, 0)
+		asm.MovImm64(RDX, uint64(value.TRUE))
+		asm.CmpRR(r, RDX)
+		asm.Jcc(CondE, trueLabel)
+		asm.MovImm64(RDX, uint64(value.FALSE))
+		asm.CmpRR(r, RDX)
+		asm.Jcc(CondE, doneLabel)
+		asm.MovQFromGPR(XMM0, r)
+		asm.XorPD(XMM1, XMM1)
+		asm.Ucomisd(XMM0, XMM1)
+		asm.Jcc(CondP, doneLabel)
+		asm.Jcc(CondE, doneLabel)
+		asm.Bind(trueLabel)
+		asm.MovImm32(RCX, 1)
+		asm.Bind(doneLabel)
+		return
+	}
 	trueLabel := asm.NewLabel()
 	doneLabel := asm.NewLabel()
 	asm.MovImm32(RCX, 0)
@@ -347,11 +412,10 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		cs.loadTop(RAX, 1)
 		cs.pushReg(RAX)
 	case chunk.OP_POP_BELOW2:
-		// [.., a, b, v] -> [.., a, v]
+		// [.., a, b, v] -> [.., v]
 		cs.loadTop(RAX, 0)
-		cs.storeTop(RAX, 1)
-		asm.DecRR(R11)
-		asm.DecRR(R11)
+		cs.storeTop(RAX, 2)
+		asm.SubImm32(R11, 2)
 	case chunk.OP_RETURN:
 		cs.popReg(RAX)
 		notMethod := asm.NewLabel()
@@ -362,6 +426,8 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.DecRR(R11)
 		asm.Bind(notMethod)
 		asm.MovStore(RBX, ActivationResult, RAX)
+		asm.MovImm64(RDX, 0)
+		asm.MovStore(RBX, ActivationStatus, RDX)
 		asm.MovRR(RSP, RBP)
 		asm.Pop(RBP)
 		asm.Ret()
@@ -420,28 +486,34 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.Jmp(cs.ipLabels[instr.NextIP])
 	case chunk.OP_GET_LOCAL:
 		asm.MovLoad(RAX, R15, int32(instr.Operands[0]*8))
-		asm.MovImm64(RDX, uint64(value.UNINITIALIZED))
-		asm.CmpRR(RAX, RDX)
-		asm.Jcc(CondE, cs.deoptLabel(ip, "uninitialized-local"))
+		if !cs.direct {
+			asm.MovImm64(RDX, uint64(value.UNINITIALIZED))
+			asm.CmpRR(RAX, RDX)
+			asm.Jcc(CondE, cs.deoptLabel(ip, "uninitialized-local"))
+		}
 		cs.pushReg(RAX)
 	case chunk.OP_GET_LOCAL_RAW:
 		asm.MovLoad(RAX, R15, int32(instr.Operands[0]*8))
 		cs.pushReg(RAX)
 	case chunk.OP_SET_LOCAL:
 		cs.loadTop(RAX, 0)
-		asm.MovRR(RCX, RAX)
-		asm.ShiftImm(5, RCX, 48)
-		asm.CmpImm32(RCX, 0xfffc)
-		asm.Jcc(CondAE, cs.bridgeLabel(ip, ReqSetLocal))
+		if !cs.direct {
+			asm.MovRR(RCX, RAX)
+			asm.ShiftImm(5, RCX, 48)
+			asm.CmpImm32(RCX, 0xfffc)
+			asm.Jcc(CondAE, cs.bridgeLabel(ip, ReqSetLocal))
+		}
 		asm.MovStore(R15, int32(instr.Operands[0]*8), RAX)
 		asm.DecRR(R11)
 	case chunk.OP_DEFINE_LOCAL_SLOT:
 		slot := instr.Operands[0]
 		cs.loadTop(RAX, 0)
-		asm.MovRR(RCX, RAX)
-		asm.ShiftImm(5, RCX, 48)
-		asm.CmpImm32(RCX, 0xfffc)
-		asm.Jcc(CondAE, cs.bridgeLabel(ip, ReqDefineLocalSlot))
+		if !cs.direct {
+			asm.MovRR(RCX, RAX)
+			asm.ShiftImm(5, RCX, 48)
+			asm.CmpImm32(RCX, 0xfffc)
+			asm.Jcc(CondAE, cs.bridgeLabel(ip, ReqDefineLocalSlot))
+		}
 		asm.DecRR(R11)
 		store := asm.NewLabel()
 		asm.CmpImm32(R11, int32(slot))
@@ -450,11 +522,13 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 		asm.Bind(store)
 		asm.MovStore(R15, int32(slot*8), RAX)
 	case chunk.OP_DEFINE_LOCAL:
-		cs.loadTop(RAX, 0)
-		asm.MovRR(RCX, RAX)
-		asm.ShiftImm(5, RCX, 48)
-		asm.CmpImm32(RCX, 0xfffc)
-		asm.Jcc(CondAE, cs.bridgeLabel(ip, ReqDefineLocal))
+		if !cs.direct {
+			cs.loadTop(RAX, 0)
+			asm.MovRR(RCX, RAX)
+			asm.ShiftImm(5, RCX, 48)
+			asm.CmpImm32(RCX, 0xfffc)
+			asm.Jcc(CondAE, cs.bridgeLabel(ip, ReqDefineLocal))
+		}
 	case chunk.OP_POP_LOCAL:
 		under := asm.NewLabel()
 		asm.TestRR(R11, R11)
@@ -553,7 +627,11 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 	case chunk.OP_UNSIGNED_RIGHT_SHIFT:
 		cs.bridge(ip, ReqUnsignedRightShift)
 	case chunk.OP_CALL:
-		cs.bridge(ip, ReqCall)
+		if cs.direct {
+			cs.emitDirectCall(instr)
+		} else {
+			cs.bridge(ip, ReqCall)
+		}
 	case chunk.OP_CALL_OPTIONAL:
 		cs.bridge(ip, ReqCallOptional)
 	case chunk.OP_CALL_CALLEE_FIRST:
@@ -656,11 +734,13 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 
 func (cs *compileState) emitNumericBinary(instr Instruction, req Request, op func()) {
 	asm := cs.asm
-	notNumber := cs.bridgeLabel(instr.IP, req)
-	cs.loadTop(RAX, 1)
-	cs.isNumberJump(RAX, notNumber)
-	cs.loadTop(RCX, 0)
-	cs.isNumberJump(RCX, notNumber)
+	if !cs.direct {
+		notNumber := cs.bridgeLabel(instr.IP, req)
+		cs.loadTop(RAX, 1)
+		cs.isNumberJump(RAX, notNumber)
+		cs.loadTop(RCX, 0)
+		cs.isNumberJump(RCX, notNumber)
+	}
 	asm.MovSDLoadIndex(XMM1, R15, R11, 3, -16)
 	asm.MovSDLoadIndex(XMM0, R15, R11, 3, -8)
 	op()
@@ -670,11 +750,13 @@ func (cs *compileState) emitNumericBinary(instr Instruction, req Request, op fun
 
 func (cs *compileState) emitCompare(instr Instruction, cond Cond, req Request) {
 	asm := cs.asm
-	notNumber := cs.bridgeLabel(instr.IP, req)
-	cs.loadTop(RAX, 1)
-	cs.isNumberJump(RAX, notNumber)
-	cs.loadTop(RCX, 0)
-	cs.isNumberJump(RCX, notNumber)
+	if !cs.direct {
+		notNumber := cs.bridgeLabel(instr.IP, req)
+		cs.loadTop(RAX, 1)
+		cs.isNumberJump(RAX, notNumber)
+		cs.loadTop(RCX, 0)
+		cs.isNumberJump(RCX, notNumber)
+	}
 	asm.MovSDLoadIndex(XMM0, R15, R11, 3, -16)
 	asm.MovSDLoadIndex(XMM1, R15, R11, 3, -8)
 	asm.Ucomisd(XMM0, XMM1)
@@ -697,17 +779,56 @@ func (cs *compileState) emitCompare(instr Instruction, cond Cond, req Request) {
 	asm.DecRR(R11)
 }
 
+func (cs *compileState) emitDirectCall(instr Instruction) {
+	asm := cs.asm
+	argc := instr.Operands[0]
+	fail := cs.bridgeLabel(instr.IP, ReqCall)
+	cs.loadTop(RAX, 0)
+	asm.MovLoad(RCX, RBX, ActivationSelfValue)
+	asm.CmpRR(RAX, RCX)
+	asm.Jcc(CondNE, fail)
+	asm.IncLoad(RBX, ActivationDepth)
+	asm.CmpLoadImm32(RBX, ActivationDepth, MaxJITFrames)
+	asm.Jcc(CondGE, cs.stackOverflowLabel())
+	for i := 0; i < argc; i++ {
+		cs.loadTop(RAX, argc-i)
+		asm.MovStore(R15, int32((cs.frameSlots+i)*8), RAX)
+	}
+	asm.Push(R11)
+	asm.MovImm32(R11, int32(argc))
+	asm.AddImm32(R15, int32(cs.frameSlots*8))
+	asm.IncLoad(RBX, ActivationDirectDepth)
+	asm.Call(cs.fastThunk)
+	asm.DecLoad(RBX, ActivationDirectDepth)
+	asm.SubImm32(R15, int32(cs.frameSlots*8))
+	asm.Pop(R11)
+	propagate := asm.NewLabel()
+	done := asm.NewLabel()
+	asm.CmpLoadImm32(RBX, ActivationStatus, 0)
+	asm.Jcc(CondNE, propagate)
+	asm.DecLoad(RBX, ActivationDepth)
+	asm.MovLoad(RAX, RBX, ActivationResult)
+	cs.storeTop(RAX, argc)
+	asm.SubImm32(R11, int32(argc))
+	asm.Jmp(done)
+	asm.Bind(propagate)
+	asm.Jmp(cs.exitLabel)
+	asm.Bind(done)
+}
+
 func (cs *compileState) emitStrictEquals(instr Instruction, negate bool) {
 	asm := cs.asm
 	req := ReqStrictEquals
 	if negate {
 		req = ReqStrictNotEquals
 	}
-	notNumber := cs.bridgeLabel(instr.IP, req)
-	cs.loadTop(RAX, 1)
-	cs.isNumberJump(RAX, notNumber)
-	cs.loadTop(RCX, 0)
-	cs.isNumberJump(RCX, notNumber)
+	if !cs.direct {
+		notNumber := cs.bridgeLabel(instr.IP, req)
+		cs.loadTop(RAX, 1)
+		cs.isNumberJump(RAX, notNumber)
+		cs.loadTop(RCX, 0)
+		cs.isNumberJump(RCX, notNumber)
+	}
 	asm.MovSDLoadIndex(XMM0, R15, R11, 3, -16)
 	asm.MovSDLoadIndex(XMM1, R15, R11, 3, -8)
 	asm.Ucomisd(XMM0, XMM1)

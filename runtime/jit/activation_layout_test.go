@@ -29,4 +29,5 @@ func TestActivationLayout(t *testing.T) {
 	check("SelfValue", unsafe.Offsetof(a.SelfValue), ActivationSelfValue)
 	check("GoSP", unsafe.Offsetof(a.GoSP), ActivationGoSP)
 	check("GlobalsCount", unsafe.Offsetof(a.GlobalsCount), ActivationGlobalsCount)
+	check("DirectDepth", unsafe.Offsetof(a.DirectDepth), ActivationDirectDepth)
 }

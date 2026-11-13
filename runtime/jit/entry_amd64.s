@@ -31,6 +31,7 @@ TEXT ·jitEnter(SB),NOSPLIT,$64-40
 
 	MOVQ 112(BX), SP
 	MOVQ 48(BX), AX
+	MOVQ AX, ret+32(FP)
 
 	MOVQ 0(SP), BP
 	MOVQ 8(SP), BX

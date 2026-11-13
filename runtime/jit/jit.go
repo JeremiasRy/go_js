@@ -142,6 +142,7 @@ type Activation struct {
 	SelfValue    value.Value
 	GoSP         uintptr
 	GlobalsCount int64
+	DirectDepth  int64
 
 	Chunk       *value.ValueChunk
 	Fn          object.Callable
@@ -176,6 +177,7 @@ const (
 	ActivationSelfValue    = 104
 	ActivationGoSP         = 112
 	ActivationGlobalsCount = 120
+	ActivationDirectDepth  = 128
 )
 
 const JITNativeStackSize = 64 * 1024

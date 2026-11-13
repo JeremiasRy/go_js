@@ -16,6 +16,7 @@ import (
 var (
 	sharedJITOnce    sync.Once
 	sharedJITContext *jit.Context
+	jitTrace         = os.Getenv("JIT_TRACE") == "1"
 )
 
 func jitContext() *jit.Context {
@@ -53,7 +54,13 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	if top < 0 {
 		top = 0
 	}
+	if cc.Direct && top > cc.FrameSlots {
+		return jitUnavailable, nil
+	}
 	bufferSize := cc.FrameSlots
+	if cc.Direct {
+		bufferSize = cc.FrameSlots * jit.MaxJITFrames
+	}
 	if top+8 > bufferSize {
 		bufferSize = top + 8
 	}
@@ -76,6 +83,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	act.BytecodeIP = 0
 	act.Status = jit.StatusDone
 	act.Depth = int64(vm.frameCount)
+	act.DirectDepth = 1
 	act.SelfValue = callee
 	act.Chunk = c
 	act.Fn = f.fn
@@ -93,6 +101,9 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 
 	entry, ok := cc.Entry(0)
 	if !ok {
+		if jitTrace {
+			fmt.Fprintf(os.Stderr, "JIT no entry 0; entries=%v\n", cc.Entries)
+		}
 		release()
 		return jitUnavailable, nil
 	}
@@ -104,8 +115,8 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 	for {
 		act.Status = jit.StatusDone
 		status, enterErr := ctx.Enter(cc, entry, act)
-		if os.Getenv("JIT_TRACE") == "1" {
-			fmt.Fprintf(os.Stderr, "JIT seg entry=%x status=%d req=%d ip=%d sp=%d res=%x frame=%d\n", entry, status, act.Request, act.BytecodeIP, act.SP, uint64(act.Result), vm.frameCount)
+		if jitTrace {
+			fmt.Fprintf(os.Stderr, "JIT seg entry=%x status=%d req=%d ip=%d sp=%d res=%x frame=%d dd=%d self=%x\n", entry, status, act.Request, act.BytecodeIP, act.SP, uint64(act.Result), vm.frameCount, act.DirectDepth, uint64(act.SelfValue))
 		}
 		if enterErr != nil {
 			release()
@@ -131,6 +142,10 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			release()
 			return jitFinished, nil
 		case jit.StatusDeopt:
+			if act.DirectDepth > 1 {
+				release()
+				return jitDeoptimized, fmt.Errorf("jit: deopt inside a direct-recursion frame (ip %d)", act.BytecodeIP)
+			}
 			ip := int(act.BytecodeIP)
 			vm.copyActivationToStack(act, localStart)
 			if currentIp != nil {
@@ -145,6 +160,10 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				outcome, throwErr := vm.resumeAfterJITThrow(f, c, currentIp, int(act.BytecodeIP), thrown)
 				release()
 				return outcome, throwErr
+			}
+			if act.DirectDepth > 1 {
+				release()
+				return jitDeoptimized, fmt.Errorf("jit: bridge inside a direct-recursion frame (ip %d, request %d)", act.BytecodeIP, act.Request)
 			}
 			vm.copyActivationToStack(act, localStart)
 			next, bridgeErr := vm.handleBridge(act, localStart)
