@@ -19,6 +19,7 @@ var (
 	JITLoopThreshold = 4096
 	JITMaxCodeBytes  = 16 << 20
 	JITStats         = false
+	JITTrace         = false
 	StructuredOutput = true
 	JSONErrors       = false
 )

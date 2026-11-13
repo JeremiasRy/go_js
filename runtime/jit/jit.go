@@ -2,13 +2,16 @@ package jit
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
 
 	"go_js/chunk"
+	"go_js/flags"
 	"go_js/object"
 	"go_js/value"
 )
@@ -287,6 +290,11 @@ func (s *Stats) NoteFail(reason string) {
 	s.mu.Unlock()
 }
 
+type Backedge struct {
+	From int
+	To   int
+}
+
 type CompiledChunk struct {
 	Chunk       *value.ValueChunk
 	Code        []byte
@@ -297,9 +305,33 @@ type CompiledChunk struct {
 	MaxSP       int
 	Arity       int
 	FastEntry   uintptr
+	Backedges   []Backedge
+	HeavyIPs    []int
 	Direct      bool
+	OSRable     bool
 	Disassembly []JitDetail
 	CompileErr  string
+}
+
+// LoopOSRable reports whether the loop with the given header has a fully
+// native body. Loops whose bodies contain bridge or deopt sites stay
+// interpreted: the bridge round trip costs more than the loop saves.
+func (cc *CompiledChunk) LoopOSRable(header int) bool {
+	backedge := -1
+	for _, b := range cc.Backedges {
+		if b.To == header && (backedge < 0 || b.From < backedge) {
+			backedge = b.From
+		}
+	}
+	if backedge < 0 {
+		return false
+	}
+	for _, ip := range cc.HeavyIPs {
+		if ip >= header && ip <= backedge {
+			return false
+		}
+	}
+	return true
 }
 
 func (cc *CompiledChunk) Entry(ip int) (uintptr, bool) {
@@ -316,17 +348,19 @@ type loopKey struct {
 }
 
 type Context struct {
-	mu           sync.Mutex
-	compiled     map[*value.ValueChunk]*CompiledChunk
-	failures     map[*value.ValueChunk]string
-	backedges    map[loopKey]int
-	blacklisted  map[loopKey]bool
-	deopts       map[*value.ValueChunk]int
-	codeBytes    int
-	maxCodeBytes int
-	stacks       StackPool
-	stats        Stats
-	activations  sync.Pool
+	mu                sync.Mutex
+	compiled          map[*value.ValueChunk]*CompiledChunk
+	failures          map[*value.ValueChunk]string
+	backedges         map[loopKey]int
+	blacklisted       map[loopKey]bool
+	deopts            map[*value.ValueChunk]int
+	blacklistedChunks map[*value.ValueChunk]bool
+	callCounts        map[*value.ValueChunk]int
+	codeBytes         int
+	maxCodeBytes      int
+	stacks            StackPool
+	stats             Stats
+	activations       sync.Pool
 }
 
 func NewContext(maxCodeBytes int) *Context {
@@ -334,18 +368,61 @@ func NewContext(maxCodeBytes int) *Context {
 		maxCodeBytes = 16 << 20
 	}
 	ctx := &Context{
-		compiled:     map[*value.ValueChunk]*CompiledChunk{},
-		failures:     map[*value.ValueChunk]string{},
-		backedges:    map[loopKey]int{},
-		blacklisted:  map[loopKey]bool{},
-		deopts:       map[*value.ValueChunk]int{},
-		maxCodeBytes: maxCodeBytes,
+		compiled:          map[*value.ValueChunk]*CompiledChunk{},
+		failures:          map[*value.ValueChunk]string{},
+		backedges:         map[loopKey]int{},
+		blacklisted:       map[loopKey]bool{},
+		deopts:            map[*value.ValueChunk]int{},
+		blacklistedChunks: map[*value.ValueChunk]bool{},
+		callCounts:        map[*value.ValueChunk]int{},
+		maxCodeBytes:      maxCodeBytes,
 	}
 	ctx.activations.New = func() any { return &Activation{} }
 	return ctx
 }
 
 func (ctx *Context) Stats() *Stats { return &ctx.stats }
+
+func (ctx *Context) PrintStats(w io.Writer) {
+	ctx.mu.Lock()
+	compiled := len(ctx.compiled)
+	failures := len(ctx.failures)
+	files := ctx.codeBytes
+	ctx.mu.Unlock()
+	fmt.Fprintf(w, "jit stats: compiled=%d failures=%d code_bytes=%d code_limit=%d\n", compiled, failures, files, ctx.maxCodeBytes)
+	fmt.Fprintf(w, "jit stats: recompiles=%d compile_failures=%d deopts=%d bridges=%d osr=%d safepoints=%d code_limit_hits=%d\n",
+		atomic.LoadInt64(&ctx.stats.Compiled),
+		atomic.LoadInt64(&ctx.stats.CompileFailures),
+		atomic.LoadInt64(&ctx.stats.Deopts),
+		atomic.LoadInt64(&ctx.stats.BridgeRequests),
+		atomic.LoadInt64(&ctx.stats.OSREntries),
+		atomic.LoadInt64(&ctx.stats.Safepoints),
+		atomic.LoadInt64(&ctx.stats.CodeLimitHits),
+	)
+	ctx.stats.mu.Lock()
+	reasons := make([]string, 0, len(ctx.stats.DeoptReasons))
+	for reason := range ctx.stats.DeoptReasons {
+		reasons = append(reasons, reason)
+	}
+	sort.Strings(reasons)
+	for _, reason := range reasons {
+		fmt.Fprintf(w, "jit stats:   %s=%d\n", reason, ctx.stats.DeoptReasons[reason])
+	}
+	ctx.stats.mu.Unlock()
+}
+
+// NoteCall counts an invocation of a chunk and reports the new count. Counts
+// are shared across function clones and sub-VMs.
+func (ctx *Context) NoteCall(chunk *value.ValueChunk) int {
+	if chunk == nil {
+		return 0
+	}
+	ctx.mu.Lock()
+	ctx.callCounts[chunk]++
+	count := ctx.callCounts[chunk]
+	ctx.mu.Unlock()
+	return count
+}
 
 // NoteBackedge counts a backward branch and reports whether the loop is hot
 // enough to attempt OSR.
@@ -373,6 +450,17 @@ func (ctx *Context) NoteDeopt(chunk *value.ValueChunk) bool {
 	defer ctx.mu.Unlock()
 	ctx.deopts[chunk]++
 	return ctx.deopts[chunk] > 16
+}
+
+func (ctx *Context) BlacklistChunk(chunk *value.ValueChunk) {
+	ctx.mu.Lock()
+	ctx.blacklistedChunks[chunk] = true
+	for key := range ctx.backedges {
+		if key.chunk == chunk {
+			ctx.blacklisted[key] = true
+		}
+	}
+	ctx.mu.Unlock()
 }
 
 func (ctx *Context) BlacklistChunkOSR(chunk *value.ValueChunk) {
@@ -464,7 +552,7 @@ func (ctx *Context) seal(code []byte) ([]byte, error) {
 }
 
 func (ctx *Context) CanCompile(fn object.Callable) bool {
-	if fn == nil {
+	if !flags.EnableJIT || fn == nil {
 		return false
 	}
 	if _, ok := fn.(*object.ObjFunction); !ok {
@@ -472,6 +560,12 @@ func (ctx *Context) CanCompile(fn object.Callable) bool {
 	}
 	c := fn.ValueChunk()
 	if c == nil || len(c.Code) == 0 {
+		return false
+	}
+	ctx.mu.Lock()
+	blacklisted := ctx.blacklistedChunks[c]
+	ctx.mu.Unlock()
+	if blacklisted {
 		return false
 	}
 	if fn.HasArguments() || fn.HasRestParameter() {

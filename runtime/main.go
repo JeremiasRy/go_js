@@ -56,6 +56,7 @@ func main() {
 	flag.IntVar(&flags.JITLoopThreshold, "jit-loop-threshold", flags.JITLoopThreshold, "Backedge count before a hot loop is compiled with OSR")
 	flag.IntVar(&flags.JITMaxCodeBytes, "jit-max-code-bytes", flags.JITMaxCodeBytes, "Maximum executable code cache size in bytes")
 	flag.BoolVar(&flags.JITStats, "jit-stats", false, "Print JIT statistics on exit")
+	flag.BoolVar(&flags.JITTrace, "jit-trace", false, "Trace JIT compilation and execution")
 
 	flag.Parse()
 	if *sourceType != "script" && *sourceType != "module" {
@@ -137,6 +138,10 @@ func main() {
 	eventloop.Dispatch(mainJob)
 
 	wg.Wait()
+
+	if flags.JITStats {
+		virtualMachine.PrintJITStats(os.Stderr)
+	}
 
 	if flags.StructuredOutput {
 		info := map[string]*virtualMachine.DebugInfo{}

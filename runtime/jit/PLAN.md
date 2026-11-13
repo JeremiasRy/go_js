@@ -615,17 +615,21 @@ outputs match.
 
 Goal: stop treating every non-self call as a bridge.
 
-- [ ] Move argument padding/default initialization before the JIT attempt; fix
+- [x] Move argument padding/default initialization before the JIT attempt; fix
       missing-argument behavior.
-- [ ] Support `this`, method handles, and arrow-function lexical `this` where
+- [x] Support `this`, method handles, and arrow-function lexical `this` where
       possible.
-- [ ] Direct self-recursion for pure numeric functions (retain fib performance).
+- [x] Direct self-recursion for pure numeric functions (retain fib performance).
 - [ ] Direct monomorphic calls to jitted chunks with an activation frame stack;
       define and test multi-frame deopt or restrict to no-deopt callees.
-- [ ] Call-site inline caches; megamorphic fallback to bridge.
-- [ ] `arguments`, rest, default parameters, constructors, and spread: bridge or
+      Decision: deferred. The bridge replays the real `OP_CALL` on the same VM,
+      so the callee can itself be JIT compiled and all call semantics stay in
+      the interpreter. No nested-frame deopt is ever required.
+- [ ] Call-site inline caches; megamorphic fallback to bridge. Decision:
+      deferred with the monomorphic-call work above.
+- [x] `arguments`, rest, default parameters, constructors, and spread: bridge or
       mark non-jittable with a clear reason.
-- [ ] Share hotness/counters across sub-VMs so callbacks can become hot.
+- [x] Share hotness/counters across sub-VMs so callbacks can become hot.
 
 Exit criteria: mutual recursion, function-valued arguments, closures/methods,
 and missing/extra arguments are correct; fib remains fast; no nested-frame
@@ -636,14 +640,17 @@ corruption.
 Goal: safely JIT functions containing heap/string/iterator operations without
 compiling those operations natively.
 
-- [ ] Property reads/writes, array index/length, object creation, array creation,
+- [x] Property reads/writes, array index/length, object creation, array creation,
       `PUSH_ELEMENT`.
-- [ ] String concatenation, `TO_STRING`, template literals, string length/index.
-- [ ] Iterators and `for...of`/`for...in` setup and next/current operations.
-- [ ] `NEW`, optional calls, spread, `IN`, `INSTANCEOF`, `TYPEOF` for non-numbers.
-- [ ] Keep try/catch/finally, async/generator/await, class construction,
-      modules/import, proxy, and regexp non-jittable for now.
-- [ ] Measure bridge overhead; only compile loops whose bodies benefit.
+- [x] String concatenation, `TO_STRING`, template literals, string length/index.
+- [x] Iterators and `for...of`/`for...in` setup and next/current operations.
+- [x] `NEW`, optional calls, spread, `IN`, `INSTANCEOF`, `TYPEOF` for non-numbers.
+- [x] Keep try/catch/finally, async/generator/await, class construction,
+      modules/import, proxy, and regexp non-jittable for now. Class creation
+      and constructors are bridged instruction-by-instruction on the real VM
+      rather than compiled natively; try/catch, async/generator, `with`, and
+      completion bookkeeping reject the whole chunk.
+- [x] Measure bridge overhead; only compile loops whose bodies benefit.
 
 Exit criteria: a hot loop containing property access and string concatenation
 produces correct output; performance is measured (it may still be slower than
@@ -655,13 +662,26 @@ accepted.
 Goal: remove bridge overhead from the common heap operations.
 
 - [ ] Array numeric get/set/length fast path with type/index/range/hole guards.
-- [ ] Object property design spike: hidden shapes + dense slots, or another
+      Partial: the bridge now implements member get/set, `PUSH_ELEMENT`, array
+      creation, and object creation directly in Go instead of replaying the
+      instruction in a sub-frame. Direct `ObjArr.items` access from machine
+      code is deferred while the heap still stores objects behind a Go map;
+      see the design note in §7.
+- [x] Object property design spike: hidden shapes + dense slots, or another
       direct-access layout. Do not start without a written design and a
       compatibility plan for descriptors/accessors/prototypes.
-- [ ] Monomorphic property/getter caches with heap epoch invalidation.
-- [ ] Monomorphic call-target caches.
+      Decision: keep properties on the bridge for v1. `ObjObject.Members` is a
+      Go map, so machine code cannot read it without a handle-to-object table
+      and a shape/slot ABI. A compatibility plan must cover accessors,
+      prototypes, descriptors, `__proto__`, and GC epochs before that change.
+- [ ] Monomorphic property/getter caches with heap epoch invalidation. Deferred
+      with the object layout work.
+- [ ] Monomorphic call-target caches. Deferred; calls go through the correct
+      bridge and can reach JIT-compiled callees.
 - [ ] Optional: compiler lowering of `for...of` over arrays to indexed loops.
-- [ ] Optional: string builder fast path for repeated `+=` in a loop.
+      Deferred (would benefit the interpreter independently).
+- [ ] Optional: string builder fast path for repeated `+=` in a loop. Deferred;
+      the bridge preserves builder semantics.
 
 Exit criteria: array iteration is at least as fast as the interpreter; object
 property benchmarks improve or are explicitly left on the bridge; all caches
@@ -669,20 +689,21 @@ invalidate correctly across GC and mutation.
 
 ### Phase 7 — Hardening, docs, and handoff (size M)
 
-- [ ] GC stress: `GOGC=1`, forced GC from another goroutine, long JIT loops, and
+- [x] GC stress: `GOGC=1`, forced GC from another goroutine, long JIT loops, and
       allocation-heavy bridge calls.
-- [ ] Stack stress: deep recursion, mutual recursion, stack guard, negative
+- [x] Stack stress: deep recursion, mutual recursion, stack guard, negative
       recursion test expecting `RangeError`.
-- [ ] Code cache stress: thousands of distinct chunks, code-size limit, compile
+- [x] Code cache stress: thousands of distinct chunks, code-size limit, compile
       failure fallback, no leaks of `Callable`s.
-- [ ] W^X verification and page-permission tests.
-- [ ] Race/concurrency tests for shared JIT contexts.
-- [ ] Fuzz the decoder/CFG and differential-test generated numeric programs.
-- [ ] Update `README.md` and `ECMASCRIPT_ROADMAP.md` with the supported subset,
+- [x] W^X verification and page-permission tests.
+- [x] Race/concurrency tests for shared JIT contexts.
+- [x] Fuzz the decoder/CFG and differential-test generated numeric programs.
+- [x] Update `README.md` and `ECMASCRIPT_ROADMAP.md` with the supported subset,
       flags, and benchmark results.
-- [ ] Delete or build-tag the unused arm64 JIT stubs; keep amd64 clean.
+- [x] Delete or build-tag the unused arm64 JIT stubs; keep amd64 clean.
 - [ ] Final pass: `./test.sh`, JIT-off vs JIT-force, benchmarks, and a short
-      handoff note in this file.
+      handoff note in this file. (Tracked separately below; the Docker gate is
+      run last.)
 
 ---
 

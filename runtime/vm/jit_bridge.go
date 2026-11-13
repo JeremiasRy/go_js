@@ -2,6 +2,7 @@ package vm
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	"go_js/flags"
 	"go_js/heap"
 	"go_js/jit"
+	"go_js/native"
 	"go_js/object"
 	"go_js/value"
 )
@@ -17,8 +19,12 @@ import (
 var (
 	sharedJITOnce    sync.Once
 	sharedJITContext *jit.Context
-	jitTrace         = os.Getenv("JIT_TRACE") == "1"
+	jitTrace         = flags.JITTrace || os.Getenv("JIT_TRACE") == "1"
 )
+
+func PrintJITStats(w io.Writer) {
+	jitContext().PrintStats(w)
+}
 
 func jitContext() *jit.Context {
 	sharedJITOnce.Do(func() {
@@ -119,7 +125,7 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 		act.Status = jit.StatusDone
 		status, enterErr := ctx.Enter(cc, entry, act)
 		if jitTrace {
-			fmt.Fprintf(os.Stderr, "JIT seg entry=%x status=%d req=%d ip=%d sp=%d res=%x frame=%d dd=%d self=%x\n", entry, status, act.Request, act.BytecodeIP, act.SP, uint64(act.Result), vm.frameCount, act.DirectDepth, uint64(act.SelfValue))
+			fmt.Fprintf(os.Stderr, "JIT seg entry=%x status=%d req=%d ip=%d sp=%d res=%x frame=%d dd=%d self=%x this=%x\n", entry, status, act.Request, act.BytecodeIP, act.SP, uint64(act.Result), vm.frameCount, act.DirectDepth, uint64(act.SelfValue), uint64(act.This))
 		}
 		if enterErr != nil {
 			release()
@@ -150,7 +156,15 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 				return jitDeoptimized, fmt.Errorf("jit: deopt inside a direct-recursion frame (ip %d)", act.BytecodeIP)
 			}
 			ip := int(act.BytecodeIP)
+			ctx.Stats().NoteDeopt("runtime")
+			if ctx.NoteDeopt(c) {
+				ctx.BlacklistChunk(c)
+			}
 			vm.copyActivationToStack(act, localStart)
+			f.heapScope = act.HeapScope
+			f.ownScope = act.OwnScope
+			f.arguments = act.Args
+			vm.frames[vm.frameCount-1] = *f
 			if currentIp != nil {
 				*currentIp = ip
 			}
@@ -192,6 +206,10 @@ func (vm *VM) runJIT(f *CallFrame, c *value.ValueChunk, currentIp *int, callee v
 			entry, ok = cc.Entry(next)
 			if !ok {
 				vm.copyActivationToStack(act, localStart)
+				f.heapScope = act.HeapScope
+				f.ownScope = act.OwnScope
+				f.arguments = act.Args
+				vm.frames[vm.frameCount-1] = *f
 				if currentIp != nil {
 					*currentIp = next
 				}
@@ -287,6 +305,7 @@ func (vm *VM) syncActivationFromStack(act *jit.Activation, localStart int) {
 func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 	c := *act.Chunk
 	ip := int(act.BytecodeIP)
+	jitContext().Stats().NoteBridge()
 	if jitTrace {
 		fmt.Fprintf(os.Stderr, "BRIDGE ip=%d req=%d gc=%d\n", ip, act.Request, act.GlobalsCount)
 	}
@@ -294,8 +313,34 @@ func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 	if !ok {
 		return 0, fmt.Errorf("jit: invalid bridge bytecode ip %d", ip)
 	}
-	if act.Request == jit.ReqGetMember {
+	switch act.Request {
+	case jit.ReqGetMember:
 		if err := vm.bridgeGetMember(act); err != nil {
+			return 0, err
+		}
+		return next, nil
+	case jit.ReqSetMemberReturn, jit.ReqSetMemberKeep, jit.ReqSetMemberStrictReturn:
+		if err := vm.bridgeSetMember(act, act.Request); err != nil {
+			return 0, err
+		}
+		return next, nil
+	case jit.ReqPushElement:
+		if err := vm.bridgePushElement(act); err != nil {
+			return 0, err
+		}
+		return next, nil
+	case jit.ReqCreateArray:
+		length, ok := jit.ReadUint32BE(c.Code, ip+1)
+		if !ok {
+			return 0, fmt.Errorf("jit: truncated array creation")
+		}
+		arr := native.NewArray(length)
+		if err := vm.bridgePush(act, value.EncodeHandle(heap.Allocate(arr))); err != nil {
+			return 0, err
+		}
+		return next, nil
+	case jit.ReqCreateObject:
+		if err := vm.bridgePush(act, value.EncodeHandle(heap.Allocate(native.NewObjectHash()))); err != nil {
 			return 0, err
 		}
 		return next, nil
@@ -310,10 +355,16 @@ func (vm *VM) handleBridge(act *jit.Activation, localStart int) (int, error) {
 		Constants: c.Constants,
 		FnName:    jitBridgeFnName,
 	}
-	dummy := object.NewFunction(jitBridgeFnName, 0, rc)
+	var bridgeFn object.Callable = object.NewFunction(jitBridgeFnName, 0, rc)
+	if real, ok := act.Fn.(*object.ObjFunction); ok {
+		clone := real.Clone().(*object.ObjFunction)
+		rc.FnName = real.ValueChunk().FnName
+		clone.Chunk = rc
+		bridgeFn = clone
+	}
 
 	frame := CallFrame{}
-	frame.initCallFrame(dummy, localStart, 0, act.This)
+	frame.initCallFrame(bridgeFn, localStart, 0, act.This)
 	frame.heapScope = act.HeapScope
 	frame.ownScope = act.OwnScope
 	frame.newTarget = act.NewTarget
@@ -357,6 +408,81 @@ func (vm *VM) handleSafepoint(act *jit.Activation) (int, error) {
 	act.GlobalSync = vm.globalSyncBase()
 	jitContext().Stats().NoteSafepoint()
 	return int(act.BytecodeIP), nil
+}
+
+func (vm *VM) bridgePush(act *jit.Activation, v value.Value) error {
+	top := int(act.SP)
+	if top >= len(act.Buffer) {
+		buffer := make([]value.Value, len(act.Buffer)*2+32)
+		copy(buffer, act.Buffer)
+		act.Buffer = buffer
+		act.Values = &buffer[0]
+	}
+	act.Buffer[top] = v
+	act.SP = int64(top + 1)
+	return nil
+}
+
+func (vm *VM) bridgeSetMember(act *jit.Activation, req jit.Request) error {
+	top := int(act.SP)
+	strict := req == jit.ReqSetMemberStrictReturn
+	if req == jit.ReqSetMemberKeep {
+		if top < 4 {
+			return fmt.Errorf("jit: member store with an empty stack")
+		}
+		v := act.Buffer[top-1]
+		keep := act.Buffer[top-2]
+		key := act.Buffer[top-3]
+		obj := act.Buffer[top-4]
+		if err := vm.setMemberValueStrict(obj, key, v, strict); err != nil {
+			return jitMemberError(vm, err)
+		}
+		act.Buffer[top-4] = keep
+		act.SP = int64(top - 3)
+		return nil
+	}
+	if top < 3 {
+		return fmt.Errorf("jit: member store with an empty stack")
+	}
+	v := act.Buffer[top-1]
+	key := act.Buffer[top-2]
+	obj := act.Buffer[top-3]
+	if err := vm.setMemberValueStrict(obj, key, v, strict); err != nil {
+		return jitMemberError(vm, err)
+	}
+	act.Buffer[top-3] = v
+	act.SP = int64(top - 2)
+	return nil
+}
+
+func jitMemberError(vm *VM, err error) error {
+	name := "TypeError"
+	message := err.Error()
+	if jsErr, ok := err.(*JSException); ok {
+		name = jsErr.Name
+		message = jsErr.Message
+	}
+	return &JSException{Name: name, Message: message, Value: vm.makeError(name, message), HasValue: true}
+}
+
+func (vm *VM) bridgePushElement(act *jit.Activation) error {
+	top := int(act.SP)
+	if top < 2 {
+		return fmt.Errorf("jit: push element with an empty stack")
+	}
+	v := act.Buffer[top-1]
+	arr := act.Buffer[top-2]
+	obj, err := heap.GetObject(arr.GetHandle())
+	if err != nil {
+		return err
+	}
+	array, ok := obj.(*native.ObjArr)
+	if !ok {
+		return fmt.Errorf("trying to initialize %s that is not an array", native.String(arr))
+	}
+	array.PushElement(v)
+	act.SP = int64(top - 1)
+	return nil
 }
 
 func (vm *VM) bridgeGetMember(act *jit.Activation) error {

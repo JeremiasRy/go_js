@@ -158,6 +158,10 @@ func decodeChunk(code []byte) ([]Instruction, error) {
 	return instructions, nil
 }
 
+func ReadUint32BE(code []byte, ip int) (int, bool) {
+	return readUint32BE(code, ip)
+}
+
 func InstructionEnd(code []byte, ip int) (int, bool) {
 	if ip < 0 || ip >= len(code) {
 		return 0, false

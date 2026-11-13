@@ -5,30 +5,35 @@ package jit
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	"go_js/chunk"
+	"go_js/flags"
 	"go_js/value"
 )
 
 type compileState struct {
-	asm        *Assembler
-	chunk      *value.ValueChunk
-	arity      int
-	localCount int
-	ipLabels    map[int]Label
-	entryLabels map[int]Label
-	bindings    map[int]bool
-	deoptLocs  map[int]Label
-	bridgeLocs map[int]Label
-	bridgeReqs map[int]Request
-	safepoints map[int]Label
-	exitLabel  Label
-	throwLabel Label
-	reasons    map[string]int
-	direct     bool
-	fastBody   Label
-	fastThunk  Label
-	frameSlots int
+	asm          *Assembler
+	chunk        *value.ValueChunk
+	arity        int
+	localCount   int
+	ipLabels     map[int]Label
+	entryLabels  map[int]Label
+	bindings     map[int]bool
+	deoptLocs    map[int]Label
+	bridgeLocs   map[int]Label
+	bridgeReqs   map[int]Request
+	safepoints   map[int]Label
+	backedges    []Backedge
+	alwaysBridge map[int]bool
+	alwaysDeopt  map[int]bool
+	exitLabel    Label
+	throwLabel   Label
+	reasons      map[string]int
+	direct       bool
+	fastBody     Label
+	fastThunk    Label
+	frameSlots   int
 }
 
 func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChunk, error) {
@@ -64,7 +69,7 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 
 	analysis := analyzeDirect(ch, arity)
 	direct := analysis.ok
-	if os.Getenv("JIT_TRACE") == "1" {
+	if flags.JITTrace || os.Getenv("JIT_TRACE") == "1" {
 		fmt.Fprintf(os.Stderr, "JIT compile fn=%s arity=%d direct=%v maxTop=%d len=%d fail=%d/%d\n", ch.FnName, arity, direct, analysis.maxTop, len(ch.Code), analysis.failIP, analysis.failOp)
 	}
 	frameSlots := arity + 3*len(ch.Code) + 32
@@ -82,20 +87,22 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 
 	asm := NewAssembler(1 << 20)
 	cs := &compileState{
-		asm:        asm,
-		chunk:      ch,
-		arity:      arity,
-		localCount: localCount,
-		ipLabels:    map[int]Label{},
-		entryLabels: map[int]Label{},
-		bindings:    map[int]bool{},
-		deoptLocs:  map[int]Label{},
-		bridgeLocs: map[int]Label{},
-		bridgeReqs: map[int]Request{},
-		safepoints: map[int]Label{},
-		reasons:    map[string]int{},
-		direct:     direct,
-		frameSlots: frameSlots,
+		asm:          asm,
+		chunk:        ch,
+		arity:        arity,
+		localCount:   localCount,
+		ipLabels:     map[int]Label{},
+		entryLabels:  map[int]Label{},
+		bindings:     map[int]bool{},
+		deoptLocs:    map[int]Label{},
+		bridgeLocs:   map[int]Label{},
+		bridgeReqs:   map[int]Request{},
+		safepoints:   map[int]Label{},
+		alwaysBridge: map[int]bool{},
+		alwaysDeopt:  map[int]bool{},
+		reasons:      map[string]int{},
+		direct:       direct,
+		frameSlots:   frameSlots,
 	}
 	for _, instr := range instructions {
 		cs.ipLabels[instr.IP] = asm.NewLabel()
@@ -213,6 +220,20 @@ func (ctx *Context) compileLocked(ch *value.ValueChunk, arity int) (*CompiledChu
 			cc.Entries[ip] = uintptr(off)
 		}
 	}
+	heavyIPs := make([]int, 0, len(cs.alwaysBridge)+len(cs.alwaysDeopt))
+	for ip := range cs.alwaysBridge {
+		heavyIPs = append(heavyIPs, ip)
+	}
+	for ip := range cs.alwaysDeopt {
+		heavyIPs = append(heavyIPs, ip)
+	}
+	sort.Ints(heavyIPs)
+	cc.HeavyIPs = heavyIPs
+	cc.Backedges = cs.backedges
+	cc.OSRable = len(heavyIPs) == 0
+	if os.Getenv("JIT_TRACE") == "1" {
+		fmt.Fprintf(os.Stderr, "JIT osr-able=%v heavy=%d\n", cc.OSRable, len(heavyIPs))
+	}
 	cc.Disassembly = buildDisassembly(asm.code, mem, asm.markers)
 	return cc, nil
 }
@@ -267,6 +288,7 @@ func (cs *compileState) deoptLabel(ip int, reason string) Label {
 }
 
 func (cs *compileState) deopt(ip int, reason string) {
+	cs.alwaysDeopt[ip] = true
 	cs.asm.Jmp(cs.deoptLabel(ip, reason))
 }
 
@@ -282,6 +304,7 @@ func (cs *compileState) bridgeLabel(ip int, req Request) Label {
 }
 
 func (cs *compileState) bridge(ip int, req Request) {
+	cs.alwaysBridge[ip] = true
 	cs.asm.Jmp(cs.bridgeLabel(ip, req))
 }
 
@@ -749,6 +772,7 @@ func (cs *compileState) compileInstruction(instr Instruction) error {
 
 func (cs *compileState) emitJump(target, from int) {
 	if target < from {
+		cs.backedges = append(cs.backedges, Backedge{From: from, To: target})
 		cs.emitBackedge(target)
 		return
 	}

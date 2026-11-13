@@ -20,7 +20,8 @@ A javascript runtime built from scratch using GO
     - The vm listens to our eventloop
 5. Dispatch our generated function (the bytecode) to the event loop
 6. VM picks up our function and begins executing
-   - during execution, if a function gets called more than the threshold for "hot path", and the [JIT compiler](runtime/jit/compiler.go) has translation steps for the bytecode used in the function, the VM requests a JIT compiled version of the function and executes it
+   - during execution, hot functions are compiled by the [JIT](runtime/jit) and run as machine code; hot loops inside functions that are called only once are entered with on-stack replacement (OSR)
+   - unsupported instructions (heap operations, calls, string conversion, iterators) return to Go through a bridge that performs the operation with full VM semantics and then re-enters the compiled code; a failed guard deoptimizes to the interpreter at the exact bytecode IP
    - all possible encounters with setTimeouts/await instructions are dispatched to our eventloop accordingly
    - when out of work VM will first drain the microtask queue, after that it will consumethe task queue
 7. If our VM is not executing and eventloop doesn't have any work, we have finished our program
@@ -57,7 +58,19 @@ Requires go version `1.22.5`
 2. `cd /runtime`
 3. `go run main.go <your_javascript_file.js>` use `--debug` flag to see all the fun stuff
 
-Test suite can be run with docker by running `./test.sh` in the root of the repo.
+Test suite can be run with docker by running `./test.sh` in the root of the repo. Set `GO_JS_DIFFERENTIAL=1` to run every positive case with the JIT both disabled and forced, and fail on any divergence.
+
+### JIT
+
+`runtime/jit/PLAN.md` describes the architecture and the completed roadmap. In short:
+
+- Compiled chunks are cached per `*value.ValueChunk` in a shared, mutex-protected context. Code is emitted into RW pages and mapped RX (never RWX).
+- Values live in a `JITActivation` frame; the machine code never calls Go while a JIT frame is live. A small `jitEnter` trampoline switches to a dedicated native stack.
+- Number arithmetic, comparisons, locals, globals, branches, loops, and returns are native. Non-number `+`, heap/property operations, iterators, calls, and string work go through the bridge.
+- Pure numeric self-recursive functions use direct JIT-to-JIT calls; all other calls use the bridge.
+- Unsupported instructions deoptimize to the interpreter at the exact bytecode IP, so the interpreter remains the semantic reference.
+
+Useful flags: `--jit=off|auto|force`, `--jit-call-threshold`, `--jit-loop-threshold`, `--jit-max-code-bytes`, `--jit-stats`, `--jit-trace`.
 
 ## Web demo and MCP agent bridge
 

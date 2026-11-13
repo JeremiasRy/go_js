@@ -33,6 +33,11 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 		*ip = target
 		return false, value.UNDEFINED, nil
 	}
+	if !cc.LoopOSRable(target) {
+		ctx.BlacklistLoop(c, target)
+		*ip = target
+		return false, value.UNDEFINED, nil
+	}
 	if cc.Direct {
 		top := vm.stackTop - f.localStart
 		for i := 0; i < top; i++ {
@@ -130,13 +135,18 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			return false, value.UNDEFINED, nil
 		case jit.StatusDeopt:
 			resume := int(act.BytecodeIP)
+			ctx.Stats().NoteDeopt("runtime")
 			if jitTrace {
 				fmt.Fprintf(os.Stderr, "OSR deopt ip=%d\n", resume)
 			}
 			vm.copyActivationToStack(act, localStart)
+			f.heapScope = act.HeapScope
+			f.ownScope = act.OwnScope
+			f.arguments = act.Args
+			vm.frames[vm.frameCount-1] = *f
 			*ip = resume
 			if ctx.NoteDeopt(c) {
-				ctx.BlacklistChunkOSR(c)
+				ctx.BlacklistChunk(c)
 			}
 			release()
 			return false, value.UNDEFINED, nil
@@ -172,6 +182,10 @@ func (vm *VM) tryOSR(f *CallFrame, c *value.ValueChunk, ip *int, target int) (do
 			entry, ok = cc.Entry(next)
 			if !ok {
 				vm.copyActivationToStack(act, localStart)
+				f.heapScope = act.HeapScope
+				f.ownScope = act.OwnScope
+				f.arguments = act.Args
+				vm.frames[vm.frameCount-1] = *f
 				*ip = next
 				release()
 				return false, value.UNDEFINED, nil

@@ -30,7 +30,7 @@ const FRAMES_MAX = 1024
 
 func jitCallThreshold() int {
 	if flags.JITMode == flags.JITForce {
-		return 1
+		return 0
 	}
 	return flags.JITCallThreshold
 }
@@ -109,7 +109,6 @@ type VM struct {
 	stack          []value.Value
 	stackTop       int
 	exceptionStack []ExceptionState
-	callCounts     map[object.Callable]int
 	output         *strings.Builder
 
 	exports *native.ObjObject
@@ -139,7 +138,6 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		stackTop:       0,
 		exceptionStack: []ExceptionState{},
 		main:           main,
-		callCounts:     map[object.Callable]int{},
 		catchValues:    map[int]value.Value{},
 		loopMarks:      map[int][]int{},
 		loopIterators:  map[int]value.Value{},
@@ -2721,7 +2719,7 @@ func (vm *VM) findArgStart() []value.Value {
 func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this value.Value, argCount int, calledWithSpread bool) (f CallFrame, c value.ValueChunk, err error) {
 	localStart := max(vm.stackTop-argCount, 0)
 	returnIp := 0
-	vm.callCounts[fn]++
+	callCount := jitContext().NoteCall(fn.ValueChunk())
 
 	if currentIp != nil {
 		returnIp = *currentIp
@@ -2733,7 +2731,7 @@ func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this 
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
 
-	if currentIp != nil && !calledWithSpread && vm.callCounts[fn] > jitCallThreshold() && jitContext().CanCompile(fn) {
+	if currentIp != nil && !calledWithSpread && callCount > jitCallThreshold() && jitContext().CanCompile(fn) {
 		vm.padMissingArguments(fn, f.localStart)
 		outcome, jitErr := vm.runJIT(&f, &c, currentIp, callee)
 		if jitErr != nil {
