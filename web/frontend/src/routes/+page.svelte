@@ -355,7 +355,7 @@
                 return;
             }
             console.error(error);
-            scriptsError = "Could not load your scripts.";
+            scriptsError = "Could not load your latest runs.";
         } finally {
             if (request === scriptsRequest) {
                 scriptsLoading = false;
@@ -754,12 +754,12 @@
     <div class="flex-1 min-h-0 flex flex-row gap-3">
         <aside
             class="w-64 shrink-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden"
-            aria-label="Your scripts"
+            aria-label="Latest runs"
         >
             <div
                 class="bg-slate-100 px-4 py-2 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2"
             >
-                <span>Your scripts</span>
+                <span>Latest runs</span>
                 <button
                     type="button"
                     onclick={() => void loadSessionScripts()}
@@ -796,8 +796,8 @@
                 {#if scripts.length === 0}
                     <p class="px-2 py-3 text-xs text-slate-500">
                         {scriptsLoading
-                            ? "Loading scripts…"
-                            : "No scripts yet. Submit one and it will show up here."}
+                            ? "Loading runs…"
+                            : "No runs yet. Submit one and it will show up here."}
                     </p>
                 {:else}
                     <ul class="flex flex-col gap-1">
