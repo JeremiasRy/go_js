@@ -81,6 +81,9 @@ func (f *fakeStore) GetRandomJob(_ context.Context) (*db.UserScriptJob, error) {
 	defer f.mu.Unlock()
 
 	for _, job := range f.jobs {
+		if job.JobStatus == db.JobFailed {
+			continue
+		}
 		jobCopy := job
 		return &jobCopy, nil
 	}
@@ -293,18 +296,36 @@ func TestRandomJobReturnsStoredScript(t *testing.T) {
 	t.Cleanup(manager.Close)
 
 	server := newTestServer(t, manager)
+	ctx := context.Background()
 
 	empty, err := http.Get(server.URL + "/scripts/random")
 	if err != nil {
 		t.Fatalf("get random script: %v", err)
 	}
-	defer empty.Body.Close()
+	empty.Body.Close()
 	if empty.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected 404 when no scripts exist, got %d", empty.StatusCode)
 	}
 
+	failedJobID, err := store.InsertNewJob(uuid.NewString(), "console.log('failed')", ctx)
+	if err != nil {
+		t.Fatalf("insert failed job: %v", err)
+	}
+	if err := store.UpdateJob(db.JobFailed, "nope", failedJobID, ctx); err != nil {
+		t.Fatalf("fail job: %v", err)
+	}
+
+	failedOnly, err := http.Get(server.URL + "/scripts/random")
+	if err != nil {
+		t.Fatalf("get random script: %v", err)
+	}
+	failedOnly.Body.Close()
+	if failedOnly.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404 when only failed scripts exist, got %d", failedOnly.StatusCode)
+	}
+
 	sessionID := uuid.NewString()
-	if _, err := store.InsertNewJob(sessionID, "console.log('random')", context.Background()); err != nil {
+	if _, err := store.InsertNewJob(sessionID, "console.log('random')", ctx); err != nil {
 		t.Fatalf("insert job: %v", err)
 	}
 

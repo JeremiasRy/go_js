@@ -242,12 +242,13 @@ func (db *Db) GetRandomJob(ctx context.Context) (*UserScriptJob, error) {
 	query := `
 	SELECT ` + jobColumns + `
 	FROM user_script_jobs
+	WHERE job_status <> $1
 	ORDER BY random()
 	LIMIT 1
 	`
 
 	var job UserScriptJob
-	err := db.pool.QueryRow(ctx, query).Scan(
+	err := db.pool.QueryRow(ctx, query, JobFailed).Scan(
 		&job.JobId,
 		&job.SessionID,
 		&job.Src,
