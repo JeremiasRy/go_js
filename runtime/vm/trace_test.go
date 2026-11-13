@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"go_js/chunk"
+	"go_js/heap"
+	"go_js/native"
 	"go_js/object"
 	"go_js/value"
 )
@@ -83,6 +85,29 @@ func TestSnapshotOmitsHiddenFrames(t *testing.T) {
 	}
 	if state.ActiveFrame != 0 {
 		t.Fatalf("expected active frame 0, got %d", state.ActiveFrame)
+	}
+}
+
+func TestTraceValueViewNamesConcreteObjects(t *testing.T) {
+	vm := NewVM(false, nil)
+
+	console := native.NewObjectConsole()
+	consoleView := vm.valueView(value.EncodeHandle(heap.Allocate(console)))
+	if consoleView.Type != "object" || consoleView.Display != "[console]" {
+		t.Fatalf("expected console object name, got %s %q", consoleView.Type, consoleView.Display)
+	}
+
+	class := native.NewObjClass("Person")
+	instance := class.NewInstance()
+	instanceView := vm.valueView(value.EncodeHandle(heap.Allocate(instance)))
+	if instanceView.Type != "object" || instanceView.Display != "[Person]" {
+		t.Fatalf("expected instance class name, got %s %q", instanceView.Type, instanceView.Display)
+	}
+
+	anonymous := &native.ObjObject{Members: map[string]native.ObjectValueEntry{}}
+	anonymousView := vm.valueView(value.EncodeHandle(heap.Allocate(anonymous)))
+	if anonymousView.Type != "object" || anonymousView.Display != "[Object object]" {
+		t.Fatalf("expected anonymous object display, got %s %q", anonymousView.Type, anonymousView.Display)
 	}
 }
 

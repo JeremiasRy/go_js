@@ -1,14 +1,16 @@
 <script lang="ts">
     import type {
+        DisassembledChunk,
         EventLoopState,
         ExecutionFrame,
-        ExecutionFrameKind,
         ExecutionInfo,
         HighlightOptions,
+        HighlightStatus,
         QueueState,
         SetHighlightStatusParams,
         VMState,
     } from "../types";
+    import Code from "./Code.svelte";
     import ExecutionEventLoop from "./ExecutionEventLoop.svelte";
     import ExecutionQueues from "./ExecutionQueues.svelte";
     import ExecutionStack from "./ExecutionStack.svelte";
@@ -16,13 +18,21 @@
     type Props = {
         execution?: ExecutionInfo | null;
         output?: string;
+        chunks?: DisassembledChunk[];
+        highlight?: HighlightStatus | null;
         setHighlight: (
             opts: SetHighlightStatusParams,
             options?: HighlightOptions,
         ) => void;
     };
 
-    const { execution = null, output = "", setHighlight }: Props = $props();
+    const {
+        execution = null,
+        output = "",
+        chunks = [],
+        highlight = null,
+        setHighlight,
+    }: Props = $props();
 
     const emptyQueues: QueueState = { micro_tasks: [], tasks: [] };
     const emptyEventLoop: EventLoopState = {
@@ -85,21 +95,6 @@
     const narration = $derived(
         currentFrame === null ? "" : narrationFor(currentFrame),
     );
-    const secondaryNote = $derived.by(() => {
-        if (currentFrame === null) {
-            return "";
-        }
-
-        const options = [currentFrame.note, currentFrame.event?.detail];
-        return (
-            options.find(
-                (value): value is string =>
-                    typeof value === "string" &&
-                    value !== "" &&
-                    value !== narration,
-            ) ?? ""
-        );
-    });
     const unavailableMessage = $derived.by(() => {
         if (execution === null) {
             return "This result does not include an execution trace.";
@@ -167,23 +162,6 @@
         playing = false;
         frameIndex = clampIndex(Number(target));
         requestScroll();
-    }
-
-    function frameKindClasses(kind: ExecutionFrameKind | undefined): string {
-        switch (kind) {
-            case "step":
-                return "bg-cyan-100 text-cyan-700";
-            case "event":
-                return "bg-violet-100 text-violet-700";
-            case "jit":
-                return "bg-amber-100 text-amber-700";
-            case "boot":
-                return "bg-slate-200 text-slate-600";
-            case "end":
-                return "bg-emerald-100 text-emerald-700";
-            default:
-                return "bg-slate-100 text-slate-500";
-        }
     }
 
     function queueLabel(queue: string | undefined): string {
@@ -436,57 +414,23 @@
                 </label>
             </div>
 
-            <div
-                class="mt-2 flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5"
-            >
-                <span
-                    class="shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide {frameKindClasses(
-                        currentFrame?.kind,
-                    )}"
+            <div class="mt-1.5 flex min-w-0 items-center gap-2">
+                <p
+                    class="min-w-0 flex-1 truncate text-[10px] font-medium text-slate-500"
+                    title={narration}
                 >
-                    {currentFrame?.kind ?? "—"}
+                    {narration}
+                </p>
+                <span class="shrink-0 font-mono text-[9px] text-slate-400">
+                    seq {currentFrame?.seq ?? "—"} · t+{formatMs(
+                        currentFrame?.at_ms ?? 0,
+                    )}ms
                 </span>
-                <div class="min-w-0 flex-1">
-                    <p
-                        class="truncate text-xs font-medium text-slate-700"
-                        title={narration}
-                    >
-                        {narration}
-                    </p>
-                    <div
-                        class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px] text-slate-400"
-                    >
-                        <span>frame {frameIndex + 1}/{frameCount}</span>
-                        <span>seq {currentFrame?.seq ?? "—"}</span>
-                        <span
-                            >t+{formatMs(currentFrame?.at_ms ?? 0)}ms · run
-                            {formatMs(execution?.duration_ms ?? 0)}ms</span
-                        >
-                        {#if currentFrame?.event}
-                            <span
-                                class="rounded bg-violet-100 px-1 py-0.5 font-semibold text-violet-600"
-                            >
-                                {currentFrame.event.type}
-                            </span>
-                        {/if}
-                        {#if currentFrame?.vm}
-                            <span class="truncate font-mono text-cyan-700"
-                                >{currentFrame.vm.fn} · {currentFrame.vm
-                                    .op}</span
-                            >
-                        {/if}
-                        {#if currentFrame?.output?.delta}
-                            <span class="text-emerald-600"
-                                >+{currentFrame.output.delta.length} chars</span
-                            >
-                        {/if}
-                    </div>
-                    {#if secondaryNote}
-                        <p class="mt-1 text-[10px] text-slate-500">
-                            {secondaryNote}
-                        </p>
-                    {/if}
-                </div>
+                {#if currentFrame?.output?.delta}
+                    <span class="shrink-0 text-[9px] text-emerald-600">
+                        +{currentFrame.output.delta.length} chars
+                    </span>
+                {/if}
             </div>
 
             {#if execution?.truncated}
@@ -502,34 +446,56 @@
             {/if}
         </div>
 
-        <div class="flex min-h-0 flex-1 flex-col gap-2 p-2">
-            <div
-                class="grid min-h-0 flex-[1.05] grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2"
+        <div
+            class="grid min-h-0 flex-1 grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] grid-rows-[minmax(0,0.95fr)_minmax(0,1.05fr)] gap-2 p-2"
+        >
+            <section
+                class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
             >
-                <section
-                    class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
-                >
-                    <ExecutionQueues
-                        {queues}
-                        {eventLoop}
-                        frame={currentFrame}
-                    />
-                </section>
-
-                <section
-                    class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
-                >
-                    <ExecutionEventLoop
-                        {eventLoop}
-                        frame={currentFrame}
-                        outputText={currentOutput}
-                        {atEnd}
-                    />
-                </section>
-            </div>
+                <ExecutionQueues {queues} {eventLoop} frame={currentFrame} />
+            </section>
 
             <section
-                class="flex min-h-0 flex-[0.95] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
+            >
+                <ExecutionEventLoop
+                    {eventLoop}
+                    frame={currentFrame}
+                    outputText={currentOutput}
+                    {atEnd}
+                />
+            </section>
+
+            <section
+                class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+            >
+                <div
+                    class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-2"
+                >
+                    <span class="text-xs font-semibold text-slate-600"
+                        >Op codes</span
+                    >
+                    {#if currentVm}
+                        <span
+                            class="font-mono text-[9px] text-slate-400"
+                        >
+                            {currentVm.chunk_id} · {currentVm.op}
+                        </span>
+                    {/if}
+                </div>
+                <div class="flex min-h-0 flex-1 flex-col p-2">
+                    <Code
+                        {chunks}
+                        {highlight}
+                        {setHighlight}
+                        scrollBehavior="auto"
+                        expandAll
+                    />
+                </div>
+            </section>
+
+            <section
+                class="flex min-h-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
             >
                 <ExecutionStack vm={currentVm} frame={currentFrame} />
             </section>

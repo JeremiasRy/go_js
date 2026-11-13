@@ -593,7 +593,8 @@ Value display rules:
 - functions/async functions/generators: `<fn name>` plus metadata.
 - arrays: `Array(n)`, not the full contents.
 - errors: `Name(n): message` when available.
-- objects: `[Object object]`; class instances use the class name when available.
+- objects: `[Object object]` for anonymous literals; named objects such as `console`
+  and class instances use `[name]` (for example `[console]`, `[Person]`).
 - map/set/regexp/class use their `String()` form.
 - invalid/stale handles: `{type:"unknown", display:"<invalid>"}`; never panic.
 - JIT placeholder: `{type:"note", display:"Executing JIT...", synthetic:true}`.

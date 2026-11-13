@@ -1249,6 +1249,8 @@
                                         ?.execution ?? null}
                                     output={interpretResult!.result?.output ??
                                         ""}
+                                    chunks={debugChunks}
+                                    {highlight}
                                     {setHighlight}
                                 />
                             </div>
