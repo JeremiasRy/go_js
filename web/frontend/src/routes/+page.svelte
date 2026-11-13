@@ -25,7 +25,6 @@
     } from "../types";
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
-    import { normalizeDebugChunks } from "$lib/debugInfo";
     import Code from "./Code.svelte";
     import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
     import { fetchRandomScript, fetchSessionScripts } from "$lib/scriptsApi";
@@ -573,7 +572,7 @@
             try {
                 const interpretDetails = JSON.parse(atob(message.result));
                 runError = null;
-                debugChunks = normalizeDebugChunks(interpretDetails);
+                debugChunks = interpretDetails.debug_chunks ?? [];
                 interpretResult = {
                     jobStatus: "Success",
                     result: interpretDetails,

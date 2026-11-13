@@ -10,14 +10,13 @@ pending.
 Already landed for the unified message:
 
 - every `value.ValueChunk` has a stable `ChunkID` (`c1`, `c2`, ...),
-- `debug_chunks` is the canonical array of chunk metadata with `id`, `name`, `kind`,
+- `debug_chunks` is the only chunk-metadata field, with `id`, `name`, `kind`,
   `hidden`, `byte_code`, and `jit`,
-- `debug_info` is kept as a legacy name-keyed projection for older frontend bundles;
-  new frontend code prefers `debug_chunks`,
 - the structured response has `format_version: 2` and an `execution` placeholder with
   `status: "not_requested"` and `frames: []`,
-- the frontend uses chunk ids for expansion/highlighting, accepts old and new payloads,
-  and still displays the same function names, panels, toggles, and JIT/bytecode views.
+- the frontend consumes `debug_chunks` directly and uses chunk ids for
+  expansion/highlighting while displaying the same function names, panels, toggles,
+  and JIT/bytecode views.
 
 The animation work below still needs the capture hooks and playback UI.
 
@@ -39,11 +38,10 @@ scope; a JIT call is a single "Executing JIT..." placeholder followed by its res
 2. **Trace is opt-in.** Add `--trace-execution`. The normal interpreter and the test
    suite pay nothing when it is off. The web backend passes the flag.
 3. **One versioned message.** The structured response has a top-level
-   `format_version: 2`, a canonical `debug_chunks` array with a stable `id` per
-   bytecode chunk, an `execution` object, and a legacy `debug_info` map keyed by
-   function name for older clients. Until the animation is implemented, `execution`
-   is an explicit placeholder with `status: "not_requested"` and `frames: []`.
-   Frames will reference the same `chunk.id` used by `debug_chunks`.
+   `format_version: 2`, a `debug_chunks` array with a stable `id` per bytecode chunk,
+   and an `execution` object. Until the animation is implemented, `execution` is an
+   explicit placeholder with `status: "not_requested"` and `frames: []`. Frames will
+   reference the same `chunk.id` used by `debug_chunks`.
 4. **Capture at instruction boundaries.** A normal frame is captured immediately
    before executing the bytecode instruction at `op_ptr`. The next frame shows the
    effects of that instruction. `op_ptr` is the raw byte offset used by the matching
@@ -226,8 +224,7 @@ The animation contract is deliberately small:
 out := virtualMachine.StructuredOut{
     FormatVersion: virtualMachine.StructuredOutputFormatVersion,
     Output:        output.String(),
-    DebugInfo:     info.Legacy,   // legacy name-keyed projection
-    DebugChunks:   info.Chunks,   // canonical chunk list
+    DebugChunks:   info.Chunks,
     Ast:           ast,
     Execution:     virtualMachine.NewExecutionPlaceholder(),
 }
@@ -237,8 +234,7 @@ out := virtualMachine.StructuredOut{
 `runtime/vm/debug.go` defines `StructuredOut`, `DebugInfo`, and the chunk list.
 `DebugInfo.AddCallable` walks every chunk reachable from constants and emits
 bytecode/JIT disassembly keyed by the chunk's stable `ChunkID`. Setup and module-wrapper
-chunks are marked `hidden`. `Finalize` also builds the legacy `debug_info` map so older
-frontend bundles keep working during rollout.
+chunks are marked `hidden`.
 
 `execution` is currently a placeholder:
 
@@ -387,7 +383,7 @@ only materialize the string when it grew.
 
 ## 4. JSON schema
 
-All field names are snake_case, matching the existing `debug_info`, `ast_id`, and
+All field names are snake_case, matching the existing `debug_chunks`, `ast_id`, and
 `op_ptr` fields. The schema below is the contract with the frontend.
 
 ### 4.1 Top level
@@ -398,17 +394,9 @@ The unified structured message:
 export interface InterpretDetails {
   format_version: 2;
   output: string;
-  debug_info?: LegacyDebugInfo;      // old name-keyed projection
-  debug_chunks?: DisassembledChunk[]; // canonical chunk list
+  debug_chunks: DisassembledChunk[];
   ast: AstNode;
   execution: ExecutionInfo;
-}
-
-export type LegacyDebugInfo = Record<string, LegacyDisassembledChunk>;
-
-export interface LegacyDisassembledChunk {
-  byte_code: DisassembledOp[];
-  jit: DisassembledJit[];
 }
 
 export interface DisassembledChunk {
@@ -458,11 +446,6 @@ export interface ExecutionLimits {
 repeat. `hidden` chunks are filtered by the frontend; the setup chunk and module-import
 wrapper are hidden.
 
-`debug_info` is a compatibility projection keyed by function name and keeps the old
-`{ byte_code, jit }` shape. It is emitted so a stale frontend bundle can still render
-during rollout. New code must not rely on it for identity; duplicate names collapse in
-that projection.
-
 `execution` is always present in `format_version: 2`. Until the animation work lands,
 it is an explicit placeholder with `status: "not_requested"` and `frames: []`.
 `total_frames` counts every frame the recorder attempted to append. `dropped_frames`
@@ -476,12 +459,6 @@ The decoded structured response therefore looks like:
 {
   "format_version": 2,
   "output": "A\nB\n",
-  "debug_info": {
-    "PROGRAM_MAIN": {
-      "byte_code": [ { "op": "0000 | OP_CONSTANT \\n0004 | 0 \\n", "ast_id": 1, "op_ptr": 0 } ],
-      "jit": []
-    }
-  },
   "debug_chunks": [
     {
       "id": "c2",
@@ -505,13 +482,10 @@ The decoded structured response therefore looks like:
 }
 ```
 
-Migration note for the frontend: prefer `debug_chunks`. If it is absent, accept a
-`debug_info.chunks` array from the intermediate format, then fall back to converting the
-old name-keyed `debug_info` map. Find a chunk with
+Frontend lookup: find a chunk with
 `debug_chunks.find((chunk) => chunk.id === chunkId)`, use `chunk.name` only for display,
 and filter `chunk.hidden`. Highlight identity is `chunkId`, never the function name.
-Duplicate anonymous functions intentionally produce multiple visible chunks in
-`debug_chunks`.
+Duplicate anonymous functions intentionally produce multiple visible chunks.
 
 ### 4.2 Frame
 
@@ -1463,19 +1437,17 @@ Extend `StructuredOut`:
 
 ```go
 type StructuredOut struct {
-    FormatVersion int                         `json:"format_version"`
-    Output        string                      `json:"output"`
-    DebugInfo     map[string]*LegacyDebugInfo `json:"debug_info"`
-    DebugChunks   []*ChunkInfo                `json:"debug_chunks"`
-    Ast           *parser.Node                `json:"ast"`
-    Execution     *ExecutionInfo              `json:"execution"`
+    FormatVersion int          `json:"format_version"`
+    Output        string       `json:"output"`
+    DebugChunks   []*ChunkInfo `json:"debug_chunks"`
+    Ast           *parser.Node `json:"ast"`
+    Execution     *ExecutionInfo `json:"execution"`
 }
 ```
 
-`debug_chunks` is the canonical chunk list from §4.1. `debug_info` is the legacy
-name-keyed projection that keeps old frontend bundles working. `ExecutionInfo` is the
-placeholder now; when the animation lands it grows real frames while keeping
-`schema_version`, `status`, `frames`, and the limit metadata.
+`debug_chunks` is the only chunk list from §4.1. `ExecutionInfo` is the placeholder now;
+when the animation lands it grows real frames while keeping `schema_version`, `status`,
+`frames`, and the limit metadata.
 
 Do not key anything by `name`; use `chunk.id`. Function names are display-only and may
 repeat.
@@ -1595,13 +1567,9 @@ const interpretDetails = JSON.parse(atob(message.result)) as InterpretDetails;
 Update `web/frontend/src/types.ts` with the interfaces from §4. `format_version`,
 `debug_chunks`, and `execution` are part of `format_version: 2`. The current
 placeholder has `execution.status: "not_requested"`, so the frontend must check the
-status before trying to play frames. `Code.svelte` takes a normalized `chunks` array and
-filters chunks with `hidden: true`; setup and module-wrapper chunks are not shown.
-
-Use `normalizeDebugChunks(details)` from `$lib/debugInfo` so the page accepts:
-1. `debug_chunks` (canonical),
-2. `debug_info.chunks` (intermediate format),
-3. the old name-keyed `debug_info` map.
+status before trying to play frames. The page passes `interpretDetails.debug_chunks`
+directly to `Code.svelte`, which filters chunks with `hidden: true`; setup and
+module-wrapper chunks are not shown.
 
 ### 8.2 UI pieces
 
@@ -1797,7 +1765,7 @@ produce a valid `execution` object before any frontend work starts.
 
 | Risk | Mitigation |
 | --- | --- |
-| Capturing `ip` after `ip++` gives the wrong opcode pointer | Capture `opIp := ip` at the top of the loop before reading/advancing. Test against `debug_info`. |
+| Capturing `ip` after `ip++` gives the wrong opcode pointer | Capture `opIp := ip` at the top of the loop before reading/advancing. Test against `debug_chunks`. |
 | Queue snapshot calls `Fn.String()`/heap from event-loop goroutine | Store labels at enqueue time; queue snapshots only copy strings/ids/bools. |
 | Frame order is nondeterministic | Record queue events under `q.mu` into a pending log; VM drains at well-defined capture points. |
 | Recorder lock deadlocks with queue/eventloop/native locks | Never call those packages while holding the recorder lock. Build snapshots outside, then append. |
@@ -1810,7 +1778,6 @@ produce a valid `execution` object before any frontend work starts.
 | Huge structured response/base64 | Frame/queue/stack caps; `truncated` metadata; consider a larger `--trace-max-frames` only for local use. |
 | Errors produce no trace | V1 only animates successful runs. A later change should return errors through structured output instead of `os.Exit`. |
 | Duplicate function names collide | `debug_chunks` is keyed by stable `chunk_id`; `name` is display-only. Frames must always carry the chunk id. |
-| Old `debug_info` keyed by function name | Kept as a legacy projection for old frontend bundles; new code uses `debug_chunks` and chunk ids for expansion/highlighting. |
 | Sub-VM stacks look like the main stack | Include `vm.id`/`parent_id`; render a sub-VM badge and do not merge stacks. |
 | Timers never removed from `timerRegistry` | Track fired/cancelled state; snapshots show `fired` rather than `pending`. |
 | Frontend scrolls code on every tick | Separate animation highlight from the existing scroll effect; follow on pause/manual step. |

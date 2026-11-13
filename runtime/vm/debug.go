@@ -19,17 +19,11 @@ const StructuredOutputFormatVersion = 2
 const ExecutionSchemaVersion = 1
 
 type StructuredOut struct {
-	FormatVersion int                         `json:"format_version"`
-	Output        string                      `json:"output"`
-	DebugInfo     map[string]*LegacyDebugInfo `json:"debug_info"`
-	DebugChunks   []*ChunkInfo                `json:"debug_chunks"`
-	Ast           *parser.Node                `json:"ast"`
-	Execution     *ExecutionInfo              `json:"execution"`
-}
-
-type LegacyDebugInfo struct {
-	Jit      []jit.JitDetail `json:"jit"`
-	ByteCode []OpDetail      `json:"byte_code"`
+	FormatVersion int            `json:"format_version"`
+	Output        string         `json:"output"`
+	DebugChunks   []*ChunkInfo   `json:"debug_chunks"`
+	Ast           *parser.Node   `json:"ast"`
+	Execution     *ExecutionInfo `json:"execution"`
 }
 
 type ExecutionLimits struct {
@@ -301,7 +295,6 @@ type ChunkInfo struct {
 
 type DebugInfo struct {
 	Chunks []*ChunkInfo
-	Legacy map[string]*LegacyDebugInfo
 
 	seen map[*value.ValueChunk]*ChunkInfo
 	byID map[string]*ChunkInfo
@@ -310,7 +303,6 @@ type DebugInfo struct {
 func NewDebugInfo() *DebugInfo {
 	return &DebugInfo{
 		Chunks: []*ChunkInfo{},
-		Legacy: map[string]*LegacyDebugInfo{},
 		seen:   map[*value.ValueChunk]*ChunkInfo{},
 		byID:   map[string]*ChunkInfo{},
 	}
@@ -325,9 +317,6 @@ func (d *DebugInfo) AddCallable(fn object.Callable, nameOverride string, hideSam
 	}
 	if d.byID == nil {
 		d.byID = map[string]*ChunkInfo{}
-	}
-	if d.Legacy == nil {
-		d.Legacy = map[string]*LegacyDebugInfo{}
 	}
 	return d.addChunkTree(fn.ValueChunk(), callableKind(fn, nameOverride), nameOverride, hideSameName)
 }
@@ -434,16 +423,6 @@ func (d *DebugInfo) hideOtherChunksNamed(name, keepID string) {
 }
 
 func (d *DebugInfo) Finalize() {
-	if d.Legacy == nil {
-		d.Legacy = map[string]*LegacyDebugInfo{}
-	}
-	for _, chunk := range d.Chunks {
-		d.Legacy[chunk.Name] = &LegacyDebugInfo{
-			Jit:      chunk.Jit,
-			ByteCode: chunk.ByteCode,
-		}
-	}
-
 	sort.Slice(d.Chunks, func(i, j int) bool {
 		if d.Chunks[i].Name == d.Chunks[j].Name {
 			return d.Chunks[i].ID < d.Chunks[j].ID
