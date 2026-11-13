@@ -6,41 +6,23 @@
         HighlightStatus,
         SetHighlightStatusParams,
     } from "../types";
+    import OpcodeList from "./OpcodeList.svelte";
 
     type PropsType = {
         chunks: DisassembledChunk[];
         setHighlight: (opts: SetHighlightStatusParams) => void;
         highlight: HighlightStatus | null;
-        scrollBehavior?: ScrollBehavior;
-        expandAll?: boolean;
     };
     const opElements = new Map<number, HTMLElement>();
     const opByPtr = new Map<string, HTMLElement>();
-    const {
-        chunks,
-        setHighlight,
-        highlight,
-        scrollBehavior = "smooth",
-        expandAll = false,
-    }: PropsType = $props();
+    const { chunks, setHighlight, highlight }: PropsType = $props();
 
     const MAIN_FUNCTION = "PROGRAM_MAIN";
     const EXPAND_DURATION = 200;
 
     type CodeView = "bytecode" | "jit";
 
-    let expandedChunks = $state<string[]>(
-        untrack(() => {
-            if (expandAll) {
-                return chunks
-                    .filter((chunk) => !chunk.hidden)
-                    .map((chunk) => chunk.id);
-            }
-            return highlight !== null && highlight.source !== "ast"
-                ? [highlight.chunkId]
-                : [];
-        }),
-    );
+    let expandedChunks = $state<string[]>([]);
     let codeViews = $state<Record<string, CodeView>>({});
 
     function compareChunks(a: DisassembledChunk, b: DisassembledChunk) {
@@ -98,7 +80,7 @@
 
     const scrollTo = (element: HTMLElement | null | undefined) => {
         element?.scrollIntoView({
-            behavior: scrollBehavior,
+            behavior: "smooth",
             block: "center",
         });
     };
@@ -174,10 +156,6 @@
     });
 
     const affectedChunks = $derived.by(() => {
-        if (expandAll) {
-            return chunkEntries.map((chunk) => chunk.id);
-        }
-
         if (highlight === null) {
             return [];
         }
@@ -287,34 +265,6 @@
         return [offset, "|", ...rest].join(" ");
     }
 
-    type OpLine = {
-        offset: string;
-        text: string;
-    };
-
-    type ParsedOp = {
-        opcode: OpLine;
-        operands: OpLine[];
-    };
-
-    function parseOp(op: string): ParsedOp {
-        const lines = op
-            .split("\n")
-            .filter((line) => line.trim() !== "")
-            .map((line): OpLine => {
-                const [offset, ...rest] = line.split("|");
-                return {
-                    offset: offset.trim(),
-                    text: rest.join("|").trim(),
-                };
-            });
-
-        return {
-            opcode: lines[0] ?? { offset: "", text: op.trim() },
-            operands: lines.slice(1),
-        };
-    }
-
     const highlightedAstIds = $derived(
         highlight?.source === "ast"
             ? new Set(highlight.astIds)
@@ -347,7 +297,6 @@
         });
     }
 
-    const getOpCodePtr = (item: { op_ptr: number }) => item.op_ptr;
     const getJitPtr = (item: { op_code_ptr: number }) => item.op_code_ptr;
 </script>
 
@@ -357,11 +306,6 @@
 >
     {#each chunkEntries as chunk, chunkIndex (chunk.id)}
         {@const isExpanded = expandedChunks.includes(chunk.id)}
-        {@const byteHighlightClasses = buildHighlightClasses({
-            items: chunk.byte_code,
-            chunkId: chunk.id,
-            getPtr: getOpCodePtr,
-        })}
         {@const jitHighlightClasses = buildHighlightClasses({
             items: chunk.jit,
             chunkId: chunk.id,
@@ -459,49 +403,11 @@
                                 </p>
                             {/each}
                         {:else}
-                            {#each chunk.byte_code as { op, ast_id, op_ptr }, i}
-                                {@const parsedOp = parseOp(op)}
-                                <p
-                                    ondblclick={() => {
-                                        setHighlight({
-                                            astId: ast_id,
-                                            source: "op_code",
-                                            opCodePtr: op_ptr,
-                                            chunkId: chunk.id,
-                                        });
-                                    }}
-                                    data-code-row
-                                    data-chunk-id={chunk.id}
-                                    data-ast-id={ast_id}
-                                    data-op-ptr={op_ptr}
-                                    class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 {Number(
-                                        ast_id,
-                                    )} {byteHighlightClasses[i]}"
-                                >
-                                    <span
-                                        class="grid grid-cols-[3.5rem_minmax(0,1fr)] items-baseline gap-x-2"
-                                    >
-                                        <span
-                                            class="text-[10px] text-slate-400"
-                                            >{parsedOp.opcode.offset}</span
-                                        >
-                                        <span
-                                            class="whitespace-pre-wrap font-semibold text-[#00758D]"
-                                            >{parsedOp.opcode.text}</span
-                                        >
-                                        {#each parsedOp.operands as operand}
-                                            <span
-                                                class="text-[10px] text-slate-400"
-                                                >{operand.offset}</span
-                                            >
-                                            <span
-                                                class="whitespace-pre-wrap text-slate-500"
-                                                >{operand.text}</span
-                                            >
-                                        {/each}
-                                    </span>
-                                </p>
-                            {/each}
+                            <OpcodeList
+                                chunk={chunk}
+                                {highlight}
+                                {setHighlight}
+                            />
                         {/if}
                     </div>
                 </div>
