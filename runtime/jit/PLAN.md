@@ -863,6 +863,18 @@ Object properties stay on the bridge. Introducing hidden shapes or dense slots
 must first specify descriptor, accessor, prototype, `__proto__`, and GC-epoch
 behavior; otherwise a stale cache would be a correctness bug.
 
+Decisions recorded during implementation:
+
+1. Default remains `--jit=auto` with the conservative eligibility check.
+2. The bridge-exit model is the v1 foundation; direct calls are deferred except
+   for pure numeric self-recursion.
+3. `vm.Call` now returns an error; the bridge uses it for uncaught throws.
+4. Object properties stay on the bridge until a handle-table/shape design is
+   written (see §6.1).
+5. `for...of` lowering and the string-builder fast path are deferred as
+   independent optimizations.
+6. The default code cache is 16 MiB, bounded per context and configurable.
+
 ## 8. Handoff checklist
 
 - [x] Read this document and §1.1 first; reproduce at least two known
