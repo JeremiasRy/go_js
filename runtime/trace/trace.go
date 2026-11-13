@@ -204,12 +204,13 @@ type QueueEvent struct {
 type Recorder struct {
 	mu sync.Mutex
 
-	limits  Limits
-	frames  []Frame
-	total   int
-	dropped int
-	nextSeq int
-	start   time.Time
+	limits      Limits
+	normalLimit int
+	frames      []Frame
+	total       int
+	dropped     int
+	nextSeq     int
+	start       time.Time
 
 	lastOutputLen int
 	lastVM        *VMState
@@ -223,10 +224,21 @@ type Recorder struct {
 }
 
 func NewRecorder(limits Limits) *Recorder {
+	limits = limits.normalized()
+	normalLimit := limits.MaxFrames - 1
+	reserve := limits.MaxFrames / 10
+	if reserve > 1024 {
+		reserve = 1024
+	}
+	normalLimit -= reserve
+	if normalLimit < 0 {
+		normalLimit = 0
+	}
 	return &Recorder{
-		limits: limits.normalized(),
-		frames: []Frame{},
-		start:  time.Now(),
+		limits:      limits,
+		normalLimit: normalLimit,
+		frames:      []Frame{},
+		start:       time.Now(),
 	}
 }
 
@@ -337,11 +349,12 @@ func (r *Recorder) AppendFrame(frame Frame, outputLen int, output string) bool {
 	r.total++
 
 	isEnd := frame.Kind == "end"
-	normalLimit := r.limits.MaxFrames - 1
-	if normalLimit < 0 {
-		normalLimit = 0
+	interesting := frame.Kind == "event" || frame.Kind == "jit"
+	limit := r.normalLimit
+	if interesting {
+		limit = r.limits.MaxFrames - 1
 	}
-	if !isEnd && len(r.frames) >= normalLimit {
+	if !isEnd && len(r.frames) >= limit {
 		r.dropped++
 		return false
 	}

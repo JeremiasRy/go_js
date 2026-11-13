@@ -167,6 +167,16 @@ func (i *Instance) Class() *ObjClass {
 	return i.class
 }
 
+func (i *Instance) Name() string {
+	if i.instanceOf != "" {
+		return i.instanceOf
+	}
+	if i.class != nil {
+		return i.class.Name()
+	}
+	return ""
+}
+
 func (oc *ObjClass) NewInstance() *Instance {
 	i := &Instance{
 		instanceOf: oc.name,

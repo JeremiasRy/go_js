@@ -593,7 +593,8 @@ Value display rules:
 - functions/async functions/generators: `<fn name>` plus metadata.
 - arrays: `Array(n)`, not the full contents.
 - errors: `Name(n): message` when available.
-- objects: `[Object object]`, map/set/regexp/class use their `String()` form.
+- objects: `[Object object]`; class instances use the class name when available.
+- map/set/regexp/class use their `String()` form.
 - invalid/stale handles: `{type:"unknown", display:"<invalid>"}`; never panic.
 - JIT placeholder: `{type:"note", display:"Executing JIT...", synthetic:true}`.
 
@@ -1326,7 +1327,9 @@ When a limit is reached:
 - keep updating the recorder's last VM/output state,
 - increment `total_frames` and `dropped_frames`,
 - stop appending normal frames,
-- always reserve one slot for the final `end` frame.
+- always reserve one slot for the final `end` frame,
+- reserve roughly 10% of the frame budget for `event` and `jit` frames so timer,
+  await, and JIT transitions near the end of a truncated run remain visible.
 
 The stack cap keeps the **top** values (the most recently pushed operands), because
 those are what execution is about to consume. Set `stack_base`/`stack_omitted`

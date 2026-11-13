@@ -586,7 +586,14 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 		view.Type = "string"
 		view.Display = quotedDisplay(o.String(), maxChars)
 		return view
-	case *native.ObjObject, *native.Instance:
+	case *native.Instance:
+		view.Type = "object"
+		view.Display = "[Object object]"
+		if name := o.Name(); name != "" {
+			view.Display = name
+		}
+		return view
+	case *native.ObjObject:
 		view.Type = "object"
 		view.Display = "[Object object]"
 		return view

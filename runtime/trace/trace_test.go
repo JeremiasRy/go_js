@@ -72,6 +72,39 @@ func TestSequenceIsMonotonicAcrossDroppedFrames(t *testing.T) {
 	}
 }
 
+func TestTruncationKeepsInterestingTailFrames(t *testing.T) {
+	recorder := NewRecorder(Limits{MaxFrames: 20})
+	for i := 0; i < 100; i++ {
+		recorder.AppendFrame(stepFrame("step"), 0, "")
+	}
+	for i := 0; i < 5; i++ {
+		frame := stepFrame("jit")
+		frame.Kind = "jit"
+		recorder.AppendFrame(frame, 0, "")
+	}
+	recorder.AppendFrame(Frame{Kind: "end"}, 0, "")
+
+	execution := recorder.Execution()
+	if len(execution.Frames) != 20 {
+		t.Fatalf("expected 20 stored frames, got %d", len(execution.Frames))
+	}
+	jitFrames := 0
+	for _, frame := range execution.Frames {
+		if frame.Kind == "jit" {
+			jitFrames++
+		}
+	}
+	if jitFrames != 2 {
+		t.Fatalf("expected the reserved tail to keep 2 jit frames, got %d", jitFrames)
+	}
+	if execution.Frames[len(execution.Frames)-1].Kind != "end" {
+		t.Fatalf("expected last frame to be end, got %q", execution.Frames[len(execution.Frames)-1].Kind)
+	}
+	if execution.TotalFrames != 106 || execution.DroppedFrames != 86 {
+		t.Fatalf("unexpected totals: total=%d dropped=%d", execution.TotalFrames, execution.DroppedFrames)
+	}
+}
+
 func TestQueueEventsFlushInOrder(t *testing.T) {
 	recorder := NewRecorder(DefaultLimits())
 	recorder.RecordQueueEvent(QueueEvent{Type: "enqueue", Queue: "tasks", Item: QueueItem{ID: "q1"}})

@@ -34,7 +34,6 @@
     let frameIndex = $state(0);
     let playing = $state(false);
     let speed = $state(10);
-    let follow = $state(false);
     let scrollRequest = $state(0);
     let lastScrollRequest = 0;
     let previousExecution: ExecutionInfo | null | undefined = undefined;
@@ -69,6 +68,15 @@
     const currentVm = $derived(vmAtFrame[frameIndex] ?? null);
     const rawOutput = $derived(outputAtFrame[frameIndex] ?? "");
     const atEnd = $derived(frameCount === 0 || frameIndex >= lastIndex);
+    const firstJitIndex = $derived(
+        frames.findIndex((frame) => frame.kind === "jit"),
+    );
+    const jitFrameCount = $derived(
+        frames.reduce(
+            (count, frame) => count + (frame.kind === "jit" ? 1 : 0),
+            0,
+        ),
+    );
     const currentOutput = $derived(
         atEnd && output !== "" ? output : rawOutput,
     );
@@ -142,6 +150,15 @@
     function stepBy(delta: number) {
         playing = false;
         frameIndex = clampIndex(frameIndex + delta);
+        requestScroll();
+    }
+
+    function jumpToJit() {
+        if (firstJitIndex < 0) {
+            return;
+        }
+        playing = false;
+        frameIndex = firstJitIndex;
         requestScroll();
     }
 
@@ -268,7 +285,7 @@
         const frame = currentFrame;
         const vm = currentVm;
         const requested = scrollRequest;
-        const shouldScroll = follow || requested !== lastScrollRequest;
+        const shouldScroll = requested !== lastScrollRequest;
         lastScrollRequest = requested;
 
         if (frame === null || frame.kind === "boot" || frame.kind === "end") {
@@ -368,6 +385,22 @@
                     ↺
                 </button>
 
+                {#if firstJitIndex >= 0}
+                    <button
+                        type="button"
+                        onclick={jumpToJit}
+                        title="Jump to the first JIT frame"
+                        class="inline-flex cursor-pointer items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-[10px] font-semibold text-amber-700 transition-colors hover:bg-amber-100"
+                    >
+                        JIT
+                        <span
+                            class="rounded-full bg-amber-500 px-1.5 py-0.5 text-[8px] font-bold text-white"
+                        >
+                            {jitFrameCount}
+                        </span>
+                    </button>
+                {/if}
+
                 <input
                     type="range"
                     min="0"
@@ -400,17 +433,6 @@
                         class="w-16 accent-cyan-600"
                     />
                     <span class="w-10 font-mono text-[9px]">{speed} fps</span>
-                </label>
-
-                <label
-                    class="flex shrink-0 cursor-pointer items-center gap-1 text-[10px] text-slate-500"
-                >
-                    <input
-                        type="checkbox"
-                        bind:checked={follow}
-                        class="accent-cyan-600"
-                    />
-                    Follow code
                 </label>
             </div>
 

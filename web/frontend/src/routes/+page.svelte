@@ -614,10 +614,7 @@
                     target: lookUp,
                 });
                 outputExpanded = true;
-                resultView =
-                    interpretDetails.execution?.frames?.length > 0
-                        ? "animation"
-                        : "result";
+                resultView = "result";
                 pageState = "done";
             } catch (error) {
                 console.error(error);
