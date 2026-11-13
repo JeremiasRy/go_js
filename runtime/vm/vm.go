@@ -12,6 +12,7 @@ import (
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
+	"go_js/trace"
 	"go_js/value"
 	"math"
 	"math/big"
@@ -8459,6 +8460,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					promise = native.NewPromise()
 					promise.Resolve(value.UNDEFINED)
 				}
+				promiseView := vm.awaitPromiseView(awaitee, promise)
+				awaitFn := callableName(f.fn)
+				vm.traceEvent(trace.Event{
+					Type:        "await_suspend",
+					Fn:          awaitFn,
+					ResumeOpPtr: ip,
+					Promise:     &promiseView,
+					Detail:      "await suspended; continuation will resume from the promise",
+				}, awaitFn+" is suspended at await")
 				if generator, ok := f.fn.(*native.ObjGenerator); ok && generator.IsAsync {
 					vm.suspendGenerator(generator, ip, &f, value.UNDEFINED)
 					generator.AsyncAwaiting = promise

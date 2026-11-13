@@ -508,26 +508,7 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 
 	switch o := obj.(type) {
 	case *native.ObjPromise:
-		state := "pending"
-		switch o.Status {
-		case native.RESOLVED:
-			state = "fulfilled"
-		case native.REJECTED:
-			state = "rejected"
-		}
-		promise := &trace.PromiseView{
-			State:     state,
-			Reactions: len(o.Reactions),
-			Observers: len(o.Observers),
-		}
-		if depth == 0 && o.Status != native.PENDING {
-			settled := vm.valueViewDepth(o.Value, depth+1, maxChars)
-			promise.Value = &settled
-		}
-		view.Type = "promise"
-		view.Display = "Promise <" + state + ">"
-		view.Promise = promise
-		return view
+		return vm.promiseValueView(o, id, depth, maxChars)
 	case *native.ObjAsyncFunction:
 		view.Type = "function"
 		view.Display = "<fn " + o.Name + ">"
@@ -600,6 +581,41 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 	view.Type = "object"
 	view.Display = truncateDisplay(obj.String(), maxChars)
 	return view
+}
+
+func (vm *VM) promiseValueView(p *native.ObjPromise, id string, depth int, maxChars int) trace.ValueView {
+	state := "pending"
+	switch p.Status {
+	case native.RESOLVED:
+		state = "fulfilled"
+	case native.REJECTED:
+		state = "rejected"
+	}
+	promise := &trace.PromiseView{
+		State:     state,
+		Reactions: len(p.Reactions),
+		Observers: len(p.Observers),
+	}
+	if depth == 0 && p.Status != native.PENDING {
+		settled := vm.valueViewDepth(p.Value, depth+1, maxChars)
+		promise.Value = &settled
+	}
+	return trace.ValueView{
+		Type:    "promise",
+		Display: "Promise <" + state + ">",
+		ID:      id,
+		Promise: promise,
+	}
+}
+
+func (vm *VM) awaitPromiseView(awaitee value.Value, promise *native.ObjPromise) trace.ValueView {
+	id := ""
+	if awaitee.IsObject() {
+		if obj, err := heap.GetObject(awaitee.GetHandle()); err == nil && obj == promise {
+			id = fmt.Sprintf("obj:%d", awaitee.GetHandle())
+		}
+	}
+	return vm.promiseValueView(promise, id, 0, trace.CurrentLimits().MaxValueChars)
 }
 
 func truncateDisplay(display string, maxChars int) string {
