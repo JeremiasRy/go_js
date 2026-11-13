@@ -99,8 +99,8 @@ recreates the same MCP URL on the next page load.
 
 Every job is stored with its client session id. The "Latest runs" sidebar lists
 the scripts submitted by the current client, and clicking one loads it back into
-the editor. The "Give me a random script" button fetches any stored script from
-the database, regardless of which client wrote it.
+the editor and runs it again. The "Give me a random script" button fetches any
+stored script from the database, regardless of which client wrote it.
 
 For frontend development, the SvelteKit dev server proxies `/ws`, `/session`, and
 `/scripts` to port `8000`, so the same browser-origin URLs work in development and

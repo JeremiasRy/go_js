@@ -387,7 +387,7 @@
 
     function applyScript(script: ScriptJob) {
         if (view === undefined || isBusy) {
-            return;
+            return false;
         }
 
         resetPage();
@@ -400,6 +400,14 @@
         });
         selectedScriptId = script.job_id;
         view.focus();
+        return true;
+    }
+
+    function runScript(script: ScriptJob) {
+        if (!applyScript(script)) {
+            return;
+        }
+        submitCode();
     }
 
     function scriptPreview(src: string): string {
@@ -805,7 +813,7 @@
                             <li>
                                 <button
                                     type="button"
-                                    onclick={() => applyScript(script)}
+                                    onclick={() => runScript(script)}
                                     disabled={isBusy}
                                     class="w-full text-left rounded-lg border px-3 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer {scriptButtonClass(
                                         script.job_id,
