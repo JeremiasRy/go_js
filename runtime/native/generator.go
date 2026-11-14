@@ -26,6 +26,7 @@ type ObjGenerator struct {
 
 	Ip                int
 	Locals            []value.Value
+	LocalCount        int
 	Args              []value.Value
 	Started           bool
 	Done              bool

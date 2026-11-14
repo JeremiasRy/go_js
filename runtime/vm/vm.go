@@ -63,6 +63,7 @@ type CallFrame struct {
 	fn         object.Callable
 	thisCtx    value.Value
 	localStart int
+	localCount int
 	returnIp   int
 	heapScope  int
 	ownScope   bool
@@ -78,6 +79,7 @@ func InitFileRoot(path string) {
 func (cf *CallFrame) initCallFrame(fn object.Callable, localStart int, returnIp int, this value.Value) {
 	cf.fn = fn
 	cf.localStart = localStart
+	cf.localCount = 0
 	cf.returnIp = returnIp
 	cf.thisCtx = this
 	cf.heapScope = fn.GetHeapScope()
@@ -180,6 +182,14 @@ func (vm *VM) newSubVM() *VM {
 
 func (vm *VM) currentFrame() CallFrame {
 	return vm.frames[vm.frameCount-1]
+}
+
+func (vm *VM) setCurrentLocalCount(f *CallFrame, count int) {
+	if count < 0 {
+		count = 0
+	}
+	f.localCount = count
+	vm.frames[vm.frameCount-1].localCount = count
 }
 
 func (vm *VM) ensureStack(size int) {
@@ -923,6 +933,8 @@ func (vm *VM) generatorResume(generator *native.ObjGenerator, input value.Value,
 	for _, local := range generator.Locals {
 		runner.push(local)
 	}
+	f.localCount = generator.LocalCount
+	runner.frames[runner.frameCount-1].localCount = f.localCount
 	if generator.HasSavedScope {
 		f.heapScope = generator.SavedHeapScope
 		f.ownScope = generator.SavedOwnScope
@@ -1036,6 +1048,7 @@ func (vm *VM) suspendGenerator(generator *native.ObjGenerator, ip int, f *CallFr
 	}
 	generator.Ip = ip
 	generator.Locals = locals
+	generator.LocalCount = f.localCount
 	generator.Current = yieldValue
 	generator.SavedHeapScope = f.heapScope
 	generator.SavedOwnScope = f.ownScope
@@ -2767,9 +2780,13 @@ func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this 
 
 	f = vm.currentFrame()
 	c = *f.fn.ValueChunk()
+	f.localCount = vm.stackTop - f.localStart
+	vm.frames[vm.frameCount-1].localCount = f.localCount
 
 	if flags.EnableJIT && currentIp != nil && !calledWithSpread && callCount > jitCallThreshold() && jitContext().CanCompile(fn) {
 		vm.padMissingArguments(fn, f.localStart)
+		f.localCount = vm.stackTop - f.localStart
+		vm.frames[vm.frameCount-1].localCount = f.localCount
 		outcome, jitErr := vm.runJIT(&f, &c, currentIp, callee)
 		if jitErr != nil {
 			return f, c, jitErr
@@ -2851,6 +2868,9 @@ func (vm *VM) Call(fn object.Callable, callee value.Value, currentIp *int, this 
 	if !fn.HasRestParameter() && !calledWithSpread {
 		vm.padMissingArguments(fn, f.localStart)
 	}
+
+	f.localCount = vm.stackTop - f.localStart
+	vm.frames[vm.frameCount-1].localCount = f.localCount
 
 	return f, c, nil
 }
@@ -3024,10 +3044,12 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				promise.CallerStack = nil
 			}
 			f.localStart = promise.State.LocalStart
+			f.localCount = promise.State.LocalCount
 			f.heapScope = promise.State.HeapScope
 			f.ownScope = promise.State.OwnScope
 			vm.stackTop = f.localStart
 			vm.frames[vm.frameCount-1].localStart = f.localStart
+			vm.frames[vm.frameCount-1].localCount = f.localCount
 			vm.frames[vm.frameCount-1].heapScope = f.heapScope
 			vm.frames[vm.frameCount-1].ownScope = f.ownScope
 			for _, exception := range promise.State.Exceptions {
@@ -4511,6 +4533,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				if vm.stackTop > f.localStart {
 					vm.stackTop--
+					if f.localCount > vm.stackTop-f.localStart {
+						vm.setCurrentLocalCount(&f, vm.stackTop-f.localStart)
+					}
 				}
 			}
 		case chunk.OP_CATCH_BIND:
@@ -4547,6 +4572,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					v = cloneFunctionValue(v, f.heapScope)
 				}
 				vm.push(v)
+				if count := vm.stackTop - f.localStart; count > f.localCount {
+					vm.setCurrentLocalCount(&f, count)
+				}
 			}
 		case chunk.OP_DEFINE_LOCAL_SLOT:
 			{
@@ -4569,6 +4597,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				vm.stack[target] = v
 				if vm.stackTop <= target {
 					vm.stackTop = target + 1
+				}
+				if slot+1 > f.localCount {
+					vm.setCurrentLocalCount(&f, slot+1)
 				}
 			}
 		case chunk.OP_GET_LOCAL_RAW:
@@ -4615,6 +4646,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				}
 				vm.ensureStack(f.localStart + slot + 1)
 				vm.stack[f.localStart+slot] = v
+				if slot+1 > f.localCount {
+					vm.setCurrentLocalCount(&f, slot+1)
+				}
 			}
 		case chunk.OP_CREATE_OBJECT:
 			{
@@ -7850,6 +7884,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				if target < vm.stackTop {
 					vm.stackTop = target
 				}
+				if f.localCount > slot+1 {
+					vm.setCurrentLocalCount(&f, slot+1)
+				}
 			}
 		case chunk.OP_STACK_MARK:
 			{
@@ -7867,6 +7904,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				marks := vm.loopMarks[id]
 				if len(marks) > 0 {
 					vm.stackTop = marks[len(marks)-1]
+					if localCount := vm.stackTop - f.localStart; f.localCount > localCount {
+						vm.setCurrentLocalCount(&f, localCount)
+					}
 				}
 			}
 		case chunk.OP_STACK_UNMARK:
@@ -8520,7 +8560,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 					}
 					vm.exceptionStack = kept
-					curentAsyncFn.Pause(stack, ip, f.localStart, f.heapScope, f.ownScope, exceptions)
+					curentAsyncFn.Pause(stack, ip, f.localStart, f.localCount, f.heapScope, f.ownScope, exceptions)
 					if promise.Status != native.PENDING {
 						if len(curentAsyncFn.State.Stack) > 0 {
 							curentAsyncFn.State.Stack[len(curentAsyncFn.State.Stack)-1] = promise.Value

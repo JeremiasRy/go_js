@@ -491,13 +491,6 @@
         selectedScriptId = null;
     }
 
-    function runScript(script: ScriptJob) {
-        if (!applyScript(script)) {
-            return;
-        }
-        submitCode();
-    }
-
     function setEditorTab(tab: EditorTab) {
         if (editorTab === tab) {
             return;
@@ -929,7 +922,7 @@
                             <li>
                                 <button
                                     type="button"
-                                    onclick={() => runScript(script)}
+                                    onclick={() => applyScript(script)}
                                     disabled={isBusy}
                                     class="w-full text-left rounded-lg border px-3 py-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer {scriptButtonClass(
                                         script.job_id,

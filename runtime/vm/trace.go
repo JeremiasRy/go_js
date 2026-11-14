@@ -24,6 +24,8 @@ func newTraceVMID() int {
 	return int(nextVMTraceID.Add(1)) + 1
 }
 
+const anonymousFunctionName = "ANONYMOYS_FN"
+
 func callableName(fn object.Callable) string {
 	if fn == nil {
 		return ""
@@ -32,6 +34,21 @@ func callableName(fn object.Callable) string {
 		return chunk.FnName
 	}
 	return fn.String()
+}
+
+func traceFunctionName(name string) string {
+	if name == anonymousFunctionName {
+		return ""
+	}
+	return name
+}
+
+func traceFunctionDisplay(kind string, name string) string {
+	name = traceFunctionName(name)
+	if name == "" {
+		return "<" + kind + ">"
+	}
+	return "<" + kind + " " + name + ">"
 }
 
 func astIDAt(c *value.ValueChunk, opIp int) int {
@@ -473,15 +490,78 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 	if limits.MaxStack > 0 && top > limits.MaxStack {
 		startStack = top - limits.MaxStack
 	}
+	localNames := vm.stackLocalNames(c, opIp, startStack, top)
+	thisValues := map[value.Value]struct{}{}
+	for i := 0; i < vm.frameCount; i++ {
+		thisCtx := vm.frames[i].thisCtx
+		if thisCtx.IsObject() {
+			thisValues[thisCtx] = struct{}{}
+		}
+	}
+
 	state.Stack = make([]trace.ValueView, 0, top-startStack)
 	for i := startStack; i < top; i++ {
-		state.Stack = append(state.Stack, vm.valueView(vm.stack[i]))
+		v := vm.stack[i]
+		var view trace.ValueView
+		if v == value.TAG_METHOD_HANDLE && i > 0 {
+			view = vm.methodHandleView(vm.stack[i-1])
+		} else {
+			view = vm.valueView(v)
+		}
+		if name, found := localNames[i]; found {
+			view.Name = name
+		} else if _, found := thisValues[v]; found {
+			view.Name = "this"
+		}
+		state.Stack = append(state.Stack, view)
 	}
 	state.StackBase = startStack
 	state.StackTop = top
 	state.StackOmitted = startStack
 
 	return state
+}
+
+func (vm *VM) stackLocalNames(c *value.ValueChunk, opIp int, startStack int, top int) map[int]string {
+	names := map[int]string{}
+	for i := 0; i < vm.frameCount; i++ {
+		callFrame := &vm.frames[i]
+		chunk := callFrame.fn.ValueChunk()
+		frameOpPtr := 0
+		if i+1 < vm.frameCount {
+			frameOpPtr = vm.frames[i+1].returnIp
+		}
+		if i == vm.frameCount-1 {
+			chunk = c
+			frameOpPtr = opIp
+		}
+		if chunk == nil {
+			continue
+		}
+		localNames := chunk.LocalNamesAt(frameOpPtr)
+		localCount := min(callFrame.localCount, len(localNames))
+		for slot := 0; slot < localCount; slot++ {
+			name := localNames[slot]
+			if name == "" {
+				continue
+			}
+			abs := callFrame.localStart + slot
+			if abs < startStack || abs >= top {
+				continue
+			}
+			names[abs] = name
+		}
+	}
+	return names
+}
+
+func (vm *VM) methodHandleView(callee value.Value) trace.ValueView {
+	view := vm.valueView(callee)
+	display := "<method>"
+	if view.Function != nil && view.Function.Name != "" {
+		display = "<method " + view.Function.Name + ">"
+	}
+	return trace.ValueView{Type: "method_handle", Display: display}
 }
 
 func (vm *VM) loopState(queues trace.Queues, done bool) trace.EventLoopState {
@@ -593,14 +673,26 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 	case *native.ObjPromise:
 		return vm.promiseValueView(o, id, depth, maxChars)
 	case *native.ObjAsyncFunction:
+		name := traceFunctionName(o.Name)
 		view.Type = "function"
-		view.Display = "<fn " + o.Name + ">"
-		view.Function = &trace.FunctionView{Name: o.Name, Arity: o.Arity, Async: true}
+		view.Display = traceFunctionDisplay("fn", name)
+		view.Function = &trace.FunctionView{Name: name, Arity: o.Arity, Async: true}
 		return view
 	case *native.ObjGenerator:
+		name := traceFunctionName(o.Name)
 		view.Type = "function"
-		view.Display = o.String()
-		view.Function = &trace.FunctionView{Name: o.Name, Arity: o.Arity, Async: o.IsAsync}
+		view.Display = traceFunctionDisplay("generator", name)
+		view.Function = &trace.FunctionView{Name: name, Arity: o.Arity, Async: o.IsAsync}
+		return view
+	case *native.ObjBoundFunction:
+		target := vm.valueViewDepth(o.Target, depth+1, maxChars)
+		name := ""
+		if target.Function != nil {
+			name = target.Function.Name
+		}
+		view.Type = "function"
+		view.Display = traceFunctionDisplay("bound fn", name)
+		view.Function = &trace.FunctionView{Name: name}
 		return view
 	case *native.ObjArr:
 		view.Type = "array"
@@ -653,6 +745,17 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 		return view
 	}
 
+	if nativeFn, ok := obj.(interface{ NativeArity() int }); ok {
+		name := ""
+		if named, ok := obj.(interface{ Name() string }); ok {
+			name = named.Name()
+		}
+		view.Type = "function"
+		view.Display = fmt.Sprintf("<native fn %s()>", name)
+		view.Function = &trace.FunctionView{Name: name, Arity: nativeFn.NativeArity()}
+		return view
+	}
+
 	if named, ok := obj.(interface{ Name() string }); ok {
 		if name := named.Name(); name != "" {
 			view.Type = "object"
@@ -662,9 +765,9 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 	}
 
 	if callable, ok := obj.(object.Callable); ok {
-		name := callableName(callable)
+		name := traceFunctionName(callableName(callable))
 		view.Type = "function"
-		view.Display = "<fn " + name + ">"
+		view.Display = traceFunctionDisplay("fn", name)
 		view.Function = &trace.FunctionView{Name: name, Arity: callable.GetArity()}
 		return view
 	}
