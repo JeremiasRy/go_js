@@ -1,6 +1,6 @@
 # Frontend/backend communication investigation
 
-- **Status:** Draft for peer review; architecture and protocol proposals only.
+- **Status:** Reviewed; Phase 1 decisions and implementation scope are in [COMMUNICATION_REVIEW_AND_PLAN.md](COMMUNICATION_REVIEW_AND_PLAN.md).
 - **Date:** 2026-11-14.
 - **Repository baseline:** `b033e772db68a1d306a8748c69d1de76c90c5a6b`.
 
