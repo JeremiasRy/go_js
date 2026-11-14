@@ -195,54 +195,61 @@
     {:else}
         <div
             bind:this={stackScroll}
-            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1.5"
+            class="min-h-0 flex-1 overflow-y-auto p-1.5"
         >
-            {#each displaySlots as slot (slot.abs)}
-                {@const style = styleFor(slot.owner?.index)}
-                {@const active = slot.owner?.index === activeFrame?.index}
-                <div
-                    in:fly={{ y: 10, duration: 140 }}
-                    class="flex w-full shrink-0 flex-col flex-end rounded-md border-l-4 {style.bar} pb-0.5 {active
-                        ? 'bg-slate-50'
-                        : ''}"
-                    title={slot.owner
-                        ? `slot ${slot.abs} · #${slot.owner.index} ${slot.owner.fn}`
-                        : `slot ${slot.abs}`}
-                >
-                    <ExecutionValue
-                        value={slot.value}
-                        top={slot.abs === topAbsolute}
-                        compact
-                    />
-                    <div class="flex min-w-0 items-center gap-1 px-1 pt-0.5">
-                        <span
-                            class="min-w-0 truncate text-[8px] font-medium {style.text}"
-                        >
-                            slot {slot.abs}
-                            {#if slot.owner}
-                                · #{slot.owner.index} {slot.owner.fn}
-                            {/if}
-                        </span>
-                    </div>
-                </div>
-            {/each}
-
-            {#if hiddenSlots > 0}
-                <div
-                    class="flex shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-2 py-1 text-center"
-                >
-                    <span class="text-slate-300">…</span>
-                    <span class="text-[9px] text-slate-400">
-                        {hiddenSlots} hidden slot{hiddenSlots === 1 ? "" : "s"}
-                    </span>
-                </div>
-            {/if}
-
             {#if slots.length === 0 && hiddenSlots === 0}
                 <div
-                    class="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 px-2 py-3 text-center text-[10px] text-slate-300"
+                    class="flex h-full items-center justify-center rounded-lg border border-dashed border-slate-200 px-2 py-3 text-center text-[10px] text-slate-300"
                 >
                     empty stack
+                </div>
+            {:else}
+                <div class="flex min-h-full flex-col justify-end gap-1">
+                    {#each displaySlots as slot (slot.abs)}
+                        {@const style = styleFor(slot.owner?.index)}
+                        {@const active =
+                            slot.owner?.index === activeFrame?.index}
+                        <div
+                            in:fly={{ y: 10, duration: 140 }}
+                            class="flex w-full shrink-0 flex-col rounded-md border-l-4 {style.bar} pb-0.5 {active
+                                ? 'bg-slate-50'
+                                : ''}"
+                            title={slot.owner
+                                ? `slot ${slot.abs} · #${slot.owner.index} ${slot.owner.fn}`
+                                : `slot ${slot.abs}`}
+                        >
+                            <ExecutionValue
+                                value={slot.value}
+                                top={slot.abs === topAbsolute}
+                                compact
+                            />
+                            <div
+                                class="flex min-w-0 items-center gap-1 px-1 pt-0.5"
+                            >
+                                <span
+                                    class="min-w-0 truncate text-[8px] font-medium {style.text}"
+                                >
+                                    slot {slot.abs}
+                                    {#if slot.owner}
+                                        · #{slot.owner.index} {slot.owner.fn}
+                                    {/if}
+                                </span>
+                            </div>
+                        </div>
+                    {/each}
+
+                    {#if hiddenSlots > 0}
+                        <div
+                            class="flex shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-2 py-1 text-center"
+                        >
+                            <span class="text-slate-300">…</span>
+                            <span class="text-[9px] text-slate-400">
+                                {hiddenSlots} hidden slot{hiddenSlots === 1
+                                    ? ""
+                                    : "s"}
+                            </span>
+                        </div>
+                    {/if}
                 </div>
             {/if}
         </div>

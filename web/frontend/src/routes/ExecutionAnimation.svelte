@@ -462,13 +462,13 @@
             </section>
 
             <section
-                class="flex gap-2 min-h-0 min-w-44 flex-[1.2] flex-col overflow-hidden rounded-lg bg-white"
+                class="flex min-h-0 min-w-36 flex-[1] flex-col overflow-hidden rounded-lg bg-white"
             >
                 <ExecutionQueues {queues} {eventLoop} frame={currentFrame} />
             </section>
 
             <section
-                class="flex min-h-0 min-w-48 flex-[1.4] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="flex min-h-0 min-w-52 flex-[1.7] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
             >
                 <ExecutionEventLoop
                     {eventLoop}
