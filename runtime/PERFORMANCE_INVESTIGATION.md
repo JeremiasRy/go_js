@@ -1,10 +1,10 @@
 # Runtime Performance Investigation: Tracer vs. VM/Bytecode
 
-**Status:** peer-reviewed investigation only; no production changes in this
-branch yet<br>
+**Status:** P0 plus low-risk P1/P2 tracing work implemented; P3/P4 remain future
+work<br>
 **Branch:** `perf/tracing-vs-vm-investigation`<br>
 **Base commit:** `bda45c4` (`feat/execution-animation-frontend`)<br>
-**Date:** 2026-11-13<br>
+**Date:** 2026-11-13 (implementation 2026-11-14)<br>
 **Environment:** Linux amd64, Go 1.26.3
 
 ## TL;DR
@@ -563,3 +563,50 @@ early-out that skips only step snapshots and preserves event state, output
 deltas, counters, and sub-VM behavior." That corrected P0 remains smaller and
 more predictable than VM/JIT work, but it needs the regression coverage listed
 in Section 8 before it is safe to land.
+
+## 11. Implemented changes
+
+P0 is implemented with the semantics described in Section 6.1:
+
+- `Recorder` owns the step-budget-exhausted flag, and only a rejected `step`
+  frame can set it. Event and JIT frames cannot disable future step capture.
+- Skipped steps are counted with an atomic counter that is drained before the
+  next stored frame or `Execution` snapshot. This preserves `total_frames`,
+  `dropped_frames`, and `seq` without rebuilding discarded snapshots.
+- An exhausted `traceStep` still flushes pending queue events and records the
+  latest frame/chunk/op position. The VM-state view is built lazily only when
+  an event frame needs it, using the last position rather than a stale stored
+  snapshot.
+- Output capture stays on the normal frame path, so deltas after truncation are
+  attached to the next stored event/end frame and reconstruct the full output.
+- The state is recorder-scoped, so sub-VMs stop emitting step frames when the
+  shared step budget is full.
+
+Low-risk P1/P2 cleanup is also applied: the active recorder is an atomic
+pointer, the VM caches its recorder and immutable limits, `LastOutputLen` and
+the pending-event count use atomics, the last VM is kept per VM instead of
+re-publishing it on every step, frame/stack views are preallocated, and value
+views have fast paths for small integers and short/plain ASCII strings.
+
+Representative runs with the exact web flags after the change:
+
+| Web example | Current trace, before | Implemented | Total / dropped frames | Stored frames |
+| --- | ---: | ---: | --- | ---: |
+| Mandelbrot | 22.12–25.70 s | **0.40 s** | 2,522,077 / 2,513,076 | 9,001 |
+| Game of Life | 23.60–28.84 s | **1.42 s** | 2,739,065 / 2,729,065 | 10,000 |
+| Eight queens | 6.47–7.92 s | **0.70 s** | 715,179 / 705,179 | 10,000 |
+| Fibonacci | 3.44–3.98 s | **2.96 s** | 45,327 / 36,264 | 9,063 |
+
+The totals and stored frame counts match the original trace, including the
+`queueMicrotask` reproduction from Section 10.3: the enqueue event keeps its
+sequence position and `OP_CALL` state, while output after truncation lands on
+the later job/end frame instead of the enqueue event. Regression coverage was
+added in `trace/trace_test.go` and `vm/trace_test.go` for counters/sequence,
+event-after-truncation state, output reconstruction, and shared sub-VM budgets.
+`go test -race ./trace ./vm` and the full `./test.sh` suite pass (506/506,
+AOC, benchmarks).
+
+Cached queue/event-loop/timer snapshots were not added: after P0 the remaining
+trace time is small on the web examples, so that P1 item should wait for a fresh
+profile. P3 (sampling/delta encoding) and P4 (VM/JIT work) remain separate
+follow-up projects.

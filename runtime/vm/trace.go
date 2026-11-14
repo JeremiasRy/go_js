@@ -52,8 +52,13 @@ func (vm *VM) BeginTrace(limits trace.Limits) {
 	if vm == nil {
 		return
 	}
-	trace.Enable(limits)
+	recorder := trace.Enable(limits)
 	vm.traceEnabled = true
+	vm.traceRecorder = recorder
+	vm.traceLimits = recorder.Limits()
+	vm.traceLastPosValid = false
+	vm.traceLastVMDirty = false
+	vm.traceLastVMState = nil
 	trace.SetBooted(false)
 	queues := queue.Snapshot()
 	loop := vm.loopState(queues, false)
@@ -96,19 +101,62 @@ func (vm *VM) traceStep(f *CallFrame, c *value.ValueChunk, opIp int, code uint8)
 	if !vm.traceEnabled || c == nil || c.TraceHidden {
 		return
 	}
+	recorder := vm.traceRecorder
+	if recorder == nil {
+		return
+	}
+
+	if recorder.StepBudgetExhausted() {
+		vm.flushTraceEvents()
+		vm.rememberTracePosition(f, c, opIp, code)
+		recorder.SkipStepFrame()
+		return
+	}
 
 	vm.flushTraceEvents()
 	queues := queue.Snapshot()
 	loop := vm.loopState(queues, false)
 	vmState := vm.snapshotVM(f, c, opIp, code)
 
-	trace.SetLastVM(vmState)
+	vm.setTraceVM(f, c, opIp, code, vmState)
 	vm.appendTraceFrame(trace.Frame{
 		Kind:      "step",
 		VM:        vmState,
 		EventLoop: loop,
 		Queues:    queues,
 	})
+}
+
+func (vm *VM) rememberTracePosition(f *CallFrame, c *value.ValueChunk, opIp int, code uint8) {
+	if f != nil {
+		vm.traceLastFrame = *f
+	}
+	vm.traceLastChunk = c
+	vm.traceLastOpIp = opIp
+	vm.traceLastCode = code
+	vm.traceLastPosValid = true
+	vm.traceLastVMDirty = true
+}
+
+func (vm *VM) setTraceVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8, state *trace.VMState) {
+	vm.rememberTracePosition(f, c, opIp, code)
+	vm.traceLastVMDirty = false
+	vm.traceLastVMState = state
+}
+
+func (vm *VM) traceLastVM() *trace.VMState {
+	if vm.traceLastPosValid && vm.traceLastVMDirty {
+		frame := vm.traceLastFrame
+		vm.traceLastVMState = vm.snapshotVM(&frame, vm.traceLastChunk, vm.traceLastOpIp, vm.traceLastCode)
+		vm.traceLastVMDirty = false
+	}
+	return vm.traceLastVMState
+}
+
+func (vm *VM) clearTraceVM() {
+	vm.traceLastPosValid = false
+	vm.traceLastVMDirty = false
+	vm.traceLastVMState = nil
 }
 
 func (vm *VM) traceJobStart(callback object.Callback, priority queue.TaskPriority) {
@@ -154,7 +202,7 @@ func (vm *VM) traceJobStart(callback object.Callback, priority queue.TaskPriorit
 		Kind:      "event",
 		Note:      "running " + label,
 		Event:     event,
-		VM:        trace.LastVM(),
+		VM:        vm.traceLastVM(),
 		EventLoop: loop,
 		Queues:    queues,
 	})
@@ -184,12 +232,12 @@ func (vm *VM) traceJobEnd() {
 		Kind:      "event",
 		Note:      note,
 		Event:     event,
-		VM:        trace.LastVM(),
+		VM:        vm.traceLastVM(),
 		EventLoop: loop,
 		Queues:    queues,
 	})
 	trace.ClearCurrentJob()
-	trace.SetLastVM(nil)
+	vm.clearTraceVM()
 }
 
 func (vm *VM) traceWaiting() {
@@ -223,7 +271,7 @@ func (vm *VM) traceEvent(event trace.Event, note string) {
 		Kind:      "event",
 		Note:      note,
 		Event:     &eventCopy,
-		VM:        trace.LastVM(),
+		VM:        vm.traceLastVM(),
 		EventLoop: loop,
 		Queues:    queues,
 	})
@@ -273,7 +321,11 @@ func (vm *VM) flushTraceEvents() {
 	if !vm.traceEnabled {
 		return
 	}
-	events := trace.TakeQueueEvents()
+	recorder := vm.traceRecorder
+	if recorder == nil || !recorder.HasPendingQueueEvents() {
+		return
+	}
+	events := recorder.TakeQueueEvents()
 	for _, queueEvent := range events {
 		loop := vm.loopState(queueEvent.Queues, false)
 		item := queueEvent.Item
@@ -290,7 +342,7 @@ func (vm *VM) flushTraceEvents() {
 				Item:   &item,
 				Detail: queueEvent.Detail,
 			},
-			VM:        trace.LastVM(),
+			VM:        vm.traceLastVM(),
 			EventLoop: loop,
 			Queues:    queueEvent.Queues,
 		})
@@ -301,15 +353,19 @@ func (vm *VM) appendTraceFrame(frame trace.Frame) {
 	if !vm.traceEnabled {
 		return
 	}
+	recorder := vm.traceRecorder
+	if recorder == nil {
+		return
+	}
 	length := 0
 	output := ""
 	if vm.output != nil {
 		length = vm.output.Len()
-		if length > trace.LastOutputLen() {
+		if length > recorder.LastOutputLen() {
 			output = vm.output.String()
 		}
 	}
-	trace.AppendFrame(frame, length, output)
+	recorder.AppendFrame(frame, length, output)
 }
 
 func queueNameForItem(item *trace.QueueItem) string {
@@ -320,7 +376,11 @@ func queueNameForItem(item *trace.QueueItem) string {
 }
 
 func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8) *trace.VMState {
-	limits := trace.CurrentLimits()
+	limits := vm.traceLimits
+	frameCapacity := vm.frameCount
+	if frameCapacity > maxTraceCallFrames {
+		frameCapacity = maxTraceCallFrames
+	}
 	state := &trace.VMState{
 		ID:          vm.traceID,
 		ParentID:    vm.traceParentID,
@@ -328,7 +388,7 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 		OpPtr:       opIp,
 		Op:          opName(code),
 		AstID:       astIDAt(c, opIp),
-		Frames:      []trace.VMStackFrame{},
+		Frames:      make([]trace.VMStackFrame, 0, frameCapacity),
 		Stack:       []trace.ValueView{},
 	}
 	if c != nil {
@@ -413,6 +473,7 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 	if limits.MaxStack > 0 && top > limits.MaxStack {
 		startStack = top - limits.MaxStack
 	}
+	state.Stack = make([]trace.ValueView, 0, top-startStack)
 	for i := startStack; i < top; i++ {
 		state.Stack = append(state.Stack, vm.valueView(vm.stack[i]))
 	}
@@ -424,7 +485,7 @@ func (vm *VM) snapshotVM(f *CallFrame, c *value.ValueChunk, opIp int, code uint8
 }
 
 func (vm *VM) loopState(queues trace.Queues, done bool) trace.EventLoopState {
-	limits := trace.CurrentLimits()
+	limits := vm.traceLimits
 	eventLoop := eventloop.SnapshotState()
 	timers := native.TimerSnapshot()
 	omitted := 0
@@ -481,7 +542,7 @@ func (vm *VM) loopState(queues trace.Queues, done bool) trace.EventLoopState {
 }
 
 func (vm *VM) valueView(v value.Value) trace.ValueView {
-	return vm.valueViewDepth(v, 0, trace.CurrentLimits().MaxValueChars)
+	return vm.valueViewDepth(v, 0, vm.traceLimits.MaxValueChars)
 }
 
 func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.ValueView {
@@ -511,7 +572,7 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 	if !v.IsObject() {
 		if v.IsNumber() {
 			n := v.AsNumber()
-			display := native.String(v)
+			display := numberDisplay(n)
 			if n == 0 && math.Signbit(n) {
 				display = "-0"
 			}
@@ -645,25 +706,77 @@ func (vm *VM) awaitPromiseView(awaitee value.Value, promise *native.ObjPromise) 
 			id = fmt.Sprintf("obj:%d", awaitee.GetHandle())
 		}
 	}
-	return vm.promiseValueView(promise, id, 0, trace.CurrentLimits().MaxValueChars)
+	return vm.promiseValueView(promise, id, 0, vm.traceLimits.MaxValueChars)
+}
+
+const (
+	traceSmallIntMin = -128
+	traceSmallIntMax = 1024
+)
+
+var traceSmallIntDisplays = func() []string {
+	displays := make([]string, traceSmallIntMax-traceSmallIntMin+1)
+	for i := range displays {
+		displays[i] = strconv.Itoa(i + traceSmallIntMin)
+	}
+	return displays
+}()
+
+func numberDisplay(n float64) string {
+	if n == math.Trunc(n) && n >= traceSmallIntMin && n <= traceSmallIntMax {
+		return traceSmallIntDisplays[int(n)-traceSmallIntMin]
+	}
+	return native.String(value.ValueFromFloat64(n))
+}
+
+func isPlainASCII(display string) bool {
+	for i := 0; i < len(display); i++ {
+		b := display[i]
+		if b < 0x20 || b >= 0x7f || b == '"' || b == '\\' {
+			return false
+		}
+	}
+	return true
 }
 
 func truncateDisplay(display string, maxChars int) string {
 	if maxChars <= 0 {
 		maxChars = trace.DefaultMaxValueChars
 	}
-	runes := []rune(display)
-	if len(runes) <= maxChars {
+	if len(display) <= maxChars {
 		return display
 	}
 	if maxChars <= 1 {
 		return "…"
 	}
+	prefixLength := maxChars - 1
+	ascii := true
+	for i := 0; i < prefixLength; i++ {
+		if display[i] >= 0x80 {
+			ascii = false
+			break
+		}
+	}
+	if ascii {
+		return display[:prefixLength] + "…"
+	}
+	runes := []rune(display)
+	if len(runes) <= maxChars {
+		return display
+	}
 	return string(runes[:maxChars-1]) + "…"
 }
 
 func quotedDisplay(display string, maxChars int) string {
-	return truncateDisplay(strconv.Quote(truncateDisplay(display, maxChars)), maxChars)
+	display = truncateDisplay(display, maxChars)
+	if isPlainASCII(display) {
+		quoted := `"` + display + `"`
+		if len(quoted) <= maxChars {
+			return quoted
+		}
+		return quoted[:maxChars-1] + "…"
+	}
+	return truncateDisplay(strconv.Quote(display), maxChars)
 }
 
 func jitNoteView() trace.ValueView {
@@ -691,7 +804,7 @@ func (vm *VM) traceJITEnter(fn string, c *value.ValueChunk, entryIP int, mode st
 	state := vm.snapshotVM(callFrame, c, entryIP, byteAt(c, entryIP))
 	state.Stack = append(state.Stack, jitNoteView())
 	state.StackTop++
-	limits := trace.CurrentLimits()
+	limits := vm.traceLimits
 	if limits.MaxStack > 0 && len(state.Stack) > limits.MaxStack {
 		drop := len(state.Stack) - limits.MaxStack
 		state.Stack = state.Stack[drop:]
@@ -704,7 +817,7 @@ func (vm *VM) traceJITEnter(fn string, c *value.ValueChunk, entryIP int, mode st
 		Fn:    fn,
 		OpPtr: entryIP,
 	}
-	trace.SetLastVM(state)
+	vm.setTraceVM(callFrame, c, entryIP, byteAt(c, entryIP), state)
 
 	note := fn + " is running as JIT code"
 	vm.appendTraceFrame(trace.Frame{
@@ -757,7 +870,7 @@ func (vm *VM) traceJITExit(fn string, fallback *value.ValueChunk, entryIP int, m
 		jitState.Result = &resultView
 	}
 	state.JIT = jitState
-	trace.SetLastVM(state)
+	vm.setTraceVM(callFrame, c, opIP, byteAt(c, opIP), state)
 
 	note := "JIT returned; the result is on the stack"
 	switch status {

@@ -251,3 +251,63 @@ func TestPendingQueueEventsAreBounded(t *testing.T) {
 		t.Fatalf("expected pending queue events capped at 4, got %d", len(events))
 	}
 }
+
+func TestStepBudgetExhaustionOnlyTriggeredByStepFrames(t *testing.T) {
+	recorder := NewRecorder(Limits{MaxFrames: 2})
+	if !recorder.AppendFrame(Frame{Kind: "event"}, 0, "") {
+		t.Fatal("expected first event frame to be stored")
+	}
+	if recorder.AppendFrame(Frame{Kind: "event"}, 0, "") {
+		t.Fatal("expected second event frame to be rejected")
+	}
+	if recorder.AppendFrame(Frame{Kind: "jit"}, 0, "") {
+		t.Fatal("expected jit frame to be rejected")
+	}
+	if recorder.StepBudgetExhausted() {
+		t.Fatal("rejected event/jit frames must not exhaust the step budget")
+	}
+	if recorder.AppendFrame(stepFrame("step"), 0, "") {
+		t.Fatal("expected step frame to be rejected")
+	}
+	if !recorder.StepBudgetExhausted() {
+		t.Fatal("expected rejected step frame to exhaust the step budget")
+	}
+}
+
+func TestSkippedStepsKeepAccountingAndSequence(t *testing.T) {
+	recorder := NewRecorder(Limits{MaxFrames: 10})
+	for i := 0; i < 4; i++ {
+		if !recorder.AppendFrame(stepFrame("step"), 0, "") {
+			t.Fatalf("expected step %d to be stored", i)
+		}
+	}
+	for i := 0; i < 5; i++ {
+		recorder.SkipStepFrame()
+	}
+	if !recorder.AppendFrame(Frame{Kind: "event", Event: &Event{Type: "enqueue"}}, 0, "") {
+		t.Fatal("expected event frame to be stored")
+	}
+
+	execution := recorder.Execution()
+	if execution.TotalFrames != 10 || execution.DroppedFrames != 5 {
+		t.Fatalf("unexpected totals: total=%d dropped=%d", execution.TotalFrames, execution.DroppedFrames)
+	}
+	event := execution.Frames[len(execution.Frames)-1]
+	if event.Seq != 9 {
+		t.Fatalf("expected event seq 9 after five skipped steps, got %d", event.Seq)
+	}
+}
+
+func TestSkippedStepsAreAccountedWithoutFollowingFrame(t *testing.T) {
+	recorder := NewRecorder(Limits{MaxFrames: 10})
+	for i := 0; i < 3; i++ {
+		recorder.SkipStepFrame()
+	}
+	execution := recorder.Execution()
+	if execution.TotalFrames != 3 || execution.DroppedFrames != 3 {
+		t.Fatalf("unexpected totals: total=%d dropped=%d", execution.TotalFrames, execution.DroppedFrames)
+	}
+	if !execution.Truncated || execution.Status != "truncated" {
+		t.Fatalf("expected truncated execution, got %+v", execution)
+	}
+}

@@ -127,9 +127,18 @@ type VM struct {
 	lastJITGC     uint32
 	callCounts    map[*value.ValueChunk]int
 
-	traceID       int
-	traceParentID int
-	traceEnabled  bool
+	traceID           int
+	traceParentID     int
+	traceEnabled      bool
+	traceRecorder     *trace.Recorder
+	traceLimits       trace.Limits
+	traceLastFrame    CallFrame
+	traceLastChunk    *value.ValueChunk
+	traceLastOpIp     int
+	traceLastCode     uint8
+	traceLastPosValid bool
+	traceLastVMDirty  bool
+	traceLastVMState  *trace.VMState
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -155,6 +164,7 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		loopIterators:  map[int]value.Value{},
 		callCounts:     map[*value.ValueChunk]int{},
 		traceID:        traceID,
+		traceLimits:    trace.DefaultLimits(),
 	}
 }
 
@@ -163,6 +173,8 @@ func (vm *VM) newSubVM() *VM {
 	sub.callCounts = vm.callCounts
 	sub.traceParentID = vm.traceID
 	sub.traceEnabled = vm.traceEnabled
+	sub.traceRecorder = vm.traceRecorder
+	sub.traceLimits = vm.traceLimits
 	return sub
 }
 

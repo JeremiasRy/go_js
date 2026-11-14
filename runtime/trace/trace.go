@@ -2,6 +2,7 @@ package trace
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -212,8 +213,12 @@ type Recorder struct {
 	nextSeq     int
 	start       time.Time
 
-	lastOutputLen int
-	lastVM        *VMState
+	lastOutputLen atomic.Int64
+	lastVM        atomic.Pointer[VMState]
+
+	skippedSteps        atomic.Int64
+	stepBudgetExhausted atomic.Bool
+	pendingCount        atomic.Int64
 
 	pending []QueueEvent
 
@@ -243,27 +248,31 @@ func NewRecorder(limits Limits) *Recorder {
 }
 
 func (r *Recorder) Limits() Limits {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	return r.limits
 }
 
 func (r *Recorder) LastOutputLen() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.lastOutputLen
+	return int(r.lastOutputLen.Load())
 }
 
 func (r *Recorder) SetLastVM(vm *VMState) {
-	r.mu.Lock()
-	r.lastVM = vm
-	r.mu.Unlock()
+	r.lastVM.Store(vm)
 }
 
 func (r *Recorder) LastVM() *VMState {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.lastVM
+	return r.lastVM.Load()
+}
+
+func (r *Recorder) StepBudgetExhausted() bool {
+	return r.stepBudgetExhausted.Load()
+}
+
+func (r *Recorder) SkipStepFrame() {
+	r.skippedSteps.Add(1)
+}
+
+func (r *Recorder) HasPendingQueueEvents() bool {
+	return r.pendingCount.Load() > 0
 }
 
 func (r *Recorder) SetCurrentJob(job *QueueItem) {
@@ -325,9 +334,13 @@ func (r *Recorder) RecordQueueEvent(event QueueEvent) {
 		return
 	}
 	r.pending = append(r.pending, event)
+	r.pendingCount.Add(1)
 }
 
 func (r *Recorder) TakeQueueEvents() []QueueEvent {
+	if r.pendingCount.Load() == 0 {
+		return nil
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if len(r.pending) == 0 {
@@ -335,12 +348,25 @@ func (r *Recorder) TakeQueueEvents() []QueueEvent {
 	}
 	events := r.pending
 	r.pending = nil
+	r.pendingCount.Store(0)
 	return events
+}
+
+func (r *Recorder) drainSkippedStepsLocked() {
+	skipped := int(r.skippedSteps.Swap(0))
+	if skipped == 0 {
+		return
+	}
+	r.total += skipped
+	r.dropped += skipped
+	r.nextSeq += skipped
 }
 
 func (r *Recorder) AppendFrame(frame Frame, outputLen int, output string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	r.drainSkippedStepsLocked()
 
 	seq := r.nextSeq
 	r.nextSeq++
@@ -356,14 +382,18 @@ func (r *Recorder) AppendFrame(frame Frame, outputLen int, output string) bool {
 	}
 	if !isEnd && len(r.frames) >= limit {
 		r.dropped++
+		if frame.Kind == "step" {
+			r.stepBudgetExhausted.Store(true)
+		}
 		return false
 	}
 
-	if outputLen > r.lastOutputLen && output != "" {
+	lastOutputLen := int(r.lastOutputLen.Load())
+	if outputLen > lastOutputLen && output != "" {
 		if outputLen > len(output) {
 			outputLen = len(output)
 		}
-		start := r.lastOutputLen
+		start := lastOutputLen
 		if start < 0 || start > len(output) {
 			start = len(output)
 		}
@@ -372,7 +402,7 @@ func (r *Recorder) AppendFrame(frame Frame, outputLen int, output string) bool {
 				Delta:  output[start:outputLen],
 				Length: outputLen,
 			}
-			r.lastOutputLen = outputLen
+			r.lastOutputLen.Store(int64(outputLen))
 		}
 	}
 
@@ -387,6 +417,8 @@ func (r *Recorder) AppendFrame(frame Frame, outputLen int, output string) bool {
 func (r *Recorder) Execution() *Execution {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+
+	r.drainSkippedStepsLocked()
 
 	frames := make([]Frame, len(r.frames))
 	copy(frames, r.frames)
@@ -408,29 +440,20 @@ func (r *Recorder) Execution() *Execution {
 	}
 }
 
-var (
-	globalMu sync.RWMutex
-	active   *Recorder
-)
+var active atomic.Pointer[Recorder]
 
 func Enable(limits Limits) *Recorder {
 	recorder := NewRecorder(limits)
-	globalMu.Lock()
-	active = recorder
-	globalMu.Unlock()
+	active.Store(recorder)
 	return recorder
 }
 
 func Disable() {
-	globalMu.Lock()
-	active = nil
-	globalMu.Unlock()
+	active.Store(nil)
 }
 
 func Active() *Recorder {
-	globalMu.RLock()
-	defer globalMu.RUnlock()
-	return active
+	return active.Load()
 }
 
 func Enabled() bool {
