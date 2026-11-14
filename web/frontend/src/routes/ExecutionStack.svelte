@@ -27,42 +27,42 @@
 
     const frameStyles: FrameStyle[] = [
         {
-            bar: "border-b-cyan-500",
+            bar: "border-l-cyan-500",
             dot: "bg-cyan-500",
             text: "text-cyan-700",
         },
         {
-            bar: "border-b-rose-500",
+            bar: "border-l-rose-500",
             dot: "bg-rose-500",
             text: "text-rose-700",
         },
         {
-            bar: "border-b-amber-500",
+            bar: "border-l-amber-500",
             dot: "bg-amber-500",
             text: "text-amber-700",
         },
         {
-            bar: "border-b-violet-500",
+            bar: "border-l-violet-500",
             dot: "bg-violet-500",
             text: "text-violet-700",
         },
         {
-            bar: "border-b-emerald-500",
+            bar: "border-l-emerald-500",
             dot: "bg-emerald-500",
             text: "text-emerald-700",
         },
         {
-            bar: "border-b-blue-500",
+            bar: "border-l-blue-500",
             dot: "bg-blue-500",
             text: "text-blue-700",
         },
         {
-            bar: "border-b-fuchsia-500",
+            bar: "border-l-fuchsia-500",
             dot: "bg-fuchsia-500",
             text: "text-fuchsia-700",
         },
         {
-            bar: "border-b-orange-500",
+            bar: "border-l-orange-500",
             dot: "bg-orange-500",
             text: "text-orange-700",
         },
@@ -136,10 +136,7 @@
     const topAbsolute = $derived(
         vm === null
             ? -1
-            : Math.min(
-                  vm.stack_top - 1,
-                  vm.stack_base + vm.stack.length - 1,
-              ),
+            : Math.min(vm.stack_top - 1, vm.stack_base + vm.stack.length - 1),
     );
 
     const panelTitle = $derived(
@@ -187,71 +184,7 @@
                 >
             {/if}
         </div>
-
-        {#if activeFrame}
-            <div class="flex min-w-0 items-center gap-1">
-                <span
-                    class="shrink-0 rounded bg-cyan-500 px-1 py-0.5 font-mono text-[8px] font-semibold text-white"
-                >
-                    #{activeFrame.index}
-                </span>
-                <span
-                    class="min-w-0 truncate text-[10px] font-semibold text-slate-700"
-                    title={activeFrame.fn}
-                >
-                    {activeFrame.fn}
-                </span>
-                <span
-                    class="ml-auto shrink-0 rounded-full bg-cyan-100 px-1 py-0.5 text-[8px] font-semibold text-cyan-700"
-                >
-                    active
-                </span>
-            </div>
-            <div class="flex min-w-0 items-center gap-1">
-                <span
-                    class="min-w-0 truncate font-mono text-[9px] text-cyan-700"
-                    title={`${activeFrame.op} @${activeFrame.op_ptr}`}
-                >
-                    {activeFrame.op} @{activeFrame.op_ptr}
-                </span>
-                <span
-                    class="ml-auto shrink-0 rounded bg-slate-100 px-1 py-0.5 font-mono text-[8px] text-slate-400"
-                >
-                    {activeFrame.chunk_id}
-                </span>
-            </div>
-        {/if}
     </div>
-
-    {#if vm?.jit}
-        <div
-            class="flex shrink-0 flex-col gap-1 border-b border-amber-100 bg-amber-50 px-2 py-1.5 text-[9px] text-amber-700"
-        >
-            <div class="flex items-center gap-1">
-                <span
-                    class="rounded bg-amber-500 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white"
-                >
-                    JIT {vm.jit.state}
-                </span>
-                <span class="min-w-0 truncate font-semibold"
-                    >{vm.jit.fn}</span
-                >
-            </div>
-            <div class="flex items-center gap-1">
-                <span>{vm.jit.mode} mode</span>
-                {#if vm.jit.result}
-                    <span class="min-w-0 truncate font-mono"
-                        >→ {vm.jit.result.display}</span
-                    >
-                {/if}
-                {#if vm.jit.duration_ms !== undefined}
-                    <span class="ml-auto shrink-0 font-mono text-[8px]"
-                        >{formatDuration(vm.jit.duration_ms)}</span
-                    >
-                {/if}
-            </div>
-        </div>
-    {/if}
 
     {#if vm === null}
         <div
@@ -269,10 +202,12 @@
                 {@const active = slot.owner?.index === activeFrame?.index}
                 <div
                     in:fly={{ y: 10, duration: 140 }}
-                    class="flex w-full shrink-0 flex-col rounded-md border-b-4 {style.bar} pb-0.5 {active
+                    class="flex w-full shrink-0 flex-col flex-end rounded-md border-l-4 {style.bar} pb-0.5 {active
                         ? 'bg-slate-50'
                         : ''}"
-                    title={slot.owner ? `slot ${slot.abs} · #${slot.owner.index} ${slot.owner.fn}` : `slot ${slot.abs}`}
+                    title={slot.owner
+                        ? `slot ${slot.abs} · #${slot.owner.index} ${slot.owner.fn}`
+                        : `slot ${slot.abs}`}
                 >
                     <ExecutionValue
                         value={slot.value}
@@ -280,9 +215,6 @@
                         compact
                     />
                     <div class="flex min-w-0 items-center gap-1 px-1 pt-0.5">
-                        <span
-                            class="h-1.5 w-1.5 shrink-0 rounded-full {style.dot}"
-                        ></span>
                         <span
                             class="min-w-0 truncate text-[8px] font-medium {style.text}"
                         >
