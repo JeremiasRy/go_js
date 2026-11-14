@@ -20,9 +20,6 @@ docker run --rm -v "$PWD:/work" -w /work node:24-slim \
 
 | File | Node 24 | Current go_js |
 | --- | --- | --- |
-| `promise-resolver-timer-await.js` | `await` resumes | `ReferenceError`, exit 1 |
-| `promise-reject-timer.js` | `.catch` runs | `ReferenceError`, exit 1 |
-| `promise-resolver-nested-sync.js` | Executor and `.then` complete | Executor truncated, `.then` skipped, exit 0 |
 | `promise-resolve-passed-as-timer.js` | `.then undefined` runs | `.then` skipped, exit 0 |
 
 ## Not covered

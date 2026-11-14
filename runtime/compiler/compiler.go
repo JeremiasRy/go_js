@@ -1527,6 +1527,28 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
 				emitPatternParameters(current.Params, symbolTable, newFn)
+
+				if len(current.Params) > 0 {
+					heapVars := []int{}
+
+					for i, n := range current.Params {
+						withAstTracking(n, newFn, func() {
+							if v, found := symbolTable.vars[parameterName(n)]; found {
+								if v.scope == HEAP {
+									heapVars = append(heapVars, i, v.slot)
+								}
+							}
+						})
+					}
+
+					if len(heapVars) > 0 {
+						newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
+						for _, slot := range heapVars {
+							newFn.ValueChunk().EmitByte(uint8(slot))
+						}
+					}
+				}
+
 				emitParameterDefaults(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
