@@ -127,6 +127,8 @@
         return result;
     });
 
+    const displaySlots = $derived([...slots].reverse());
+
     const hiddenSlots = $derived(
         vm === null ? 0 : Math.max(vm.stack_base, vm.stack_omitted ?? 0),
     );
@@ -159,131 +161,115 @@
         const slotCount = slots.length;
         const top = topAbsolute;
         const frameIndex = activeFrame?.index;
-        if (stackScroll === null) {
+        const scroller = stackScroll;
+        if (!scroller) {
             return;
         }
 
         void slotCount;
         void top;
         void frameIndex;
-        stackScroll.scrollLeft = stackScroll.scrollWidth;
+        scroller.scrollTop = 0;
     });
 </script>
 
-<div class="flex min-h-0 flex-col">
+<div class="flex h-full min-h-0 flex-col">
     <div
-        class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5"
+        class="flex shrink-0 flex-col gap-1 border-b border-slate-100 px-2 py-1.5"
     >
-        <div class="flex min-w-0 items-center gap-2">
-            <span class="text-xs font-semibold text-slate-600"
+        <div class="flex min-w-0 items-center justify-between gap-1">
+            <span class="truncate text-xs font-semibold text-slate-600"
                 >{panelTitle}</span
             >
-            <span class="text-[10px] text-slate-400">left → right</span>
             {#if vm}
-                <span
-                    class="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500"
+                <span class="shrink-0 font-mono text-[9px] text-slate-400"
+                    >{activeDepth}/{totalDepth}</span
                 >
-                    vm {vm.id}
-                </span>
-                {#if vm.parent_id}
-                    <span
-                        class="rounded-full bg-indigo-50 px-1.5 py-0.5 text-[9px] font-semibold text-indigo-500"
-                    >
-                        sub-VM of {vm.parent_id}
-                    </span>
-                {/if}
             {/if}
-            {#if activeFrame}
+        </div>
+
+        {#if activeFrame}
+            <div class="flex min-w-0 items-center gap-1">
                 <span
-                    class="rounded bg-cyan-500 px-1.5 py-0.5 font-mono text-[9px] font-semibold text-white"
+                    class="shrink-0 rounded bg-cyan-500 px-1 py-0.5 font-mono text-[8px] font-semibold text-white"
                 >
                     #{activeFrame.index}
                 </span>
                 <span
-                    class="min-w-0 truncate text-xs font-semibold text-slate-700"
+                    class="min-w-0 truncate text-[10px] font-semibold text-slate-700"
                     title={activeFrame.fn}
                 >
                     {activeFrame.fn}
                 </span>
                 <span
-                    class="shrink-0 rounded-full bg-cyan-500 px-1.5 py-0.5 text-[9px] font-semibold text-white"
+                    class="ml-auto shrink-0 rounded-full bg-cyan-100 px-1 py-0.5 text-[8px] font-semibold text-cyan-700"
                 >
                     active
                 </span>
+            </div>
+            <div class="flex min-w-0 items-center gap-1">
                 <span
-                    class="min-w-0 truncate font-mono text-[10px] text-cyan-700"
+                    class="min-w-0 truncate font-mono text-[9px] text-cyan-700"
+                    title={`${activeFrame.op} @${activeFrame.op_ptr}`}
                 >
                     {activeFrame.op} @{activeFrame.op_ptr}
                 </span>
                 <span
-                    class="shrink-0 rounded bg-slate-100 px-1 py-0.5 font-mono text-[9px] text-slate-400"
+                    class="ml-auto shrink-0 rounded bg-slate-100 px-1 py-0.5 font-mono text-[8px] text-slate-400"
                 >
                     {activeFrame.chunk_id}
                 </span>
-            {/if}
-        </div>
-        {#if vm}
-            <div
-                class="flex shrink-0 items-center gap-2 text-[10px] text-slate-400"
-            >
-                <span class="font-semibold text-slate-500"
-                    >depth {activeDepth} / {totalDepth}</span
-                >
-                <span>{slots.length} slots</span>
             </div>
         {/if}
     </div>
 
     {#if vm?.jit}
         <div
-            class="flex shrink-0 flex-wrap items-center gap-2 border-b border-amber-100 bg-amber-50 px-2.5 py-1.5 text-[10px] text-amber-700"
+            class="flex shrink-0 flex-col gap-1 border-b border-amber-100 bg-amber-50 px-2 py-1.5 text-[9px] text-amber-700"
         >
-            <span
-                class="rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white"
-            >
-                JIT {vm.jit.state}
-            </span>
-            <span class="font-semibold">{vm.jit.fn}</span>
-            <span>{vm.jit.mode} mode</span>
-            {#if vm.jit.result}
-                <span class="font-mono">→ {vm.jit.result.display}</span>
-            {/if}
-            {#if vm.jit.duration_ms !== undefined}
-                <span class="ml-auto font-mono text-[9px]"
-                    >{formatDuration(vm.jit.duration_ms)}</span
+            <div class="flex items-center gap-1">
+                <span
+                    class="rounded bg-amber-500 px-1 py-0.5 text-[8px] font-bold uppercase tracking-wide text-white"
                 >
-            {/if}
+                    JIT {vm.jit.state}
+                </span>
+                <span class="min-w-0 truncate font-semibold"
+                    >{vm.jit.fn}</span
+                >
+            </div>
+            <div class="flex items-center gap-1">
+                <span>{vm.jit.mode} mode</span>
+                {#if vm.jit.result}
+                    <span class="min-w-0 truncate font-mono"
+                        >→ {vm.jit.result.display}</span
+                    >
+                {/if}
+                {#if vm.jit.duration_ms !== undefined}
+                    <span class="ml-auto shrink-0 font-mono text-[8px]"
+                        >{formatDuration(vm.jit.duration_ms)}</span
+                    >
+                {/if}
+            </div>
         </div>
     {/if}
 
     {#if vm === null}
         <div
-            class="m-2 flex items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-center text-xs text-slate-400"
+            class="m-2 flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 bg-slate-50 px-2 py-3 text-center text-[10px] text-slate-400"
         >
-            No VM state yet. The stack appears when the first job starts.
+            No VM state yet.
         </div>
     {:else}
         <div
             bind:this={stackScroll}
-            class="flex items-stretch gap-1.5 overflow-x-auto p-2"
+            class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1.5"
         >
-            {#if hiddenSlots > 0}
-                <div
-                    class="flex w-24 shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 p-2 text-center"
-                >
-                    <span class="text-lg text-slate-300">…</span>
-                    <span class="text-[10px] text-slate-400">
-                        {hiddenSlots} hidden slot{hiddenSlots === 1 ? "" : "s"}
-                    </span>
-                </div>
-            {/if}
-
-            {#each slots as slot (slot.abs)}
+            {#each displaySlots as slot (slot.abs)}
                 {@const style = styleFor(slot.owner?.index)}
                 {@const active = slot.owner?.index === activeFrame?.index}
                 <div
-                    in:fly={{ x: -10, duration: 140 }}
-                    class="flex w-32 shrink-0 flex-col rounded-md border-b-4 {style.bar} pb-0.5 {active
+                    in:fly={{ y: 10, duration: 140 }}
+                    class="flex w-full shrink-0 flex-col rounded-md border-b-4 {style.bar} pb-0.5 {active
                         ? 'bg-slate-50'
                         : ''}"
                     title={slot.owner ? `slot ${slot.abs} · #${slot.owner.index} ${slot.owner.fn}` : `slot ${slot.abs}`}
@@ -294,9 +280,11 @@
                         compact
                     />
                     <div class="flex min-w-0 items-center gap-1 px-1 pt-0.5">
-                        <span class="h-1.5 w-1.5 shrink-0 rounded-full {style.dot}"></span>
                         <span
-                            class="truncate text-[8px] font-medium {style.text}"
+                            class="h-1.5 w-1.5 shrink-0 rounded-full {style.dot}"
+                        ></span>
+                        <span
+                            class="min-w-0 truncate text-[8px] font-medium {style.text}"
                         >
                             slot {slot.abs}
                             {#if slot.owner}
@@ -307,9 +295,20 @@
                 </div>
             {/each}
 
+            {#if hiddenSlots > 0}
+                <div
+                    class="flex shrink-0 flex-col items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 px-2 py-1 text-center"
+                >
+                    <span class="text-slate-300">…</span>
+                    <span class="text-[9px] text-slate-400">
+                        {hiddenSlots} hidden slot{hiddenSlots === 1 ? "" : "s"}
+                    </span>
+                </div>
+            {/if}
+
             {#if slots.length === 0 && hiddenSlots === 0}
                 <div
-                    class="flex min-w-40 flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 px-3 py-3 text-[10px] text-slate-300"
+                    class="flex flex-1 items-center justify-center rounded-lg border border-dashed border-slate-200 px-2 py-3 text-center text-[10px] text-slate-300"
                 >
                     empty stack
                 </div>
