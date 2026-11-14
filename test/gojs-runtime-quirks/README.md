@@ -8,6 +8,8 @@ tool, collected while trying to run a task-queue-heavy workload.
 **Runtime under test:** `go_js.execute` (Go-based JS VM; version/commit not
 exposed by the MCP interface)
 
+**Implementation plan:** [event loop and Promise plan](IMPLEMENTATION_PLAN.md)
+
 The short version: timers, `fetch`, classes, closures and manual promises work
 in go_js, but the Promise implementation breaks down as soon as async-function
 promises or concurrent orchestration are involved. Some failures are crashes,
