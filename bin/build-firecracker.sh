@@ -33,6 +33,11 @@ unsquashfs ubuntu-$ubuntu_version.squashfs.upstream
 mkdir -p squashfs-root/workspace
 mkdir -p squashfs-root/root/.cache
 
+rm -f squashfs-root/etc/resolv.conf
+printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\n' > squashfs-root/etc/resolv.conf
+mkdir -p squashfs-root/etc/ssl/certs
+cp /etc/ssl/certs/ca-certificates.crt squashfs-root/etc/ssl/certs/ca-certificates.crt
+
 cp ./go_js squashfs-root/usr/local/bin/go_js
 # gengo extracts Zydis to $HOME/.cache/.<sha1[:8]>.gengo.so and dlopens it.
 # The rootfs is read-only, so install that file here. Do not tmpfs-mount
