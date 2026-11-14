@@ -1564,6 +1564,9 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 		gen.Args = append([]value.Value{}, args...)
 		return value.EncodeHandle(heap.Allocate(gen)), nil
 	}
+	if asyncFn, ok := callable.(*native.ObjAsyncFunction); ok && !asyncFn.ReturnArgumentIsPromise && asyncFn.Promise == nil {
+		return vm.callAsyncFunctionValue(fn, asyncFn, this, args)
+	}
 	runner := vm.newSubVM()
 	runner.depth = vm.depth + 1
 	for _, arg := range args {
@@ -1574,6 +1577,27 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 		return value.UNDEFINED, err
 	}
 	return runner.run(f, c)
+}
+
+func (vm *VM) callAsyncFunctionValue(fn value.Value, asyncFn *native.ObjAsyncFunction, this value.Value, args []value.Value) (value.Value, error) {
+	promise := native.NewPromise()
+	clone := asyncFn.Clone().(*native.ObjAsyncFunction)
+	clone.SetPromise(promise)
+	runner := vm.newSubVM()
+	runner.depth = vm.depth + 1
+	for _, arg := range args {
+		runner.push(arg)
+	}
+	f, c, err := runner.Call(clone, fn, nil, this, len(args), false)
+	if err != nil {
+		return value.UNDEFINED, err
+	}
+	if _, err := runner.run(f, c); err != nil {
+		if promise.Status == native.PENDING {
+			vm.rejectPromise(promise, vm.errorValue(err))
+		}
+	}
+	return value.EncodeHandle(heap.Allocate(promise)), nil
 }
 
 func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
