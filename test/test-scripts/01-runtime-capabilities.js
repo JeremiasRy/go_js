@@ -21,14 +21,14 @@ console.log('caps:', JSON.stringify(caps));
 
 const t0 = Date.now();
 await new Promise((resolve) => setTimeout(resolve, 50));
-console.log('timer ok:', Date.now() - t0, 'ms');
+console.log('timer ok:', Date.now() - t0 >= 50);
 
 try {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
   const res = await fetch('https://httpbin.org/get', { signal: controller.signal });
   clearTimeout(timer);
-  console.log('fetch ok:', res.status, (await res.text()).slice(0, 40));
+  console.log('fetch ok:', res.status);
 } catch (e) {
   console.log('fetch failed:', e.name + ':', e.message);
 }
