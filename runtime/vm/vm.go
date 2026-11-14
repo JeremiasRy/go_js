@@ -1460,6 +1460,28 @@ func (vm *VM) rejectPromise(p *native.ObjPromise, reason value.Value) {
 	vm.settlePromise(p)
 }
 
+func (vm *VM) invokeResolveFunction(fn *native.ResolveFunc, v value.Value) {
+	p := fn.Promise()
+	if fn.ID != p.ResolutionID {
+		return
+	}
+	if p.Resolving && !fn.AllowDuringResolving {
+		return
+	}
+	if fn.Called != nil {
+		*fn.Called = true
+	}
+	vm.resolvePromise(p, v)
+}
+
+func (vm *VM) invokeRejectFunction(fn *native.RejectFunc, v value.Value) {
+	p := fn.Promise()
+	if fn.ID != p.ResolutionID {
+		return
+	}
+	vm.rejectPromise(p, v)
+}
+
 func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 	if !v.IsObject() {
 		p.Resolve(v)
@@ -2379,7 +2401,7 @@ func (vm *VM) typeofValue(v value.Value) string {
 			return "function"
 		}
 		switch obj := obj.(type) {
-		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ArrayConstructor, *native.ObjectConstructor, *native.ErrorConstructor, *native.DateConstructor, *native.MapConstructor, *native.SetConstructor, *native.PromiseConstructor, *native.StringConstructor, *native.NumberConstructor, *native.BooleanConstructor, *native.SymbolConstructor, *native.BigIntConstructor, *native.RegExpConstructor, *native.ProxyConstructor, *native.TypedArrayConstructor, *native.ArrayBufferConstructor, *native.DataViewConstructor:
+		case *object.ObjFunction, *native.ObjAsyncFunction, *native.ObjGenerator, *native.ObjClass, *native.ArrayConstructor, *native.ObjectConstructor, *native.ErrorConstructor, *native.DateConstructor, *native.MapConstructor, *native.SetConstructor, *native.PromiseConstructor, *native.StringConstructor, *native.NumberConstructor, *native.BooleanConstructor, *native.SymbolConstructor, *native.BigIntConstructor, *native.RegExpConstructor, *native.ProxyConstructor, *native.TypedArrayConstructor, *native.ArrayBufferConstructor, *native.DataViewConstructor, *native.ResolveFunc, *native.RejectFunc:
 			return "function"
 		case *native.ObjProxy:
 			if obj.Callable {
@@ -6694,31 +6716,16 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							vm.push(value.UNDEFINED)
 						}
 
-						v := vm.pop()
-						p := fn.Promise()
-						if fn.ID != p.ResolutionID {
-							vm.push(value.UNDEFINED)
-							continue
-						}
-						if p.Resolving && !fn.AllowDuringResolving {
-							vm.push(value.UNDEFINED)
-							continue
-						}
-						if fn.Called != nil {
-							*fn.Called = true
-						}
-						vm.resolvePromise(p, v)
+						vm.invokeResolveFunction(fn, vm.pop())
 						vm.push(value.UNDEFINED)
 					}
 				case *native.RejectFunc:
 					{
-						v := vm.pop()
-						p := fn.Promise()
-						if fn.ID != p.ResolutionID {
+						if vm.stackTop == 0 {
 							vm.push(value.UNDEFINED)
-							continue
 						}
-						vm.rejectPromise(p, v)
+
+						vm.invokeRejectFunction(fn, vm.pop())
 						vm.push(value.UNDEFINED)
 					}
 				case *native.SetTimeout:
@@ -7736,6 +7743,20 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					f = vm.currentFrame()
 					c = *f.fn.ValueChunk()
 				}
+			}
+		case chunk.OP_SETTLE_PROMISE:
+			{
+				argument := value.UNDEFINED
+				if vm.stackTop > f.localStart {
+					argument = vm.stack[f.localStart]
+				}
+				switch fn := f.fn.(type) {
+				case *native.ResolveFunc:
+					vm.invokeResolveFunction(fn, argument)
+				case *native.RejectFunc:
+					vm.invokeRejectFunction(fn, argument)
+				}
+				vm.push(value.UNDEFINED)
 			}
 		case chunk.OP_CREATE_ARRAY:
 			{
