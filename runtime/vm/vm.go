@@ -1355,6 +1355,22 @@ func (vm *VM) addPromiseObserver(p *native.ObjPromise, fulfilled func(value.Valu
 	})
 }
 
+func (vm *VM) resumeAsyncFunction(asyncFn *native.ObjAsyncFunction, argument value.Value, rejected bool) {
+	if asyncFn.State == nil {
+		return
+	}
+	if len(asyncFn.State.Stack) > 0 {
+		asyncFn.State.Stack[len(asyncFn.State.Stack)-1] = argument
+	}
+	if rejected {
+		asyncFn.RejectValue = argument
+		asyncFn.HasRejection = true
+	}
+	key := heap.NewCallbackRoot()
+	heap.StoreCallbackRoot(key, asyncFn.State.Stack...)
+	queue.Enqueue(object.Callback{Fn: asyncFn, ThisCtx: value.UNDEFINED, RootKey: key, MicroTask: true, TraceLabel: "resume await in " + asyncFn.Name, TraceSource: "await"}, queue.MICRO_TASK, false)
+}
+
 func (vm *VM) settlePromise(p *native.ObjPromise) {
 	if p.Status == native.PENDING {
 		return
@@ -8789,7 +8805,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						heap.StoreCallbackRoot(key, curentAsyncFn.State.Stack...)
 						queue.Enqueue(object.Callback{Fn: curentAsyncFn, ThisCtx: value.UNDEFINED, RootKey: key, MicroTask: true, TraceLabel: "resume await in " + curentAsyncFn.Name, TraceSource: "await"}, queue.MICRO_TASK, false)
 					} else {
-						curentAsyncFn.Await(promise)
+						vm.addPromiseObserver(promise, func(v value.Value) {
+							vm.resumeAsyncFunction(curentAsyncFn, v, false)
+						}, func(reason value.Value) {
+							vm.resumeAsyncFunction(curentAsyncFn, reason, true)
+						})
 					}
 					heap.StoreAsyncFunctionStack(uintptr(unsafe.Pointer(curentAsyncFn)), stack)
 					heap.StoreAsyncFunctionScope(uintptr(unsafe.Pointer(curentAsyncFn)), f.heapScope)

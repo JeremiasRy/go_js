@@ -15,6 +15,11 @@
         "16-custom-all-async.js": ["module"],
         "24-async-wrapper-race.js": ["module"],
         "17-map-limit.js": ["module"],
+        "promise-shared-pending-awaiters.js": ["module"],
+        "promise-late-then.js": ["module"],
+        "event-loop-ordering.js": ["module"],
+        "async-await-ordering.js": ["module"],
+        "20-unresolved-top-level-await.js": ["module"],
         "01-runtime-capabilities.js": ["module"],
         "02-fetch-basic.js": ["module"],
         "03-class-getter-async-method.js": ["module"],
@@ -45,6 +50,7 @@
         "31-async-returns-manual-promise.js": ["module"]
     },
     "expectedOutputs": {
+        "20-unresolved-top-level-await.js": "start\n",
         "109-host-missing-requestanimationframe.js": "function\n",
         "111-host-missing-node-require.js": "function\n",
         "119-host-missing-temporal.js": "object\n"
@@ -79,7 +85,6 @@
         { "file": "negative-scripts/07-settimeout-non-function.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/72-json-invalid.js", "sourceGoal": "script", "phase": "runtime", "error": "SyntaxError" },
         { "file": "negative-scripts/19-infinite-loop.js", "sourceGoal": "script", "timeout": true },
-        { "file": "negative-scripts/20-unresolved-top-level-await.js", "sourceGoal": "module", "timeout": true },
         { "file": "negative-scripts/21-redos-regex.js", "sourceGoal": "script", "timeout": true },
         { "file": "negative-scripts/001-panic-parser-dot-eof-null.js", "sourceGoal": "script", "phase": "runtime", "error": "TypeError" },
         { "file": "negative-scripts/003-panic-parser-trailing-dot.js", "sourceGoal": "script", "phase": "parse", "error": "SyntaxError" },
