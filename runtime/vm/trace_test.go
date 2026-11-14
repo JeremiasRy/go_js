@@ -116,6 +116,102 @@ func TestTraceValueViewNamesConcreteObjects(t *testing.T) {
 	}
 }
 
+func TestSnapshotNamesLiveLocalSlots(t *testing.T) {
+	vm := NewVM(false, nil)
+
+	codeChunk := value.NewChunk("main")
+	codeChunk.RegisterLocalScope([]string{"first", "second"})
+	codeChunk.Code = []uint8{chunk.OP_GET_LOCAL, 0, chunk.OP_GET_LOCAL, 1}
+	codeChunk.AstId = []int{1, 1, 2, 2}
+
+	fn := object.NewFunction("main", 2, codeChunk)
+	var frame CallFrame
+	frame.initCallFrame(fn, 0, 0, value.UNDEFINED)
+	frame.localCount = 2
+	vm.frames[0] = frame
+	vm.frameCount = 1
+	vm.stack[0] = value.ValueFromFloat64(3)
+	vm.stack[1] = value.ValueFromFloat64(4)
+	vm.stackTop = 2
+
+	state := vm.snapshotVM(&vm.frames[0], codeChunk, 0, codeChunk.Code[0])
+	if len(state.Stack) != 2 {
+		t.Fatalf("expected 2 stack values, got %d", len(state.Stack))
+	}
+	if state.Stack[0].Name != "first" || state.Stack[1].Name != "second" {
+		t.Fatalf("expected first/second names, got %q/%q", state.Stack[0].Name, state.Stack[1].Name)
+	}
+
+	vm.frames[0].localCount = 1
+	state = vm.snapshotVM(&vm.frames[0], codeChunk, 0, codeChunk.Code[0])
+	if state.Stack[0].Name != "first" {
+		t.Fatalf("expected the initialized local to keep its name, got %q", state.Stack[0].Name)
+	}
+	if state.Stack[1].Name != "" {
+		t.Fatalf("expected the temporary slot to stay unnamed, got %q", state.Stack[1].Name)
+	}
+}
+
+func TestSnapshotNamesMethodHandlesFromCallee(t *testing.T) {
+	vm := NewVM(false, nil)
+
+	calleeChunk := value.NewChunk("greet")
+	callee := object.NewFunction("greet", 0, calleeChunk)
+	vm.stack[0] = value.EncodeHandle(heap.Allocate(callee))
+	vm.stack[1] = value.TAG_METHOD_HANDLE
+	vm.stackTop = 2
+
+	codeChunk := value.NewChunk("main")
+	codeChunk.Code = []uint8{chunk.OP_CALL, 0, 0}
+	codeChunk.AstId = []int{1, 1, 1}
+	fn := object.NewFunction("main", 0, codeChunk)
+	var frame CallFrame
+	frame.initCallFrame(fn, 0, 0, value.UNDEFINED)
+	vm.frames[0] = frame
+	vm.frameCount = 1
+
+	state := vm.snapshotVM(&vm.frames[0], codeChunk, 0, codeChunk.Code[0])
+	if len(state.Stack) != 2 {
+		t.Fatalf("expected 2 stack values, got %d", len(state.Stack))
+	}
+	if state.Stack[1].Type != "method_handle" || state.Stack[1].Display != "<method greet>" {
+		t.Fatalf("expected the method handle to use the callee name, got %s %q", state.Stack[1].Type, state.Stack[1].Display)
+	}
+}
+
+func TestTraceValueViewNamesNativeFunctions(t *testing.T) {
+	vm := NewVM(false, nil)
+	log := native.NewLog()
+	view := vm.valueView(value.EncodeHandle(heap.Allocate(log)))
+	if view.Type != "function" || view.Function == nil || view.Function.Name != "log" {
+		t.Fatalf("expected native log function, got %s %+v", view.Type, view.Function)
+	}
+	if view.Display != "<native fn log()>" {
+		t.Fatalf("expected native display, got %q", view.Display)
+	}
+}
+
+func TestSnapshotNamesThisValue(t *testing.T) {
+	vm := NewVM(false, nil)
+	thisValue := value.EncodeHandle(heap.Allocate(native.NewObject()))
+
+	codeChunk := value.NewChunk("main")
+	codeChunk.Code = []uint8{chunk.OP_THIS}
+	codeChunk.AstId = []int{1}
+	fn := object.NewFunction("main", 0, codeChunk)
+	var frame CallFrame
+	frame.initCallFrame(fn, 0, 0, thisValue)
+	vm.frames[0] = frame
+	vm.frameCount = 1
+	vm.stack[0] = thisValue
+	vm.stackTop = 1
+
+	state := vm.snapshotVM(&vm.frames[0], codeChunk, 0, codeChunk.Code[0])
+	if state.Stack[0].Name != "this" {
+		t.Fatalf("expected this binding, got %q", state.Stack[0].Name)
+	}
+}
+
 func TestTraceValueViewPrimitives(t *testing.T) {
 	vm := NewVM(false, nil)
 	cases := []struct {

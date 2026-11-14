@@ -122,6 +122,7 @@ type VMStackFrame struct {
 type ValueView struct {
 	Type      string        `json:"type"`
 	Display   string        `json:"display"`
+	Name      string        `json:"name,omitempty"`
 	ID        string        `json:"id,omitempty"`
 	Synthetic bool          `json:"synthetic,omitempty"`
 	Promise   *PromiseView  `json:"promise,omitempty"`

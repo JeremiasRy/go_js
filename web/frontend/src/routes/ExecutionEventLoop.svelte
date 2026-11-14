@@ -128,18 +128,6 @@
                     </p>
                 </div>
                 <div class="rounded-md bg-slate-50 px-2 py-1">
-                    <p class="text-slate-400">next queue</p>
-                    <p class="truncate font-semibold text-slate-700">
-                        {eventLoop.next_queue ?? "—"}
-                    </p>
-                </div>
-                <div class="rounded-md bg-slate-50 px-2 py-1">
-                    <p class="text-slate-400">outstanding work</p>
-                    <p class="truncate font-semibold text-slate-700">
-                        {eventLoop.work}
-                    </p>
-                </div>
-                <div class="rounded-md bg-slate-50 px-2 py-1">
                     <p class="text-slate-400">timers</p>
                     <p class="truncate font-semibold text-slate-700">
                         {eventLoop.timers.length +
@@ -155,12 +143,13 @@
                 : 'border-slate-200'} bg-white"
         >
             <div class="flex items-center justify-between gap-2">
-                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                <span
+                    class="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+                >
                     Timers
                 </span>
                 <span class="text-[9px] text-slate-400">
-                    {eventLoop.timers.length +
-                        (eventLoop.timers_omitted ?? 0)} tracked
+                    {eventLoop.timers.length + (eventLoop.timers_omitted ?? 0)} tracked
                 </span>
             </div>
             {#if eventLoop.timers.length === 0}
@@ -176,10 +165,14 @@
                             <span class="shrink-0 font-mono text-[9px]"
                                 >#{timer.id}</span
                             >
-                            <span class="min-w-0 flex-1 truncate text-[10px] font-medium">
+                            <span
+                                class="min-w-0 flex-1 truncate text-[10px] font-medium"
+                            >
                                 {timer.label}
                             </span>
-                            <span class="shrink-0 text-[9px]">{timer.delay_ms}ms</span>
+                            <span class="shrink-0 text-[9px]"
+                                >{timer.delay_ms}ms</span
+                            >
                             <span
                                 class="shrink-0 rounded bg-white/70 px-1 py-0.5 text-[8px] font-semibold uppercase"
                             >
@@ -202,7 +195,9 @@
             <div
                 class="flex shrink-0 items-center justify-between gap-2 border-b border-slate-700 px-2 py-1"
             >
-                <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                <span
+                    class="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
+                >
                     Output
                 </span>
                 <span class="text-[9px] text-slate-500">
@@ -211,8 +206,8 @@
             </div>
             <pre
                 bind:this={outputElement}
-                class="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-slate-100"
-            >{outputText || "(no output yet)"}</pre>
+                class="min-h-0 flex-1 overflow-y-auto whitespace-pre-wrap break-words p-2 font-mono text-[11px] leading-relaxed text-slate-100">{outputText ||
+                    "(no output yet)"}</pre>
         </div>
     </div>
 </div>

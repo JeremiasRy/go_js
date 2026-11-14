@@ -9,7 +9,9 @@
 
     const { value, top = false, compact = false }: Props = $props();
 
-    const synthetic = $derived(value.synthetic === true || value.type === "note");
+    const synthetic = $derived(
+        value.synthetic === true || value.type === "note",
+    );
 
     function typeClasses(type: string, isSynthetic: boolean): string {
         if (isSynthetic) {
@@ -61,11 +63,17 @@
 <div
     class="rounded-md border px-2 py-1.5 transition-all {synthetic
         ? 'border-amber-300 bg-amber-50'
-        : 'border-slate-200 bg-white'} {top
-        ? 'ring-2 ring-cyan-400 ring-offset-1 ring-offset-white'
-        : ''}"
+        : 'border-slate-200 bg-white'} {top ? 'border-4' : ''}"
 >
     <div class="flex min-w-0 flex-wrap items-center gap-1">
+        {#if value.name}
+            <span
+                class="shrink-0 rounded bg-slate-700 px-1 py-0.5 font-mono text-[9px] font-semibold leading-none text-white"
+                title="stack binding"
+            >
+                {value.name}
+            </span>
+        {/if}
         <span
             class="shrink-0 rounded border px-1 py-0.5 text-[9px] font-semibold uppercase leading-none {typeClasses(
                 value.type,

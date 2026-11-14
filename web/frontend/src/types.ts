@@ -89,6 +89,7 @@ export type OutputDelta = {
 export type ValueView = {
   type: string;
   display: string;
+  name?: string;
   id?: string;
   synthetic?: boolean;
   promise?: PromiseView;

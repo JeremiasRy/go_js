@@ -743,6 +743,90 @@ var global *FunctionScope = newFunctionScope(nil, GLOBAL)
 var module = false
 var currentClassDerived = false
 var inferredClassName = ""
+var inferredFunctionName = ""
+
+func registerLocalScope(fn object.Callable, symbolTable *FunctionScope) {
+	if fn == nil || symbolTable == nil {
+		return
+	}
+	chunk := fn.ValueChunk()
+	if chunk == nil {
+		return
+	}
+	chunk.RegisterLocalScope(localScopeNames(symbolTable))
+}
+
+func localScopeNames(symbolTable *FunctionScope) []string {
+	slots := map[int]string{}
+	maxSlot := -1
+	add := func(vars Variables) {
+		for name, variable := range vars {
+			if variable.scope != LOCAL || variable.type_ == CATCH_PARAM || variable.slot < 0 {
+				continue
+			}
+			slots[variable.slot] = name
+			if variable.slot > maxSlot {
+				maxSlot = variable.slot
+			}
+		}
+	}
+
+	add(symbolTable.vars)
+	blocks := []*BlockScope{}
+	for block := symbolTable.block; block != nil; block = block.parent {
+		blocks = append(blocks, block)
+	}
+	for i := len(blocks) - 1; i >= 0; i-- {
+		add(blocks[i].vars)
+	}
+
+	if maxSlot < 0 {
+		return nil
+	}
+	names := make([]string, maxSlot+1)
+	for slot, name := range slots {
+		names[slot] = name
+	}
+	return names
+}
+
+func inferredFunctionNameFor(node *parser.Node) string {
+	if node != nil && node.Identifier != nil && node.Identifier.Name != "" {
+		inferredFunctionName = ""
+		return node.Identifier.Name
+	}
+	if inferredFunctionName != "" {
+		name := inferredFunctionName
+		inferredFunctionName = ""
+		return name
+	}
+	return "ANONYMOYS_FN"
+}
+
+func inferAssignmentFunctionName(left, right *parser.Node) {
+	if left == nil || !isAnonymousFunction(right) {
+		return
+	}
+	switch left.Type {
+	case parser.NODE_IDENTIFIER:
+		inferredFunctionName = left.Name
+	case parser.NODE_MEMBER_EXPRESSION:
+		if !left.Computed && left.Property != nil {
+			inferredFunctionName = left.Property.Name
+		}
+	}
+}
+
+func isAnonymousFunction(node *parser.Node) bool {
+	if node == nil {
+		return false
+	}
+	switch node.Type {
+	case parser.NODE_FUNCTION_EXPRESSION, parser.NODE_ARROW_FUNCTION_EXPRESSION:
+		return node.Identifier == nil
+	}
+	return false
+}
 
 func privateKeyName(name string) string {
 	return "\x00#" + name
@@ -945,6 +1029,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		switch current.Type {
 		case parser.NODE_PROGRAM:
 			{
+				registerLocalScope(fn, symbolTable)
 				if symbolTable.hasHeapVars {
 					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
@@ -1044,6 +1129,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					switch operator {
 					case parser.ASSIGN:
+						inferAssignmentFunctionName(left, current.Right)
 						generateByteCode(current.Right, symbolTable, fn)
 						fn.ValueChunk().EmitByte(memberSetOp)
 					case parser.LOGICAL_AND_ASSIGN, parser.LOGICAL_OR_ASSIGN, parser.NULLISH_ASSIGN:
@@ -1119,6 +1205,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 					switch operator {
 					case parser.ASSIGN:
+						inferAssignmentFunctionName(left, current.Right)
 						generateByteCode(current.Right, symbolTable, fn)
 						if withDepth > 0 && (variable.scope == GLOBAL || variable.undeclared) {
 							slot := uint8(variable.slot)
@@ -1187,6 +1274,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				nextFn, _ := symbolTable.findVariable(current.Identifier.Name)
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
+				registerLocalScope(nextFn.fn, symbolTable)
 				if fnObj, ok := nextFn.fn.(*object.ObjFunction); ok {
 					fnObj.Strict = module || nodeHasUseStrict(current)
 				}
@@ -1285,7 +1373,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
-				newFn := newFunctionForNode(current, "ANONYMOYS_FN", len(current.Params))
+				newFn := newFunctionForNode(current, inferredFunctionNameFor(current), len(current.Params))
+				registerLocalScope(newFn, symbolTable)
 				if base := functionBase(newFn); base != nil {
 					base.Strict = module || nodeHasUseStrict(current)
 					base.IsArrow = true
@@ -1387,7 +1476,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				outerSymbolTable := symbolTable
 				symbolTable = FUNCTION_SCOPES[current]
 				markParamsDeclared(current.Params, symbolTable)
-				newFn := newFunctionForNode(current, "ANONYMOYS_FN", len(current.Params))
+				newFn := newFunctionForNode(current, inferredFunctionNameFor(current), len(current.Params))
+				registerLocalScope(newFn, symbolTable)
 				if base := functionBase(newFn); base != nil {
 					base.Strict = module || nodeHasUseStrict(current)
 					base.IsMethod = nextFunctionIsMethod
@@ -1438,6 +1528,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_BLOCK_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current)
+				registerLocalScope(fn, symbolTable)
 				functions := []*Variable{}
 				for _, variable := range symbolTable.block.vars {
 					if variable.type_ == FUNCTION {
@@ -1464,6 +1555,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					}
 				}
 				symbolTable.exitBlockScope()
+				registerLocalScope(fn, symbolTable)
 			}
 		case parser.NODE_WITH_STATEMENT:
 			{
@@ -1790,6 +1882,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					if current.Initializer != nil {
 						if current.Initializer.Type == parser.NODE_CLASS_EXPRESSION && current.Initializer.Identifier == nil {
 							inferredClassName = current.Identifier.Name
+						}
+						if isAnonymousFunction(current.Initializer) {
+							inferredFunctionName = current.Identifier.Name
 						}
 						generateByteCode(current.Initializer, symbolTable, fn)
 
@@ -2219,6 +2314,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 		case parser.NODE_FOR_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current.BodyNode)
+				registerLocalScope(fn, symbolTable)
 				if blockHasHeapVars(symbolTable.block) {
 					fn.ValueChunk().EmitByte(chunk.OP_ENSURE_HEAP_SCOPE)
 				}
@@ -2270,10 +2366,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				}
 				popLoop()
 				symbolTable.exitBlockScope()
+				registerLocalScope(fn, symbolTable)
 			}
 		case parser.NODE_FOR_OF_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current.BodyNode)
+				registerLocalScope(fn, symbolTable)
 				for _, variable := range symbolTable.block.vars {
 					variable.declared = true
 				}
@@ -2352,10 +2450,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				popLoop()
 				symbolTable.exitBlockScope()
+				registerLocalScope(fn, symbolTable)
 			}
 		case parser.NODE_FOR_IN_STATEMENT:
 			{
 				symbolTable.enterBlockScope(current.BodyNode)
+				registerLocalScope(fn, symbolTable)
 				for _, variable := range symbolTable.block.vars {
 					variable.declared = true
 				}
@@ -2417,6 +2517,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				popLoop()
 				symbolTable.exitBlockScope()
+				registerLocalScope(fn, symbolTable)
 			}
 		case parser.NODE_OBJECT_EXPRESSION:
 			{
@@ -2441,6 +2542,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						}
 						if property.IsMethod || property.Kind == parser.KIND_PROPERTY_GET || property.Kind == parser.KIND_PROPERTY_SET {
 							nextFunctionIsMethod = true
+						}
+						if !property.Computed {
+							if valueNode, ok := property.Value.(*parser.Node); ok && isAnonymousFunction(valueNode) {
+								inferredFunctionName = objectPropertyKeyName(property.Key)
+							}
 						}
 						generateByteCode(property.Value.(*parser.Node), symbolTable, fn)
 						nextFunctionIsMethod = false
@@ -2819,6 +2925,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 
 				function := current.Value.(*parser.Node)
 				method := newFunctionForNode(function, keyName, len(function.Params))
+				registerLocalScope(method, symbolTable)
 				if base := functionBase(method); base != nil {
 					base.Strict = true
 					base.IsMethod = true
@@ -2933,6 +3040,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				block := object.NewFunction("static block", 0, nil)
 				block.Strict = true
 				block.IsMethod = true
+				registerLocalScope(block, symbolTable)
 				if symbolTable.hasHeapVars {
 					block.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}

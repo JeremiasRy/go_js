@@ -29,6 +29,11 @@ const (
 	UNINITIALIZED      Value = QNAN | (1 << 7)
 )
 
+type LocalScope struct {
+	StartIP int
+	Names   []string
+}
+
 type ValueChunk struct {
 	CurrentAstId int
 	Code         []uint8
@@ -37,6 +42,7 @@ type ValueChunk struct {
 	FnName       string
 	ChunkID      string
 	TraceHidden  bool
+	LocalScopes  []LocalScope
 }
 
 var nextChunkID atomic.Uint64
@@ -57,6 +63,33 @@ func NewChunk(fnName string) *ValueChunk {
 
 func (c *ValueChunk) SetCompTimeAstId(id int) {
 	c.CurrentAstId = id
+}
+
+func (c *ValueChunk) RegisterLocalScope(names []string) {
+	scope := LocalScope{StartIP: len(c.Code), Names: names}
+	if n := len(c.LocalScopes); n > 0 && c.LocalScopes[n-1].StartIP == scope.StartIP {
+		c.LocalScopes[n-1] = scope
+		return
+	}
+	c.LocalScopes = append(c.LocalScopes, scope)
+}
+
+func (c *ValueChunk) LocalNamesAt(ip int) []string {
+	low, high := 0, len(c.LocalScopes)-1
+	found := -1
+	for low <= high {
+		mid := (low + high) / 2
+		if c.LocalScopes[mid].StartIP <= ip {
+			found = mid
+			low = mid + 1
+		} else {
+			high = mid - 1
+		}
+	}
+	if found < 0 {
+		return nil
+	}
+	return c.LocalScopes[found].Names
 }
 
 // read uint32 and incerement ip

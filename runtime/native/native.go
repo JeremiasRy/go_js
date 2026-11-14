@@ -69,6 +69,10 @@ func (onf *ObjNativeFn) NativeArity() int {
 	return onf.Arity
 }
 
+func (onf *ObjNativeFn) Name() string {
+	return onf.name
+}
+
 func (*ObjNativeFn) GetReferencingValues() []value.Value {
 	return []value.Value{}
 }
