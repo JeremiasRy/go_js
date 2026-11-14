@@ -87,9 +87,7 @@
             0,
         ),
     );
-    const currentOutput = $derived(
-        atEnd && output !== "" ? output : rawOutput,
-    );
+    const currentOutput = $derived(atEnd && output !== "" ? output : rawOutput);
     const queues = $derived(currentFrame?.queues ?? emptyQueues);
     const eventLoop = $derived(currentFrame?.event_loop ?? emptyEventLoop);
     const narration = $derived(
@@ -440,8 +438,7 @@
                 >
                     Trace truncated after {frameCount} stored frames.
                     {execution.dropped_frames} of {execution.total_frames}
-                    attempted frames were dropped; the final output is still
-                    shown.
+                    attempted frames were dropped; the final output is still shown.
                 </div>
             {/if}
         </div>
@@ -465,7 +462,7 @@
             </section>
 
             <section
-                class="flex min-h-0 min-w-44 flex-[1.2] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="flex gap-2 min-h-0 min-w-44 flex-[1.2] flex-col overflow-hidden rounded-lg bg-white"
             >
                 <ExecutionQueues {queues} {eventLoop} frame={currentFrame} />
             </section>

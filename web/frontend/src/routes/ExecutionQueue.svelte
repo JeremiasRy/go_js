@@ -7,7 +7,6 @@
         queueName: QueueName;
         items: QueueItem[];
         omitted?: number;
-        active?: boolean;
         next?: boolean;
         flashId?: string | null;
     };
@@ -17,7 +16,6 @@
         queueName,
         items,
         omitted = 0,
-        active = false,
         next = false,
         flashId = null,
     }: Props = $props();
@@ -47,22 +45,13 @@
 </script>
 
 <div
-    class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border transition-colors {active
-        ? 'border-cyan-300 bg-cyan-50/40'
-        : 'border-slate-200 bg-slate-50/60'}"
+    class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border transition-colors border-slate-200 bg-slate-50/600"
     aria-label={`${title} queue`}
 >
     <div
-        class="flex shrink-0 items-center justify-between gap-2 border-b px-2.5 py-1.5 {active
-            ? 'border-cyan-100'
-            : 'border-slate-100'}"
+        class="flex shrink-0 items-center justify-between gap-2 border-b px-2.5 py-1.5 border-slate-100"
     >
         <div class="flex min-w-0 items-center gap-1.5">
-            <span
-                class="h-1.5 w-1.5 shrink-0 rounded-full {active
-                    ? 'animate-pulse bg-cyan-500'
-                    : 'bg-slate-300'}"
-            ></span>
             <span class="truncate text-[11px] font-semibold text-slate-600"
                 >{title}</span
             >
@@ -92,7 +81,7 @@
                     <div
                         animate:flip={{ duration: 180 }}
                         class="rounded-md border px-2 py-1.5 transition-all {index ===
-                        0 && next
+                            0 && next
                             ? 'border-cyan-300 bg-white shadow-sm shadow-cyan-100'
                             : 'border-slate-200 bg-white'} {item.id === flashId
                             ? 'queue-flash'
@@ -101,7 +90,7 @@
                         <div class="flex min-w-0 items-center gap-1.5">
                             <span
                                 class="shrink-0 rounded px-1 py-0.5 font-mono text-[9px] font-semibold {index ===
-                                0 && next
+                                    0 && next
                                     ? 'bg-cyan-500 text-white'
                                     : 'bg-slate-100 text-slate-400'}"
                             >
@@ -114,7 +103,9 @@
                                 {item.label}
                             </span>
                         </div>
-                        <div class="mt-1 flex min-w-0 flex-wrap items-center gap-1">
+                        <div
+                            class="mt-1 flex min-w-0 flex-wrap items-center gap-1"
+                        >
                             {#if item.source}
                                 <span
                                     class="rounded px-1 py-0.5 text-[9px] font-medium {sourceClasses(
@@ -138,7 +129,8 @@
                                     native
                                 </span>
                             {/if}
-                            <span class="ml-auto font-mono text-[9px] text-slate-300"
+                            <span
+                                class="ml-auto font-mono text-[9px] text-slate-300"
                                 >{item.id}</span
                             >
                         </div>
