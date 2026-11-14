@@ -446,46 +446,38 @@
             {/if}
         </div>
 
-        <div class="flex min-h-0 flex-1 flex-col gap-2 p-2">
-            <div
-                class="grid min-h-0 flex-[1] grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] gap-2"
-            >
-                <section
-                    class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
-                >
-                    <ExecutionQueues
-                        {queues}
-                        {eventLoop}
-                        frame={currentFrame}
-                    />
-                </section>
-
-                <section
-                    class="min-h-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
-                >
-                    <ExecutionEventLoop
-                        {eventLoop}
-                        frame={currentFrame}
-                        outputText={currentOutput}
-                        {atEnd}
-                    />
-                </section>
-            </div>
-
+        <div class="flex min-h-0 flex-1 gap-2 overflow-x-auto p-2">
             <section
-                class="shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="flex w-36 shrink-0 flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
             >
                 <ExecutionStack vm={currentVm} frame={currentFrame} />
             </section>
 
             <section
-                class="flex min-h-0 flex-[1] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+                class="flex min-h-0 min-w-72 flex-[2] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
             >
                 <ExecutionOpcodes
                     {chunks}
                     {highlight}
                     {setHighlight}
                     vm={currentVm}
+                />
+            </section>
+
+            <section
+                class="flex min-h-0 min-w-44 flex-[1.2] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+            >
+                <ExecutionQueues {queues} {eventLoop} frame={currentFrame} />
+            </section>
+
+            <section
+                class="flex min-h-0 min-w-48 flex-[1.4] flex-col overflow-hidden rounded-lg border border-slate-200 bg-white"
+            >
+                <ExecutionEventLoop
+                    {eventLoop}
+                    frame={currentFrame}
+                    outputText={currentOutput}
+                    {atEnd}
                 />
             </section>
         </div>
