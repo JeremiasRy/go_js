@@ -141,6 +141,8 @@ type VM struct {
 	traceLastPosValid bool
 	traceLastVMDirty  bool
 	traceLastVMState  *trace.VMState
+
+	promiseRoots map[*native.ObjPromise]uintptr
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
@@ -165,6 +167,7 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		loopMarks:      map[int][]int{},
 		loopIterators:  map[int]value.Value{},
 		callCounts:     map[*value.ValueChunk]int{},
+		promiseRoots:   map[*native.ObjPromise]uintptr{},
 		traceID:        traceID,
 		traceLimits:    trace.DefaultLimits(),
 	}
@@ -173,6 +176,7 @@ func NewVM(main bool, output *strings.Builder) *VM {
 func (vm *VM) newSubVM() *VM {
 	sub := NewVM(false, vm.output)
 	sub.callCounts = vm.callCounts
+	sub.promiseRoots = vm.promiseRoots
 	sub.traceParentID = vm.traceID
 	sub.traceEnabled = vm.traceEnabled
 	sub.traceRecorder = vm.traceRecorder
@@ -1305,10 +1309,36 @@ func (vm *VM) enqueueNativeCallback(roots []value.Value, label, source string, f
 	queue.Enqueue(object.Callback{Native: fn, RootKey: key, TraceLabel: label, TraceSource: source}, queue.MICRO_TASK, false)
 }
 
+func (vm *VM) rootPromiseWithValue(p *native.ObjPromise, pValue value.Value) {
+	if p == nil {
+		return
+	}
+	if _, found := vm.promiseRoots[p]; found {
+		return
+	}
+	key := heap.NewCallbackRoot()
+	heap.StoreCallbackRoot(key, pValue)
+	vm.promiseRoots[p] = key
+}
+
+func (vm *VM) rootPromise(p *native.ObjPromise) {
+	vm.rootPromiseWithValue(p, heap.EncodeObject(p))
+}
+
+func (vm *VM) releasePromiseRoot(p *native.ObjPromise) {
+	key, found := vm.promiseRoots[p]
+	if !found {
+		return
+	}
+	heap.ClearCallbackRoot(key)
+	delete(vm.promiseRoots, p)
+}
+
 func (vm *VM) addPromiseObserver(p *native.ObjPromise, fulfilled func(value.Value), rejected func(value.Value), roots ...value.Value) {
 	observer := native.PromiseObserver{Fulfilled: fulfilled, Rejected: rejected, Roots: roots}
 	if p.Status == native.PENDING {
 		p.Observers = append(p.Observers, observer)
+		vm.rootPromise(p)
 		return
 	}
 	status := p.Status
@@ -1357,11 +1387,13 @@ func (vm *VM) settlePromise(p *native.ObjPromise) {
 			vm.promiseReaction(reaction, fulfilled, argument)
 		})
 	}
+	vm.releasePromiseRoot(p)
 }
 
 func (vm *VM) attachPromiseReaction(p *native.ObjPromise, reaction native.PromiseReaction) {
 	if p.Status == native.PENDING {
 		p.Reactions = append(p.Reactions, reaction)
+		vm.rootPromise(p)
 		return
 	}
 	fulfilled := p.Status == native.RESOLVED
@@ -1377,7 +1409,10 @@ func (vm *VM) promiseReaction(reaction native.PromiseReaction, fulfilled bool, a
 	if err != nil {
 		return
 	}
-	derived := derivedObj.(*native.ObjPromise)
+	derived, ok := derivedObj.(*native.ObjPromise)
+	if !ok {
+		return
+	}
 	if reaction.IsFinally {
 		if reaction.Finalizer.IsObject() {
 			result, err := vm.callValue(reaction.Finalizer, value.UNDEFINED, nil)
@@ -1446,6 +1481,9 @@ func (vm *VM) throwGeneratorError(err error, f *CallFrame, c *value.ValueChunk, 
 }
 
 func (vm *VM) errorValue(err error) value.Value {
+	if jsErr, ok := err.(*JSException); ok && jsErr.HasValue {
+		return jsErr.Value
+	}
 	name := "Error"
 	message := err.Error()
 	if jsErr, ok := err.(*JSException); ok {
@@ -1513,6 +1551,7 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 				p.Resolving = true
 				p.ResolutionID++
 				resolutionID := p.ResolutionID
+				vm.rootPromise(p)
 				callbackRoots := []value.Value{thenValue, v}
 				vm.enqueueNativeCallback(callbackRoots, "promise thenable", "promise", func() {
 					called := false
@@ -1603,6 +1642,7 @@ func (vm *VM) callValue(fn value.Value, this value.Value, args []value.Value) (v
 
 func (vm *VM) callAsyncFunctionValue(fn value.Value, asyncFn *native.ObjAsyncFunction, this value.Value, args []value.Value) (value.Value, error) {
 	promise := native.NewPromise()
+	promiseValue := value.EncodeHandle(heap.Allocate(promise))
 	clone := asyncFn.Clone().(*native.ObjAsyncFunction)
 	clone.SetPromise(promise)
 	runner := vm.newSubVM()
@@ -1619,7 +1659,10 @@ func (vm *VM) callAsyncFunctionValue(fn value.Value, asyncFn *native.ObjAsyncFun
 			vm.rejectPromise(promise, vm.errorValue(err))
 		}
 	}
-	return value.EncodeHandle(heap.Allocate(promise)), nil
+	if promise.Status == native.PENDING {
+		vm.rootPromiseWithValue(promise, promiseValue)
+	}
+	return promiseValue, nil
 }
 
 func (vm *VM) setMemberValue(objValue value.Value, key, v value.Value) error {
@@ -2974,7 +3017,7 @@ Run:
 			argCount = len(callback.Stack)
 		}
 		if asyncFn, ok := callback.Fn.(*native.ObjAsyncFunction); ok && asyncFn.State != nil {
-			f.initCallFrame(asyncFn, asyncFn.State.LocalStart, 0, callback.ThisCtx)
+			f.initCallFrame(asyncFn, asyncFn.State.LocalStart, 0, asyncFn.State.This)
 			vm.frames[vm.frameCount] = f
 			vm.frameCount++
 			f = vm.currentFrame()
@@ -3062,7 +3105,17 @@ func (vm *VM) runGC() {
 		}
 	}
 	for i := 0; i < vm.frameCount; i++ {
-		scope := vm.frames[i].heapScope
+		frame := vm.frames[i]
+		if frame.thisCtx.IsObject() {
+			glob = append(glob, frame.thisCtx)
+		}
+		if frame.newTarget.IsObject() {
+			glob = append(glob, frame.newTarget)
+		}
+		if frame.arguments.IsObject() {
+			glob = append(glob, frame.arguments)
+		}
+		scope := frame.heapScope
 		for scope > 0 {
 			glob = append(glob, heap.ScopeValues(scope)...)
 			scope = heap.ParentScope(scope)
@@ -3093,11 +3146,13 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			f.localCount = promise.State.LocalCount
 			f.heapScope = promise.State.HeapScope
 			f.ownScope = promise.State.OwnScope
+			f.thisCtx = promise.State.This
 			vm.stackTop = f.localStart
 			vm.frames[vm.frameCount-1].localStart = f.localStart
 			vm.frames[vm.frameCount-1].localCount = f.localCount
 			vm.frames[vm.frameCount-1].heapScope = f.heapScope
 			vm.frames[vm.frameCount-1].ownScope = f.ownScope
+			vm.frames[vm.frameCount-1].thisCtx = f.thisCtx
 			for _, exception := range promise.State.Exceptions {
 				vm.exceptionStack = append(vm.exceptionStack, ExceptionState{jumpTo: exception.JumpTo, stackTop: exception.StackTop, frame: vm.frameCount, isFinally: exception.IsFinally})
 			}
@@ -4975,16 +5030,22 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						fn = fn.Clone().(*native.ObjAsyncFunction)
 						if !fn.ReturnArgumentIsPromise {
 							promise := native.NewPromise()
+							promiseValue := value.EncodeHandle(heap.Allocate(promise))
+							vm.rootPromiseWithValue(promise, promiseValue)
 							fn.SetPromise(promise)
 							base := vm.stackTop - argCount
 							vm.ensureStack(vm.stackTop + 1)
 							copy(vm.stack[base+1:vm.stackTop+1], vm.stack[base:vm.stackTop])
-							vm.stack[base] = value.EncodeHandle(heap.Allocate(promise))
+							vm.stack[base] = promiseValue
 							vm.stackTop++
 						}
 
+						callThis := thisCtx
+						if vm.main && scriptMode && !fn.Strict && callThis == value.UNDEFINED {
+							callThis = vm.ensureGlobalObject()
+						}
 						var callErr error
-						f, c, callErr = vm.Call(fn.Clone(), callee, &ip, value.UNDEFINED, argCount, calledWithSpread)
+						f, c, callErr = vm.Call(fn.Clone(), callee, &ip, callThis, argCount, calledWithSpread)
 						if callErr != nil {
 							return value.UNDEFINED, callErr
 						}
@@ -5159,8 +5220,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						vm.popN(argCount)
 						p := native.NewPromise()
+						pValue := value.EncodeHandle(heap.Allocate(p))
+						vm.rootPromiseWithValue(p, pValue)
 						result := native.NewObjectHash()
-						result.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("promise"))), value.EncodeHandle(heap.Allocate(p)))
+						result.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("promise"))), pValue)
 						result.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("resolve"))), value.EncodeHandle(heap.Allocate(native.NewResolveFunc(p))))
 						result.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("reject"))), value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p))))
 						vm.push(value.EncodeHandle(heap.Allocate(result)))
@@ -7301,14 +7364,6 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							}
 							continue
 						}
-						callable, ok := obj.(object.Callable)
-						if !ok {
-							errValue := vm.makeError("TypeError", "Value is not callable")
-							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
-								return value.UNDEFINED, err
-							}
-							continue
-						}
 						rest := []value.Value{}
 						if argArray != value.UNDEFINED && argArray != value.NULL {
 							if !argArray.IsObject() {
@@ -7334,6 +7389,19 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								}
 								rest = append(rest, item)
 							}
+						}
+						callable, ok := obj.(object.Callable)
+						if !ok {
+							result, err := vm.invokeCallableWithThis(target, thisArg, rest)
+							if err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								continue
+							}
+							vm.push(result)
+							continue
 						}
 						thisArg = vm.normalizeThis(callable, thisArg)
 						for _, arg := range rest {
@@ -7527,6 +7595,108 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							name = mustString(vm, args[0])
 						}
 						vm.push(value.EncodeHandle(heap.Allocate(native.NewLightString(fn.Values.Get(name)))))
+					}
+				case *native.AbortControllerAbort:
+					{
+						args := vm.popN(argCount)
+						reason := value.UNDEFINED
+						if len(args) > 0 {
+							reason = args[0]
+						}
+						if reason == value.UNDEFINED {
+							reason = vm.makeError("AbortError", "The operation was aborted")
+						}
+						obj, err := heap.GetObject(thisCtx.GetHandle())
+						if err != nil {
+							errValue := vm.makeError("TypeError", "Value is not callable")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						controller, ok := obj.(*native.AbortController)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Illegal invocation")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						signal := controller.Signal
+						if signal == nil || signal.Aborted {
+							vm.push(value.UNDEFINED)
+							continue
+						}
+						signal.Aborted = true
+						signalValue := heap.EncodeObject(signal)
+						signal.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("aborted"))), value.TRUE)
+						signal.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("reason"))), reason)
+						event := native.NewObjectHash()
+						event.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("type"))), value.EncodeHandle(heap.Allocate(native.NewLightString("abort"))))
+						event.SetMember(value.EncodeHandle(heap.Allocate(native.NewLightString("target"))), signalValue)
+						eventValue := value.EncodeHandle(heap.Allocate(event))
+						for _, listener := range append([]value.Value{}, signal.Listeners...) {
+							if _, err := vm.callValue(listener, signalValue, []value.Value{eventValue}); err != nil {
+								errValue := vm.errorValue(err)
+								if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+									return value.UNDEFINED, err
+								}
+								break
+							}
+						}
+						vm.push(value.UNDEFINED)
+					}
+				case *native.AbortSignalAddEventListener:
+					{
+						args := vm.popN(argCount)
+						obj, err := heap.GetObject(thisCtx.GetHandle())
+						if err != nil {
+							vm.push(value.UNDEFINED)
+							continue
+						}
+						signal, ok := obj.(*native.AbortSignal)
+						if !ok {
+							errValue := vm.makeError("TypeError", "Illegal invocation")
+							if err := vm.throwValue(errValue, &f, &c, &ip); err != nil {
+								return value.UNDEFINED, err
+							}
+							continue
+						}
+						if len(args) >= 2 {
+							name, _ := vm.valueAsString(args[0])
+							if name == "abort" && args[1].IsObject() {
+								if handlerObj, err := heap.GetObject(args[1].GetHandle()); err == nil {
+									if _, ok := handlerObj.(object.Callable); ok {
+										signal.Listeners = append(signal.Listeners, args[1])
+									}
+								}
+							}
+						}
+						vm.push(value.UNDEFINED)
+					}
+				case *native.AbortSignalRemoveEventListener:
+					{
+						args := vm.popN(argCount)
+						obj, err := heap.GetObject(thisCtx.GetHandle())
+						if err != nil {
+							vm.push(value.UNDEFINED)
+							continue
+						}
+						signal, ok := obj.(*native.AbortSignal)
+						if !ok {
+							vm.push(value.UNDEFINED)
+							continue
+						}
+						if len(args) >= 2 {
+							kept := signal.Listeners[:0]
+							for _, listener := range signal.Listeners {
+								if listener != args[1] {
+									kept = append(kept, listener)
+								}
+							}
+							signal.Listeners = kept
+						}
+						vm.push(value.UNDEFINED)
 					}
 				case *native.HostFunction:
 					{
@@ -8390,6 +8560,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						continue
 					}
+				case *native.AbortControllerConstructor:
+					{
+						vm.popN(int(argCount))
+						vm.push(value.EncodeHandle(heap.Allocate(native.NewAbortController())))
+					}
 				case native.Constructor:
 					{
 						args := vm.popN(int(argCount))
@@ -8426,6 +8601,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					{
 						args := vm.popN(int(argCount))
 						promise := native.NewPromise()
+						promiseValue := value.EncodeHandle(heap.Allocate(promise))
+						vm.rootPromiseWithValue(promise, promiseValue)
 						resolve := native.NewResolveFunc(promise)
 						reject := native.NewRejectFunc(promise)
 						if len(args) > 0 {
@@ -8452,7 +8629,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 										name = jsErr.Name
 										message = jsErr.Message
 									}
-									promise.Reject(vm.makeError(name, message))
+									vm.rejectPromise(promise, vm.makeError(name, message))
 								}
 							} else {
 								errValue := vm.makeError("TypeError", "Promise resolver is not a function")
@@ -8462,7 +8639,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 								continue
 							}
 						}
-						vm.push(value.EncodeHandle(heap.Allocate(promise)))
+						vm.push(promiseValue)
 					}
 				}
 			}
@@ -8519,10 +8696,10 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 									name = ns
 								}
 							}
-							return value.UNDEFINED, &JSException{Name: name, Message: native.String(err)}
+							return value.UNDEFINED, &JSException{Name: name, Message: native.String(err), Value: err, HasValue: true}
 						}
 					}
-					return value.UNDEFINED, &JSException{Name: "Error", Message: native.String(err)}
+					return value.UNDEFINED, &JSException{Name: "Error", Message: native.String(err), Value: err, HasValue: true}
 				}
 				state := vm.exceptionStack[len(vm.exceptionStack)-1]
 				vm.exceptionStack = vm.exceptionStack[:len(vm.exceptionStack)-1]
@@ -8549,6 +8726,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 							if thenObj, err := heap.GetObject(thenValue.GetHandle()); err == nil {
 								if _, ok := thenObj.(object.Callable); ok {
 									p := native.NewPromise()
+									pValue := value.EncodeHandle(heap.Allocate(p))
+									vm.rootPromiseWithValue(p, pValue)
 									resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFunc(p)))
 									reject := value.EncodeHandle(heap.Allocate(native.NewRejectFunc(p)))
 									vm.callValue(thenValue, awaitee, []value.Value{resolve, reject})
@@ -8605,7 +8784,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 					}
 					vm.exceptionStack = kept
-					curentAsyncFn.Pause(stack, ip, f.localStart, f.localCount, f.heapScope, f.ownScope, exceptions)
+					curentAsyncFn.Pause(stack, ip, f.localStart, f.localCount, f.heapScope, f.ownScope, f.thisCtx, exceptions)
 					if promise.Status != native.PENDING {
 						if len(curentAsyncFn.State.Stack) > 0 {
 							curentAsyncFn.State.Stack[len(curentAsyncFn.State.Stack)-1] = promise.Value
