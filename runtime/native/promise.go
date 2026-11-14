@@ -2,6 +2,7 @@ package native
 
 import (
 	"fmt"
+	"go_js/chunk"
 	"go_js/heap"
 	"go_js/object"
 	"go_js/value"
@@ -255,8 +256,14 @@ func (pCtor *PromiseConstructor) String() string {
 	return "function Promise"
 }
 
+func newPromiseSettlementFunction(name string) object.ObjFunction {
+	fn := *object.NewFunction(name, 1, nil)
+	fn.Chunk.EmitBytes(chunk.OP_SETTLE_PROMISE, chunk.OP_RETURN)
+	return fn
+}
+
 type ResolveFunc struct {
-	object.Ctx
+	object.ObjFunction
 	owner                *ObjPromise
 	marked               bool
 	Called               *bool
@@ -264,8 +271,19 @@ type ResolveFunc struct {
 	ID                   int
 }
 
+func newResolveFunc(owner *ObjPromise) ResolveFunc {
+	return ResolveFunc{
+		ObjFunction: newPromiseSettlementFunction("resolve"),
+		owner:       owner,
+	}
+}
+
 func NewResolveFuncTracked(owner *ObjPromise, called *bool, id int) *ResolveFunc {
-	return &ResolveFunc{owner: owner, Called: called, AllowDuringResolving: true, ID: id}
+	resolve := newResolveFunc(owner)
+	resolve.Called = called
+	resolve.AllowDuringResolving = true
+	resolve.ID = id
+	return &resolve
 }
 
 func (*ResolveFunc) GetReferencingValues() []value.Value {
@@ -273,7 +291,8 @@ func (*ResolveFunc) GetReferencingValues() []value.Value {
 }
 
 func NewResolveFunc(owner *ObjPromise) *ResolveFunc {
-	return &ResolveFunc{owner: owner}
+	resolve := newResolveFunc(owner)
+	return &resolve
 }
 
 func (*ResolveFunc) Type() object.ObjType {
@@ -296,6 +315,11 @@ func (o *ResolveFunc) Clear() {
 	o.marked = false
 }
 
+func (resolve *ResolveFunc) Clone() object.Callable {
+	clone := *resolve
+	return &clone
+}
+
 func (resolve *ResolveFunc) Resolve(v value.Value) {
 	if resolve.Called != nil {
 		*resolve.Called = true
@@ -308,14 +332,23 @@ func (resolve *ResolveFunc) Promise() *ObjPromise {
 }
 
 type RejectFunc struct {
-	object.Ctx
+	object.ObjFunction
 	owner  *ObjPromise
 	marked bool
 	ID     int
 }
 
+func newRejectFunc(owner *ObjPromise) RejectFunc {
+	return RejectFunc{
+		ObjFunction: newPromiseSettlementFunction("reject"),
+		owner:       owner,
+	}
+}
+
 func NewRejectFuncWithID(owner *ObjPromise, id int) *RejectFunc {
-	return &RejectFunc{owner: owner, ID: id}
+	reject := newRejectFunc(owner)
+	reject.ID = id
+	return &reject
 }
 
 func (*RejectFunc) GetReferencingValues() []value.Value {
@@ -323,7 +356,8 @@ func (*RejectFunc) GetReferencingValues() []value.Value {
 }
 
 func NewRejectFunc(owner *ObjPromise) *RejectFunc {
-	return &RejectFunc{owner: owner}
+	reject := newRejectFunc(owner)
+	return &reject
 }
 
 func (*RejectFunc) Type() object.ObjType {
@@ -344,6 +378,11 @@ func (o *RejectFunc) Marked() bool {
 
 func (o *RejectFunc) Clear() {
 	o.marked = false
+}
+
+func (reject *RejectFunc) Clone() object.Callable {
+	clone := *reject
+	return &clone
 }
 
 func (reject *RejectFunc) Reject(v value.Value) {

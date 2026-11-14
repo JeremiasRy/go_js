@@ -161,6 +161,7 @@ const (
 	OP_WITH_GET
 	OP_WITH_SET
 	OP_DUP_CLASS
+	OP_SETTLE_PROMISE
 	OP_JIT_HALT
 )
 
@@ -325,5 +326,6 @@ var OpNames = map[uint8]string{
 	OP_WITH_GET:                         "OP_WITH_GET",
 	OP_WITH_SET:                         "OP_WITH_SET",
 	OP_DUP_CLASS:                        "OP_DUP_CLASS",
+	OP_SETTLE_PROMISE:                   "OP_SETTLE_PROMISE",
 	OP_JIT_HALT:                         "OP_JIT_HALT",
 }

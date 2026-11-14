@@ -1502,9 +1502,53 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
 
+				functions := []*Variable{}
+				for _, variable := range symbolTable.vars {
+					if variable.type_ == FUNCTION {
+						functions = append(functions, variable)
+					}
+				}
+
+				slices.SortFunc(functions, func(a, b *Variable) int {
+					return cmp.Compare(a.slot, b.slot)
+				})
+
+				for _, variable := range functions {
+					fnValue := heap.Allocate(variable.fn)
+					slot := newFn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
+
+					if uint8(variable.slot) != slot {
+						panic("things went south")
+					}
+
+					newFn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
+				}
+
 				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
 				emitPatternParameters(current.Params, symbolTable, newFn)
+
+				if len(current.Params) > 0 {
+					heapVars := []int{}
+
+					for i, n := range current.Params {
+						withAstTracking(n, newFn, func() {
+							if v, found := symbolTable.vars[parameterName(n)]; found {
+								if v.scope == HEAP {
+									heapVars = append(heapVars, i, v.slot)
+								}
+							}
+						})
+					}
+
+					if len(heapVars) > 0 {
+						newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
+						for _, slot := range heapVars {
+							newFn.ValueChunk().EmitByte(uint8(slot))
+						}
+					}
+				}
+
 				emitParameterDefaults(current.Params, symbolTable, newFn)
 
 				if current.IsExpression {
