@@ -10,7 +10,7 @@
 
     const { eventLoop, frame, outputText, atEnd }: Props = $props();
 
-    let outputElement = $state<HTMLPreElement | undefined>(undefined);
+    let outputElement = $state<HTMLPreElement | null>(null);
     let lastOutputLength = -1;
 
     const phaseClasses = $derived.by(() => {
@@ -80,7 +80,7 @@
 
     $effect(() => {
         const length = outputText.length;
-        if (outputElement === undefined || length === lastOutputLength) {
+        if (!outputElement || length === lastOutputLength) {
             return;
         }
 
