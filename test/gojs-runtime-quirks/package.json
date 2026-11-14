@@ -1,0 +1,16 @@
+{
+  "name": "gojs-runtime-quirks",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reproduction probes for go_js MCP runtime failures, with Node.js 24 as the behavioral baseline",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node probes/run-all.js",
+    "test:node24": "npx -y node@24 probes/run-all.js",
+    "lab": "node lab/task-queue-lab.js",
+    "lab:node24": "npx -y node@24 lab/task-queue-lab.js"
+  }
+}
