@@ -1,1 +1,0 @@
-console.log(new Intl.RelativeTimeFormat('en').format(-1,'day'))

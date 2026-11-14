@@ -1,1 +1,0 @@
-console.log(Math.sumPrecise([0.1,0.2]))

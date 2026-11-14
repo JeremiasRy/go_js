@@ -1,1 +1,0 @@
-console.log(new Intl.Collator('en').compare('a','b')<0)

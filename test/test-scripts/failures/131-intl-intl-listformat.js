@@ -1,1 +1,0 @@
-console.log(new Intl.ListFormat('en').format(['a','b']))
