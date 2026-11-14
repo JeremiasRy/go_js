@@ -70,7 +70,7 @@
 
     const { vm, frame }: Props = $props();
 
-    let stackScroll = $state<HTMLDivElement | undefined>(undefined);
+    let stackScroll = $state<HTMLDivElement | null>(null);
 
     const activeFrame = $derived.by<VMStackFrame | null>(() => {
         const state = vm;
@@ -159,7 +159,7 @@
         const slotCount = slots.length;
         const top = topAbsolute;
         const frameIndex = activeFrame?.index;
-        if (stackScroll === undefined) {
+        if (stackScroll === null) {
             return;
         }
 
