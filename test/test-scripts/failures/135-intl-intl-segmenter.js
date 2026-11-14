@@ -1,1 +1,0 @@
-console.log([...new Intl.Segmenter('en',{granularity:'word'}).segment('hi there')].length>0)

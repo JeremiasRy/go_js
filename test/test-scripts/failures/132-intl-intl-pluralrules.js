@@ -1,1 +1,0 @@
-console.log(new Intl.PluralRules('en').select(1))
