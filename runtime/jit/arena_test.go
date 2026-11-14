@@ -17,7 +17,7 @@ func simpleChunk(name string) *value.ValueChunk {
 	ch := value.NewChunk(name)
 	ch.Constants = []value.Value{value.ValueFromFloat64(1)}
 	ch.Code = []uint8{
-		chunk.OP_CONSTANT, 0,
+		chunk.OP_CONSTANT, 0, 0, 0, 0,
 		chunk.OP_RETURN,
 	}
 	ch.AstId = make([]int, len(ch.Code))
@@ -106,10 +106,10 @@ func TestManyChunks(t *testing.T) {
 }
 
 func FuzzDecodeChunk(f *testing.F) {
-	f.Add([]byte{chunk.OP_CONSTANT, 0, chunk.OP_RETURN})
+	f.Add([]byte{chunk.OP_CONSTANT, 0, 0, 0, 0, chunk.OP_RETURN})
 	f.Add([]byte{chunk.OP_JUMP, 0, 0, 0, 4})
 	f.Add([]byte{chunk.OP_CALL, 1, 0})
-	f.Add([]byte{chunk.OP_CREATE_REST_OBJECT, 2, 1})
+	f.Add([]byte{chunk.OP_CREATE_REST_OBJECT, 2, 0, 0, 0, 1, 0, 0, 0, 1})
 	f.Fuzz(func(t *testing.T, code []byte) {
 		_, _ = decodeChunk(code)
 	})

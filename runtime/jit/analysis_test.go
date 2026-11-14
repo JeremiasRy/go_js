@@ -16,13 +16,13 @@ func TestAnalyzeDirectSelfRecursion(t *testing.T) {
 	}
 	ch.Code = []uint8{
 		chunk.OP_GET_LOCAL, 0,
-		chunk.OP_CONSTANT, 0,
+		chunk.OP_CONSTANT, 0, 0, 0, 0,
 		chunk.OP_LESS_THAN_EQUAL,
 		chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 13,
 		chunk.OP_GET_LOCAL, 0,
 		chunk.OP_RETURN,
 		chunk.OP_GET_LOCAL, 0,
-		chunk.OP_CONSTANT, 1,
+		chunk.OP_CONSTANT, 0, 0, 0, 1,
 		chunk.OP_SUBTRACT,
 		chunk.OP_GET_GLOBAL, 75,
 		chunk.OP_CALL, 1, 0,
@@ -45,7 +45,7 @@ func TestAnalyzeDirectRejectsNonNumeric(t *testing.T) {
 	}
 	ch.Code = []uint8{
 		chunk.OP_GET_LOCAL, 0,
-		chunk.OP_CONSTANT, 0,
+		chunk.OP_CONSTANT, 0, 0, 0, 0,
 		chunk.OP_ADD,
 		chunk.OP_RETURN,
 	}

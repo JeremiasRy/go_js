@@ -3217,10 +3217,8 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 		switch code {
 		case chunk.OP_NEW_REGEXP:
 			{
-				patternValue := c.Constants[c.Code[ip]]
-				ip++
-				flagsValue := c.Constants[c.Code[ip]]
-				ip++
+				patternValue := c.Constants[c.ReadInt(&ip)]
+				flagsValue := c.Constants[c.ReadInt(&ip)]
 				pattern, _ := vm.valueAsString(patternValue)
 				flags, _ := vm.valueAsString(flagsValue)
 				obj, err := vm.compileRegExp(pattern, flags)
@@ -3235,8 +3233,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_CONSTANT:
 			{
-				vm.push(c.Constants[c.Code[ip]])
-				ip++
+				vm.push(c.Constants[c.ReadInt(&ip)])
 			}
 		case chunk.OP_POP:
 			{
@@ -4079,8 +4076,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_GET_GLOBAL_BY_NAME:
 			{
-				name := c.Constants[c.Code[ip]]
-				ip++
+				name := c.Constants[c.ReadInt(&ip)]
 				global := vm.ensureGlobalObject()
 				obj, _ := heap.GetObject(global.GetHandle())
 				hashable := obj.(object.Hashable)
@@ -4385,8 +4381,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			}
 		case chunk.OP_DEFINE_GLOBAL_NAMED:
 			{
-				name := c.Constants[c.Code[ip]]
-				ip++
+				name := c.Constants[c.ReadInt(&ip)]
 				v := vm.pop()
 				vm.addGlobal(v)
 				global := vm.ensureGlobalObject()
@@ -4449,8 +4444,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				global := c.Code[ip]
 				ip++
-				name := c.Constants[c.Code[ip]]
-				ip++
+				name := c.Constants[c.ReadInt(&ip)]
 				if int(global) >= globalsCount {
 					for len(globals) <= int(global) {
 						globals = append(globals, value.UNINITIALIZED)
@@ -4506,8 +4500,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				slot := int(c.Code[ip])
 				ip++
-				name := c.Constants[c.Code[ip]]
-				ip++
+				name := c.Constants[c.ReadInt(&ip)]
 				found, failed := false, false
 				for i := len(vm.withObjects) - 1; i >= 0; i-- {
 					has, err := vm.hasProperty(vm.withObjects[i], name)
@@ -4559,8 +4552,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 			{
 				slot := int(c.Code[ip])
 				ip++
-				name := c.Constants[c.Code[ip]]
-				ip++
+				name := c.Constants[c.ReadInt(&ip)]
 				v := vm.pop()
 				found, failed := false, false
 				for i := len(vm.withObjects) - 1; i >= 0; i-- {
@@ -9482,10 +9474,9 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 				exludeMap := map[value.Value]struct{}{}
 
 				for range amountOfExludedKeys {
-					key := c.Constants[c.Code[ip]]
+					key := c.Constants[c.ReadInt(&ip)]
 					ptr := value.EncodeHandle(heap.GetPointer(key.GetHandle()))
 					exludeMap[ptr] = struct{}{}
-					ip++
 				}
 
 				newObj := native.NewObjectHash()
