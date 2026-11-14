@@ -63,9 +63,7 @@
 <div
     class="rounded-md border px-2 py-1.5 transition-all {synthetic
         ? 'border-amber-300 bg-amber-50'
-        : 'border-slate-200 bg-white'} {top
-        ? 'ring-1 ring-cyan-200 ring-offset-1 ring-offset-white'
-        : ''}"
+        : 'border-slate-200 bg-white'} {top ? 'border-4' : ''}"
 >
     <div class="flex min-w-0 flex-wrap items-center gap-1">
         <span
