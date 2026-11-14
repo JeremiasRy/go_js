@@ -6,6 +6,7 @@
         HighlightStatus,
         SetHighlightStatusParams,
     } from "../types";
+    import OpcodeList from "./OpcodeList.svelte";
 
     type PropsType = {
         chunks: DisassembledChunk[];
@@ -224,7 +225,9 @@
         const previous = untrack(() => expandedChunks);
         const expansionChanged = !sameChunks(previous, affected);
 
-        expandedChunks = [...affected];
+        if (expansionChanged) {
+            expandedChunks = [...affected];
+        }
 
         let cancelled = false;
         let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -294,7 +297,6 @@
         });
     }
 
-    const getOpCodePtr = (item: { op_ptr: number }) => item.op_ptr;
     const getJitPtr = (item: { op_code_ptr: number }) => item.op_code_ptr;
 </script>
 
@@ -304,11 +306,6 @@
 >
     {#each chunkEntries as chunk, chunkIndex (chunk.id)}
         {@const isExpanded = expandedChunks.includes(chunk.id)}
-        {@const byteHighlightClasses = buildHighlightClasses({
-            items: chunk.byte_code,
-            chunkId: chunk.id,
-            getPtr: getOpCodePtr,
-        })}
         {@const jitHighlightClasses = buildHighlightClasses({
             items: chunk.jit,
             chunkId: chunk.id,
@@ -406,27 +403,11 @@
                                 </p>
                             {/each}
                         {:else}
-                            {#each chunk.byte_code as { op, ast_id, op_ptr }, i}
-                                <p
-                                    ondblclick={() => {
-                                        setHighlight({
-                                            astId: ast_id,
-                                            source: "op_code",
-                                            opCodePtr: op_ptr,
-                                            chunkId: chunk.id,
-                                        });
-                                    }}
-                                    data-code-row
-                                    data-chunk-id={chunk.id}
-                                    data-ast-id={ast_id}
-                                    data-op-ptr={op_ptr}
-                                    class="code cursor-default select-none rounded border-l border-transparent px-2 py-0.5 whitespace-pre-wrap {Number(
-                                        ast_id,
-                                    )} {byteHighlightClasses[i]}"
-                                >
-                                    {op}
-                                </p>
-                            {/each}
+                            <OpcodeList
+                                chunk={chunk}
+                                {highlight}
+                                {setHighlight}
+                            />
                         {/if}
                     </div>
                 </div>

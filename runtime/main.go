@@ -14,6 +14,7 @@ import (
 	"go_js/object"
 	"go_js/parser"
 	"go_js/queue"
+	"go_js/trace"
 	virtualMachine "go_js/vm"
 	"log"
 	"os"
@@ -50,6 +51,8 @@ func main() {
 	flag.BoolVar(&flags.Debug, "debug", false, "Enable debug mode")
 	flag.BoolVar(&flags.StructuredOutput, "structured", false, "Enable structured output")
 	flag.BoolVar(&flags.JSONErrors, "json-errors", false, "Report error classes and phases as JSON on stderr")
+	flag.BoolVar(&flags.TraceExecution, "trace-execution", false, "Record frames for the execution animation")
+	flag.IntVar(&flags.TraceMaxFrames, "trace-max-frames", flags.TraceMaxFrames, "Maximum stored execution trace frames")
 	sourceType := flag.String("source-type", "module", "JavaScript source goal: script or module")
 	jitMode := flag.String("jit", flags.JITMode, "JIT mode: off, auto or force")
 	flag.IntVar(&flags.JITCallThreshold, "jit-call-threshold", flags.JITCallThreshold, "Call count before a function is JIT compiled")
@@ -64,6 +67,12 @@ func main() {
 	}
 	if err := flags.SetJITMode(*jitMode); err != nil {
 		diagnostic.Fatal("configuration", "Error", err)
+	}
+	if flags.TraceExecution && !flags.StructuredOutput {
+		diagnostic.Fatal("configuration", "Error", fmt.Errorf("--trace-execution requires --structured"))
+	}
+	if flags.TraceMaxFrames <= 0 {
+		diagnostic.Fatal("configuration", "Error", fmt.Errorf("--trace-max-frames must be greater than zero"))
 	}
 
 	args := flag.Args()
@@ -131,6 +140,16 @@ func main() {
 
 	vm := virtualMachine.NewVM(true, output)
 
+	if flags.TraceExecution && flags.StructuredOutput {
+		vm.BeginTrace(trace.Limits{
+			MaxFrames:     flags.TraceMaxFrames,
+			MaxStack:      trace.DefaultMaxStack,
+			MaxQueueItems: trace.DefaultMaxQueueItems,
+			MaxTimers:     trace.DefaultMaxTimers,
+			MaxValueChars: trace.DefaultMaxValueChars,
+		})
+	}
+
 	go eventloop.Start()
 	go vm.Run(&wg)
 
@@ -161,12 +180,17 @@ func main() {
 		}
 		info.Finalize()
 
+		execution := virtualMachine.NewExecutionPlaceholder()
+		if flags.TraceExecution && flags.StructuredOutput {
+			execution = vm.FinishTrace(output.String())
+		}
+
 		out := virtualMachine.StructuredOut{
 			FormatVersion: virtualMachine.StructuredOutputFormatVersion,
 			Output:        output.String(),
 			DebugChunks:   info.Chunks,
 			Ast:           ast,
-			Execution:     virtualMachine.NewExecutionPlaceholder(),
+			Execution:     execution,
 		}
 
 		res, err := json.Marshal(out)

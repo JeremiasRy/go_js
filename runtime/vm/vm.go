@@ -12,6 +12,7 @@ import (
 	"go_js/native"
 	"go_js/object"
 	"go_js/queue"
+	"go_js/trace"
 	"go_js/value"
 	"math"
 	"math/big"
@@ -125,11 +126,30 @@ type VM struct {
 	withObjects   []value.Value
 	lastJITGC     uint32
 	callCounts    map[*value.ValueChunk]int
+
+	traceID           int
+	traceParentID     int
+	traceEnabled      bool
+	traceRecorder     *trace.Recorder
+	traceLimits       trace.Limits
+	traceLastFrame    CallFrame
+	traceLastChunk    *value.ValueChunk
+	traceLastOpIp     int
+	traceLastCode     uint8
+	traceLastPosValid bool
+	traceLastVMDirty  bool
+	traceLastVMState  *trace.VMState
 }
 
 func NewVM(main bool, output *strings.Builder) *VM {
 	frames := make([]CallFrame, FRAMES_MAX)
 	stack := make([]value.Value, STACK_INITIAL)
+	traceID := 0
+	if main {
+		traceID = 1
+	} else {
+		traceID = newTraceVMID()
+	}
 
 	return &VM{
 		output:         output,
@@ -143,12 +163,18 @@ func NewVM(main bool, output *strings.Builder) *VM {
 		loopMarks:      map[int][]int{},
 		loopIterators:  map[int]value.Value{},
 		callCounts:     map[*value.ValueChunk]int{},
+		traceID:        traceID,
+		traceLimits:    trace.DefaultLimits(),
 	}
 }
 
 func (vm *VM) newSubVM() *VM {
 	sub := NewVM(false, vm.output)
 	sub.callCounts = vm.callCounts
+	sub.traceParentID = vm.traceID
+	sub.traceEnabled = vm.traceEnabled
+	sub.traceRecorder = vm.traceRecorder
+	sub.traceLimits = vm.traceLimits
 	return sub
 }
 
@@ -1260,10 +1286,10 @@ func (vm *VM) privateTarget(objValue, key value.Value) (object.Hashable, bool) {
 	return hashable, true
 }
 
-func (vm *VM) enqueueNativeCallback(roots []value.Value, fn func()) {
+func (vm *VM) enqueueNativeCallback(roots []value.Value, label, source string, fn func()) {
 	key := heap.NewCallbackRoot()
 	heap.StoreCallbackRoot(key, roots...)
-	queue.Enqueue(object.Callback{Native: fn, RootKey: key}, queue.MICRO_TASK, false)
+	queue.Enqueue(object.Callback{Native: fn, RootKey: key, TraceLabel: label, TraceSource: source}, queue.MICRO_TASK, false)
 }
 
 func (vm *VM) addPromiseObserver(p *native.ObjPromise, fulfilled func(value.Value), rejected func(value.Value), roots ...value.Value) {
@@ -1275,7 +1301,7 @@ func (vm *VM) addPromiseObserver(p *native.ObjPromise, fulfilled func(value.Valu
 	status := p.Status
 	argument := p.Value
 	callbackRoots := append(append([]value.Value{}, roots...), argument)
-	vm.enqueueNativeCallback(callbackRoots, func() {
+	vm.enqueueNativeCallback(callbackRoots, "promise observer", "promise", func() {
 		if status == native.RESOLVED {
 			if fulfilled != nil {
 				fulfilled(argument)
@@ -1299,7 +1325,7 @@ func (vm *VM) settlePromise(p *native.ObjPromise) {
 		fulfilled := p.Status == native.RESOLVED
 		argument := p.Value
 		callbackRoots := append(append([]value.Value{}, observer.Roots...), argument)
-		vm.enqueueNativeCallback(callbackRoots, func() {
+		vm.enqueueNativeCallback(callbackRoots, "promise observer", "promise", func() {
 			if fulfilled {
 				if observer.Fulfilled != nil {
 					observer.Fulfilled(argument)
@@ -1314,7 +1340,7 @@ func (vm *VM) settlePromise(p *native.ObjPromise) {
 		fulfilled := p.Status == native.RESOLVED
 		argument := p.Value
 		callbackRoots := []value.Value{argument, reaction.OnFulfilled, reaction.OnRejected, reaction.Finalizer, reaction.Derived}
-		vm.enqueueNativeCallback(callbackRoots, func() {
+		vm.enqueueNativeCallback(callbackRoots, "promise reaction", "promise", func() {
 			vm.promiseReaction(reaction, fulfilled, argument)
 		})
 	}
@@ -1328,7 +1354,7 @@ func (vm *VM) attachPromiseReaction(p *native.ObjPromise, reaction native.Promis
 	fulfilled := p.Status == native.RESOLVED
 	argument := p.Value
 	callbackRoots := []value.Value{argument, reaction.OnFulfilled, reaction.OnRejected, reaction.Finalizer, reaction.Derived}
-	vm.enqueueNativeCallback(callbackRoots, func() {
+	vm.enqueueNativeCallback(callbackRoots, "promise reaction", "promise", func() {
 		vm.promiseReaction(reaction, fulfilled, argument)
 	})
 }
@@ -1361,7 +1387,7 @@ func (vm *VM) promiseReaction(reaction native.PromiseReaction, fulfilled bool, a
 			}
 		}
 		callbackRoots := []value.Value{reaction.Derived, argument}
-		vm.enqueueNativeCallback(callbackRoots, func() {
+		vm.enqueueNativeCallback(callbackRoots, "promise.finally", "promise", func() {
 			if fulfilled {
 				vm.resolvePromise(derived, argument)
 			} else {
@@ -1453,7 +1479,7 @@ func (vm *VM) resolvePromise(p *native.ObjPromise, v value.Value) {
 				p.ResolutionID++
 				resolutionID := p.ResolutionID
 				callbackRoots := []value.Value{thenValue, v}
-				vm.enqueueNativeCallback(callbackRoots, func() {
+				vm.enqueueNativeCallback(callbackRoots, "promise thenable", "promise", func() {
 					called := false
 					resolve := value.EncodeHandle(heap.Allocate(native.NewResolveFuncTracked(p, &called, resolutionID)))
 					reject := value.EncodeHandle(heap.Allocate(native.NewRejectFuncWithID(p, resolutionID)))
@@ -1478,6 +1504,7 @@ func (vm *VM) invokeCallableWithThis(target, this value.Value, args []value.Valu
 	runner := vm.newSubVM()
 	runner.depth = vm.depth + 1
 	fn := object.NewFunction("native-call", 0, nil)
+	fn.ValueChunk().TraceHidden = true
 	for _, arg := range args {
 		fn.ValueChunk().WriteConstant(arg)
 	}
@@ -2844,14 +2871,24 @@ func (vm *VM) padMissingArguments(fn object.Callable, localStart int) {
 func (vm *VM) Run(wg *sync.WaitGroup) {
 	wg.Add(1)
 Run:
-	callback, errDequeue := queue.Dequeue()
+	callback, priority, errDequeue := queue.Dequeue()
 	for errDequeue == nil {
+		callback.MicroTask = priority == queue.MICRO_TASK
+		if callback.Cancelled != nil && callback.Cancelled.Load() {
+			if callback.RootKey != 0 {
+				heap.ClearCallbackRoot(callback.RootKey)
+			}
+			callback, priority, errDequeue = queue.Dequeue()
+			continue
+		}
+		vm.traceJobStart(callback, priority)
 		if callback.Native != nil {
 			callback.Native()
 			if callback.RootKey != 0 {
 				heap.ClearCallbackRoot(callback.RootKey)
 			}
-			callback, errDequeue = queue.Dequeue()
+			vm.traceJobEnd()
+			callback, priority, errDequeue = queue.Dequeue()
 			continue
 		}
 		if len(callback.Stack) > 0 {
@@ -2895,7 +2932,8 @@ Run:
 			}
 			diagnostic.Fatal("runtime", name, err)
 		}
-		callback, errDequeue = queue.Dequeue()
+		vm.traceJobEnd()
+		callback, priority, errDequeue = queue.Dequeue()
 	}
 
 	if flags.Debug {
@@ -2909,6 +2947,7 @@ Run:
 		wg.Done()
 		return
 	}
+	vm.traceWaiting()
 	for {
 		select {
 		case <-queue.QueueC:
@@ -3036,8 +3075,11 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 
 	for {
 		// time.Sleep(time.Millisecond * 100)
-		code := c.Code[ip]
+		opIp := ip
+		code := c.Code[opIp]
 		ip++
+
+		vm.traceStep(&f, &c, opIp, code)
 
 		if heap.ShouldRunGCCycle() {
 			vm.runGC()
@@ -6659,6 +6701,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						if len(args) > 0 {
 							id, _ := vm.toNumber(args[0])
 							native.CancelTimer(int(id))
+							vm.traceTimerCancelled(int(id))
 						}
 						vm.push(value.UNDEFINED)
 					}
@@ -6902,7 +6945,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						key := heap.NewCallbackRoot()
 						heap.StoreCallbackRoot(key, v)
-						queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: []value.Value{v}, RootKey: key}, queue.MICRO_TASK, false)
+						queue.Enqueue(object.Callback{Fn: callable, ThisCtx: value.UNDEFINED, Stack: []value.Value{v}, RootKey: key, TraceLabel: "queueMicrotask", TraceSource: "queueMicrotask"}, queue.MICRO_TASK, false)
 						vm.push(value.UNDEFINED)
 					}
 				case *native.JSONParse:
@@ -8438,6 +8481,15 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 					promise = native.NewPromise()
 					promise.Resolve(value.UNDEFINED)
 				}
+				promiseView := vm.awaitPromiseView(awaitee, promise)
+				awaitFn := callableName(f.fn)
+				vm.traceEvent(trace.Event{
+					Type:        "await_suspend",
+					Fn:          awaitFn,
+					ResumeOpPtr: ip,
+					Promise:     &promiseView,
+					Detail:      "await suspended; continuation will resume from the promise",
+				}, awaitFn+" is suspended at await")
 				if generator, ok := f.fn.(*native.ObjGenerator); ok && generator.IsAsync {
 					vm.suspendGenerator(generator, ip, &f, value.UNDEFINED)
 					generator.AsyncAwaiting = promise
@@ -8479,7 +8531,7 @@ func (vm *VM) run(f CallFrame, c value.ValueChunk) (value.Value, error) {
 						}
 						key := heap.NewCallbackRoot()
 						heap.StoreCallbackRoot(key, curentAsyncFn.State.Stack...)
-						queue.Enqueue(object.Callback{Fn: curentAsyncFn, ThisCtx: value.UNDEFINED, RootKey: key, MicroTask: true}, queue.MICRO_TASK, false)
+						queue.Enqueue(object.Callback{Fn: curentAsyncFn, ThisCtx: value.UNDEFINED, RootKey: key, MicroTask: true, TraceLabel: "resume await in " + curentAsyncFn.Name, TraceSource: "await"}, queue.MICRO_TASK, false)
 					} else {
 						curentAsyncFn.Await(promise)
 					}

@@ -827,6 +827,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	strictContext = module
 	setup := object.NewFunction(object.SETUP_FN_NAME, 0, nil)
 	setup.ValueChunk().SetCompTimeAstId(INITIAL_SETUP_AST_ID)
+	setup.ValueChunk().TraceHidden = true
 	defineObjectConstructor(setup, global)
 	defineConsole(setup, global)
 	defineSetTimeout(setup, global)

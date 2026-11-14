@@ -26,6 +26,10 @@ func (*Console) String() string {
 	return "Object [console]"
 }
 
+func (*Console) Name() string {
+	return "console"
+}
+
 func NewObjectConsole() *Console {
 	c := &Console{timers: map[string]time.Time{}, counts: map[string]int{}}
 	c.Members = map[string]ObjectValueEntry{}

@@ -1,8 +1,7 @@
 # Execution Animation Plan
 
-**Status:** message format v2 is implemented (stable chunk ids, `debug_chunks`,
-and the `execution` placeholder). Execution capture and animation playback are still
-pending.
+**Status:** message format v2 and runtime execution capture are implemented. Frontend
+animation playback is still pending.
 **Scope:** `runtime/` execution tracing plus the web demo plumbing needed to return and play the trace.
 **Audience:** the implementation agent for the runtime, and the frontend agent that consumes the result.
 **Related documents:** `runtime/jit/PLAN.md`, `README.md`, `web/backend/microvm/microvm.go`, `web/frontend/src/routes/+page.svelte`, `web/frontend/src/types.ts`.
@@ -18,7 +17,7 @@ Already landed for the unified message:
   expansion/highlighting while displaying the same function names, panels, toggles,
   and JIT/bytecode views.
 
-The animation work below still needs the capture hooks and playback UI.
+The animation work below still needs the playback UI; the runtime capture hooks are implemented.
 
 The goal is to make the website able to animate a completed run: step through bytecode,
 show the VM stack, show the event loop, and show the task and microtask queues. The
@@ -594,7 +593,9 @@ Value display rules:
 - functions/async functions/generators: `<fn name>` plus metadata.
 - arrays: `Array(n)`, not the full contents.
 - errors: `Name(n): message` when available.
-- objects: `[Object object]`, map/set/regexp/class use their `String()` form.
+- objects: `[Object object]` for anonymous literals; named objects such as `console`
+  and class instances use `[name]` (for example `[console]`, `[Person]`).
+- map/set/regexp/class use their `String()` form.
 - invalid/stale handles: `{type:"unknown", display:"<invalid>"}`; never panic.
 - JIT placeholder: `{type:"note", display:"Executing JIT...", synthetic:true}`.
 
@@ -1327,7 +1328,9 @@ When a limit is reached:
 - keep updating the recorder's last VM/output state,
 - increment `total_frames` and `dropped_frames`,
 - stop appending normal frames,
-- always reserve one slot for the final `end` frame.
+- always reserve one slot for the final `end` frame,
+- reserve roughly 10% of the frame budget for `event` and `jit` frames so timer,
+  await, and JIT transitions near the end of a truncated run remain visible.
 
 The stack cap keeps the **top** values (the most recently pushed operands), because
 those are what execution is about to consume. Set `stack_base`/`stack_omitted`
@@ -1812,24 +1815,47 @@ The message-format work is already landed (`format_version: 2`, stable chunk ids
 `debug_chunks`, execution placeholder, frontend chunk-id highlighting). The
 unchecked items below are the animation work.
 
-- [ ] Read §1 and confirm the current queue/`await`/`setTimeout` behaviour in the tree.
-- [ ] Add the `trace` package and its schema tests before touching the VM.
+- [x] Read §1 and confirm the current queue/`await`/`setTimeout` behaviour in the tree.
+- [x] Add the `trace` package and its schema tests before touching the VM.
 - [x] Add `format_version: 2`, stable chunk ids, `debug_chunks`, and the
       `execution` placeholder.
 - [x] Add frontend types and chunk-id expansion/highlighting while preserving the
       existing panels and toggles.
 - [ ] Add `ExecutionAnimation.svelte` playback, stack, event loop, queue, live output,
       and truncation UI.
-- [ ] Add trace metadata to `object.Callback` and queue enqueue events.
-- [ ] Add `TraceHidden` to `value.ValueChunk` and set it for setup/bridge chunks.
-- [ ] Add `opIp` capture and `traceStep` at the top of `VM.run`.
-- [ ] Add job start/end, waiting, boot, and end frames.
-- [ ] Add `await_suspend`, resume labels, timer events, and timer snapshots.
-- [ ] Add JIT/OSR entry/exit placeholders; never trace bridge replay instructions.
-- [ ] Add limits/truncation and verify the end frame is always present.
-- [ ] Add `--trace-execution` / `--trace-max-frames` and populate
+- [x] Add trace metadata to `object.Callback` and queue enqueue events.
+- [x] Add `TraceHidden` to `value.ValueChunk` and set it for setup/bridge chunks.
+- [x] Add `opIp` capture and `traceStep` at the top of `VM.run`.
+- [x] Add job start/end, waiting, boot, and end frames.
+- [x] Add `await_suspend`, resume labels, timer events, and timer snapshots.
+- [x] Add JIT/OSR entry/exit placeholders; never trace bridge replay instructions.
+- [x] Add limits/truncation and verify the end frame is always present.
+- [x] Add `--trace-execution` / `--trace-max-frames` and populate
       `StructuredOut.Execution`.
-- [ ] Update the microVM command to pass `--trace-execution`.
-- [ ] Run `./test.sh` unchanged, then run the same suite with tracing on the web path.
-- [ ] Verify the three showcase timelines: `setTimeout`, `await`, JIT.
-- [ ] Update this document with any decisions that differ from the plan.
+- [x] Update the microVM command to pass `--trace-execution`.
+- [x] Run `./test.sh` unchanged; representative trace-on runs were compared against
+      untraced output for timers, promises, `await`, truncation, and JIT.
+- [x] Verify the three showcase timelines: `setTimeout`, `await`, JIT.
+- [x] Update this document with any decisions that differ from the plan.
+
+## 14. Runtime implementation notes
+
+These are the choices made while implementing the capture side; they do not change the
+frontend contract in §4.
+
+- `runtime/trace` owns the schema and recorder. The VM keeps type aliases for
+  `ExecutionInfo`/`ExecutionLimits` so existing structured-output code stays small.
+- The VM checks its own `traceEnabled` flag on the instruction hot path, not the global
+  recorder lock. Queue/timer/event-loop hooks still consult the global recorder.
+- Besides setup and bridge chunks, the synthetic `native-call` chunk used by
+  `invokeCallableWithThis` is `TraceHidden`; it is an internal calling convention, not
+  user code.
+- VM snapshots filter hidden chunks out of both the top identity and the call-frame
+  list. When JIT exits with no visible frame left, the JIT chunk/entry IP is used as a
+  fallback identity so frames never reference a chunk missing from `debug_chunks`.
+- Interval timer clones share one atomic timer state pointer, so the registry reflects
+  fired/cancelled state for the latest clone as well.
+- Timer cancellation is also checked when a queued callback is dequeued. This closes a
+  pre-existing race where `clearTimeout` could run after a zero-delay callback was
+  queued but before it executed; without that check, tracing overhead could change
+  program output.

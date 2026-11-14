@@ -2,6 +2,7 @@ package object
 
 import (
 	"go_js/value"
+	"sync/atomic"
 )
 
 type ObjType uint8
@@ -63,6 +64,11 @@ type Callback struct {
 	Native    func()
 	RootKey   uintptr
 	MicroTask bool
+
+	TraceID     uint64
+	TraceLabel  string
+	TraceSource string
+	Cancelled   *atomic.Bool
 }
 
 type JobChannelMessage struct {

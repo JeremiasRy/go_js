@@ -16,6 +16,7 @@
     import type {
         AstNode,
         DisassembledChunk,
+        HighlightOptions,
         HighlightStatus,
         PageStatus,
         InterpretResult,
@@ -26,6 +27,7 @@
     import AstTree from "./AstTree.svelte";
     import { generateLookUp } from "$lib/util";
     import Code from "./Code.svelte";
+    import ExecutionAnimation from "./ExecutionAnimation.svelte";
     import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
     import { fetchRandomScript, fetchSessionScripts } from "$lib/scriptsApi";
     import {
@@ -46,6 +48,7 @@
         "h-9 bg-slate-100 px-4 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2";
 
     type EditorTab = "editor" | "examples";
+    type ResultView = "result" | "animation";
 
     let editorContainer: HTMLElement;
     let view: EditorView;
@@ -72,6 +75,7 @@
     let scriptsRequest = 0;
     let runDots = $state(0);
     let outputExpanded = $state(true);
+    let resultView = $state<ResultView>("result");
     let isBusy = $derived(
         pageState === "submitting" || pageState === "running",
     );
@@ -80,6 +84,9 @@
             interpretResult !== null &&
             interpretResult.jobStatus === "Success" &&
             interpretResult.result !== null,
+    );
+    let animationFrameCount = $derived(
+        interpretResult?.result?.execution?.frames?.length ?? 0,
     );
     let statusLabel = $derived(
         pageState === "submitting"
@@ -110,6 +117,8 @@
     });
 
     let highlight = $state.raw<HighlightStatus | null>(null);
+    let highlightAutoScroll = $state(true);
+    let highlightScrollRequest = $state(0);
     let timeout = $state.raw<number | null>(null);
 
     const isSameHighlight = (opts: SetHighlightStatusParams) => {
@@ -134,9 +143,23 @@
         );
     };
 
-    const setHighlight = (opts: SetHighlightStatusParams) => {
-        if (opts === null || isSameHighlight(opts)) {
+    const setHighlight = (
+        opts: SetHighlightStatusParams,
+        options: HighlightOptions = {},
+    ) => {
+        const shouldScroll = options.scroll ?? true;
+        const shouldToggle = options.toggle ?? true;
+        highlightAutoScroll = shouldScroll;
+
+        if (opts === null || (shouldToggle && isSameHighlight(opts))) {
             highlight = null;
+            return;
+        }
+
+        if (isSameHighlight(opts)) {
+            if (shouldScroll) {
+                highlightScrollRequest += 1;
+            }
             return;
         }
 
@@ -302,6 +325,9 @@
     });
 
     $effect(() => {
+        const autoScroll = highlightAutoScroll;
+        void highlightScrollRequest;
+
         if (highlight === null) {
             view.dispatch({
                 effects: addHighlight.of({ from: 0, to: 0 }),
@@ -320,7 +346,7 @@
 
         if (highlight.source === "op_code" || highlight.source === "asm") {
             timeout = setTimeout(() => {
-                if (highlight === null) {
+                if (highlight === null || !autoScroll) {
                     return;
                 }
                 const elements: HTMLElement[] = highlight.astIds
@@ -489,6 +515,12 @@
             : "cursor-pointer rounded-md px-3 py-1 text-xs font-medium text-slate-500 hover:text-slate-700";
     }
 
+    function resultTabClass(tab: ResultView): string {
+        return resultView === tab
+            ? "cursor-pointer rounded-md bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm"
+            : "cursor-pointer rounded-md px-3 py-1 text-xs font-medium text-slate-500 hover:text-slate-700";
+    }
+
     function scriptPreview(src: string): string {
         const line = src.split("\n").find((value) => value.trim() !== "");
         return (line ?? "Empty script").trim().slice(0, 90);
@@ -582,6 +614,7 @@
                     target: lookUp,
                 });
                 outputExpanded = true;
+                resultView = "result";
                 pageState = "done";
             } catch (error) {
                 console.error(error);
@@ -756,6 +789,7 @@
         debugChunks = [];
         runError = null;
         highlight = null;
+        resultView = "result";
         astElements.clear();
         lookUp.clear();
     }
@@ -1092,25 +1126,76 @@
                     out:fade={{ duration: 150 }}
                 >
                     <section class="shrink-0 {CARD_CLASS}">
-                        <button
-                            type="button"
-                            class="{CARD_HEADER_CLASS} w-full cursor-pointer text-left hover:text-slate-800"
-                            aria-expanded={outputExpanded}
-                            aria-controls="execution-result-panel"
-                            onclick={() => (outputExpanded = !outputExpanded)}
-                        >
-                            <span>Execution result</span>
-                            <span
-                                class="inline-block transition-transform {outputExpanded
-                                    ? 'rotate-90'
-                                    : ''}"
-                                aria-hidden="true"
-                            >
-                                ▸
-                            </span>
-                        </button>
+                        <div class="{CARD_HEADER_CLASS}">
+                            {#if resultView === "result"}
+                                <button
+                                    type="button"
+                                    class="flex min-w-0 cursor-pointer items-center gap-1 text-left hover:text-slate-800"
+                                    aria-expanded={outputExpanded}
+                                    aria-controls="execution-result-panel"
+                                    onclick={() =>
+                                        (outputExpanded = !outputExpanded)}
+                                >
+                                    <span>Execution result</span>
+                                    <span
+                                        class="inline-block transition-transform {outputExpanded
+                                            ? 'rotate-90'
+                                            : ''}"
+                                        aria-hidden="true"
+                                    >
+                                        ▸
+                                    </span>
+                                </button>
+                            {:else}
+                                <span
+                                    class="flex min-w-0 items-center gap-2"
+                                >
+                                    <span>Execution animation</span>
+                                    {#if animationFrameCount > 0}
+                                        <span
+                                            class="rounded-full bg-cyan-50 px-1.5 py-0.5 text-[9px] font-semibold text-cyan-600"
+                                        >
+                                            {animationFrameCount} frames
+                                        </span>
+                                    {/if}
+                                </span>
+                            {/if}
 
-                        {#if outputExpanded}
+                            <div
+                                class="flex items-center gap-1 rounded-lg bg-slate-200/70 p-1"
+                                role="tablist"
+                                aria-label="Execution view"
+                            >
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={resultView === "result"}
+                                    class={resultTabClass("result")}
+                                    onclick={() => (resultView = "result")}
+                                >
+                                    Result
+                                </button>
+                                <button
+                                    type="button"
+                                    role="tab"
+                                    aria-selected={resultView === "animation"}
+                                    class="{resultTabClass(
+                                        'animation',
+                                    )} inline-flex items-center"
+                                    onclick={() => (resultView = "animation")}
+                                >
+                                    Animation
+                                    {#if animationFrameCount > 0}
+                                        <span
+                                            class="ml-1 h-1.5 w-1.5 rounded-full bg-cyan-500"
+                                            aria-hidden="true"
+                                        ></span>
+                                    {/if}
+                                </button>
+                            </div>
+                        </div>
+
+                        {#if resultView === "result" && outputExpanded}
                             <div
                                 id="execution-result-panel"
                                 class="max-h-[35vh] overflow-y-auto p-3"
@@ -1123,36 +1208,54 @@
                         {/if}
                     </section>
 
-                    <div class="flex min-h-0 flex-1 flex-row gap-3">
-                        <section
-                            class="flex min-w-0 flex-1 flex-col {CARD_CLASS}"
-                        >
-                            <div class={CARD_HEADER_CLASS}>ECMATree</div>
-                            <div class="flex-1 min-h-0 overflow-y-auto p-2">
-                                <AstTree
-                                    node={interpretResult!.result!.ast}
-                                    {highlight}
-                                    {setHighlight}
-                                    {registerThySelf}
-                                />
-                            </div>
-                        </section>
-
-                        <section
-                            class="flex min-w-0 flex-1 flex-col {CARD_CLASS}"
-                        >
-                            <div class={CARD_HEADER_CLASS}>Byte Code</div>
-                            <div
-                                class="flex flex-1 min-h-0 flex-col p-2"
+                    {#if resultView === "result"}
+                        <div class="flex min-h-0 flex-1 flex-row gap-3">
+                            <section
+                                class="flex min-w-0 flex-1 flex-col {CARD_CLASS}"
                             >
-                                <Code
+                                <div class={CARD_HEADER_CLASS}>ECMATree</div>
+                                <div class="flex-1 min-h-0 overflow-y-auto p-2">
+                                    <AstTree
+                                        node={interpretResult!.result!.ast}
+                                        {highlight}
+                                        {setHighlight}
+                                        {registerThySelf}
+                                    />
+                                </div>
+                            </section>
+
+                            <section
+                                class="flex min-w-0 flex-1 flex-col {CARD_CLASS}"
+                            >
+                                <div class={CARD_HEADER_CLASS}>Byte Code</div>
+                                <div
+                                    class="flex flex-1 min-h-0 flex-col p-2"
+                                >
+                                    <Code
+                                        chunks={debugChunks}
+                                        {highlight}
+                                        {setHighlight}
+                                    />
+                                </div>
+                            </section>
+                        </div>
+                    {:else}
+                        <section
+                            class="flex min-h-0 flex-1 flex-col {CARD_CLASS}"
+                        >
+                            <div class="min-h-0 flex-1">
+                                <ExecutionAnimation
+                                    execution={interpretResult!.result
+                                        ?.execution ?? null}
+                                    output={interpretResult!.result?.output ??
+                                        ""}
                                     chunks={debugChunks}
                                     {highlight}
                                     {setHighlight}
                                 />
                             </div>
                         </section>
-                    </div>
+                    {/if}
                 </div>
             {/if}
         </div>

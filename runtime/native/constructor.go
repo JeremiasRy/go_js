@@ -261,8 +261,10 @@ func NewMain(fn *object.ObjFunction) *Main {
 func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	msg := &object.JobChannelMessage{
 		Callback: object.Callback{
-			Fn:      m.Fn.Clone(),
-			ThisCtx: value.UNDEFINED,
+			Fn:          m.Fn.Clone(),
+			ThisCtx:     value.UNDEFINED,
+			TraceLabel:  "main script",
+			TraceSource: "main",
 		},
 		Done: done,
 	}
@@ -271,31 +273,54 @@ func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func())
 
 type SetTimeout struct {
 	ObjNativeFn
-	time     int
-	callback object.Callback
-	args     []value.Value
-	rootKey  uintptr
-	cancel   *atomic.Bool
-	interval bool
+	time        int
+	callback    object.Callback
+	args        []value.Value
+	rootKey     uintptr
+	cancel      *atomic.Bool
+	interval    bool
+	traceLabel  string
+	traceSource string
+	state       *atomic.Int32
 }
 
+const (
+	timerPending int32 = iota
+	timerFired
+	timerCancelled
+)
+
 func NewSetTimeout() *SetTimeout {
-	setTimeout := &SetTimeout{cancel: &atomic.Bool{}}
+	setTimeout := &SetTimeout{cancel: &atomic.Bool{}, state: &atomic.Int32{}}
 	setTimeout.name = "setTimeout"
 
 	return setTimeout
 }
 
 func NewSetInterval() *SetTimeout {
-	interval := &SetTimeout{cancel: &atomic.Bool{}, interval: true}
+	interval := &SetTimeout{cancel: &atomic.Bool{}, interval: true, state: &atomic.Int32{}}
 	interval.name = "setInterval"
 	return interval
+}
+
+func (st *SetTimeout) Name() string {
+	return st.name
+}
+
+func (st *SetTimeout) Repeats() bool {
+	return st.interval
+}
+
+func (st *SetTimeout) SetTraceMetadata(label, source string) {
+	st.traceLabel = label
+	st.traceSource = source
 }
 
 func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value, args []value.Value) {
 	st.time = ms
 	st.args = append([]value.Value{}, args...)
 	st.cancel = &atomic.Bool{}
+	st.state = &atomic.Int32{}
 	st.callback = object.Callback{
 		Fn:      fn,
 		ThisCtx: this,
@@ -304,26 +329,48 @@ func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value, args []v
 
 func (st *SetTimeout) Cancel() {
 	st.cancel.Store(true)
+	if st.state != nil {
+		st.state.Store(timerCancelled)
+	}
 }
 
 func (st *SetTimeout) SetRootKey(key uintptr) {
 	st.rootKey = key
 }
 
+func (st *SetTimeout) markFired() {
+	if st.state != nil {
+		st.state.Store(timerFired)
+	}
+}
+
+func (st *SetTimeout) markPending() {
+	if st.state != nil {
+		st.state.Store(timerPending)
+	}
+}
+
 func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done func()) {
 	if st.cancel.Load() {
+		if st.state != nil {
+			st.state.Store(timerCancelled)
+		}
 		done()
 		return
 	}
 	callback := st.callback
 	callback.RootKey = st.rootKey
 	callback.Stack = append([]value.Value{}, st.args...)
+	callback.TraceLabel = st.traceLabel
+	callback.TraceSource = st.traceSource
+	callback.Cancelled = st.cancel
 	message := &object.JobChannelMessage{
 		Job:      nil,
 		Callback: callback,
 		Done:     done,
 	}
 	if st.time == 0 && !st.interval {
+		st.markFired()
 		callbackChannel <- message
 		return
 	}
@@ -335,17 +382,24 @@ func (st *SetTimeout) Work(callbackChannel chan *object.JobChannelMessage, done 
 	defer tick.Stop()
 	for range tick.C {
 		if st.cancel.Load() {
+			if st.state != nil {
+				st.state.Store(timerCancelled)
+			}
 			done()
 			return
 		}
 		if st.interval {
 			message.Done = func() {
 				done()
-				if !st.cancel.Load() {
-					eventloop.Dispatch(st.Clone())
+				if st.cancel.Load() {
+					st.state.Store(timerCancelled)
+					return
 				}
+				st.markPending()
+				eventloop.Dispatch(st.Clone())
 			}
 		}
+		st.markFired()
 		callbackChannel <- message
 		return
 	}
