@@ -112,16 +112,16 @@ func (c *ValueChunk) ReadInt(ip *int) int {
 	return result
 }
 
-func (c *ValueChunk) WriteConstant(v Value) uint8 {
+func (c *ValueChunk) WriteConstant(v Value) int {
 	arg := c.AddConstant(v)
-	c.EmitBytes(chunk.OP_CONSTANT, arg)
-
+	c.EmitByte(chunk.OP_CONSTANT)
+	c.EmitUint32(uint32(arg))
 	return arg
 }
 
-func (c *ValueChunk) AddConstant(v Value) uint8 {
+func (c *ValueChunk) AddConstant(v Value) int {
 	c.Constants = append(c.Constants, v)
-	return uint8(len(c.Constants) - 1)
+	return len(c.Constants) - 1
 }
 
 func (c *ValueChunk) PatchUint32(from uint32, u32 uint32) {

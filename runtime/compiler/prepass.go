@@ -67,6 +67,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
 		FUNCTION_SCOPES[current] = symbolTable
 
+		addParameterSlots(current.Params, symbolTable)
+		symbolTable.arity = len(current.Params)
+		markParamNames(current.Params, symbolTable)
+
 		// hoisting
 		for _, node := range current.BodyNode.Body {
 			if node.Type == parser.NODE_FUNCTION_DECLARATION {
@@ -90,10 +94,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 			}
 		}
 
-		addParameterSlots(current.Params, symbolTable)
-		symbolTable.arity = len(current.Params)
-		markParamNames(current.Params, symbolTable)
-
 		savedStrict := strictContext
 		strictContext = strictContext || nodeHasUseStrict(current) || module
 		for _, node := range current.BodyNode.Body {
@@ -108,6 +108,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		symbolTable := newFunctionScope(symbolTable, LOCAL)
 		symbolTable.isArrow = true
 		FUNCTION_SCOPES[current] = symbolTable
+
+		addParameterSlots(current.Params, symbolTable)
+		symbolTable.arity = len(current.Params)
+		markParamNames(current.Params, symbolTable)
 
 		// hoist function declarations
 		for _, node := range current.BodyNode.Body {
@@ -132,9 +136,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 				symbolTable.addVariable(name, FUNCTION, false, fn)
 			}
 		}
-		addParameterSlots(current.Params, symbolTable)
-		symbolTable.arity = len(current.Params)
-		markParamNames(current.Params, symbolTable)
 
 		if current.IsExpression {
 			prePass(current.BodyNode, symbolTable)
@@ -148,6 +149,10 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 		{
 			symbolTable := newFunctionScope(symbolTable, LOCAL)
 			FUNCTION_SCOPES[current] = symbolTable
+
+			addParameterSlots(current.Params, symbolTable)
+			symbolTable.arity = len(current.Params)
+			markParamNames(current.Params, symbolTable)
 
 			// hoist function declarations
 			for _, node := range current.BodyNode.Body {
@@ -172,9 +177,6 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 					symbolTable.addVariable(name, FUNCTION, false, fn)
 				}
 			}
-			addParameterSlots(current.Params, symbolTable)
-			symbolTable.arity = len(current.Params)
-			markParamNames(current.Params, symbolTable)
 
 			if current.IsExpression {
 				prePass(current.BodyNode, symbolTable)
@@ -359,6 +361,9 @@ func prePass(current *parser.Node, symbolTable *FunctionScope) {
 	case parser.NODE_MEMBER_EXPRESSION:
 		{
 			prePass(current.Object, symbolTable)
+			if current.Computed {
+				prePass(current.Property, symbolTable)
+			}
 			for _, node := range current.Arguments {
 				prePass(node, symbolTable)
 			}

@@ -151,10 +151,11 @@ func main() {
 	}
 
 	go eventloop.Start()
-	go vm.Run(&wg)
 
 	mainJob := &native.Main{Fn: main}
 	eventloop.Dispatch(mainJob)
+
+	go vm.Run(&wg)
 
 	wg.Wait()
 
