@@ -17,6 +17,8 @@ import (
 
 const maxJobBodySize = maxCodeSize + 16*1024
 
+const largeResultCompressionThreshold = 10 << 20
+
 type createJobRequest struct {
 	ClientRequestID  string `json:"client_request_id"`
 	ExecuteRequestID string `json:"execute_request_id"`
@@ -226,7 +228,7 @@ func (m *Manager) HandleJobResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gzipEncoding := acceptsGzip(r.Header.Get("Accept-Encoding"))
+	gzipEncoding := len(document) >= largeResultCompressionThreshold || acceptsGzip(r.Header.Get("Accept-Encoding"))
 	etag := `"` + jobID.String() + "-" + strconv.FormatInt(job.Revision, 10) + `-`
 	if gzipEncoding {
 		etag += "gzip"

@@ -374,6 +374,43 @@ func TestJobResultGzipWhenAccepted(t *testing.T) {
 	}
 }
 
+func TestJobResultCompressesLargePayloadWithoutAcceptEncoding(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, _ := manager.EnsureSession(uuid.NewString())
+	largeOutput := strings.Repeat("large-result-", largeResultCompressionThreshold/len("large-result-")+1)
+	job := insertSuccessJob(t, store, session.SessionID, largeOutput)
+
+	response := resultRequest(t, server, server.URL+"/session/"+session.SessionID+"/jobs/"+job.JobID.String()+"/result", "", "")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	if response.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("expected gzip for a large payload, got %q", response.Header.Get("Content-Encoding"))
+	}
+
+	reader, err := gzip.NewReader(response.Body)
+	if err != nil {
+		t.Fatalf("create gzip reader: %v", err)
+	}
+	defer reader.Close()
+
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read gzip result: %v", err)
+	}
+	var decoded struct {
+		Output string `json:"output"`
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	if decoded.Output != largeOutput {
+		t.Fatalf("unexpected output length %d, expected %d", len(decoded.Output), len(largeOutput))
+	}
+}
+
 func TestJobResultIdentityWhenGzipNotAccepted(t *testing.T) {
 	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
