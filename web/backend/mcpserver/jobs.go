@@ -228,7 +228,9 @@ func (m *Manager) HandleJobResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	gzipEncoding := len(document) >= largeResultCompressionThreshold || acceptsGzip(r.Header.Get("Accept-Encoding"))
+	acceptEncoding := r.Header.Get("Accept-Encoding")
+	gzipAccepted, gzipRefused := gzipPreference(acceptEncoding)
+	gzipEncoding := gzipAccepted || (len(document) >= largeResultCompressionThreshold && !gzipRefused)
 	etag := `"` + jobID.String() + "-" + strconv.FormatInt(job.Revision, 10) + `-`
 	if gzipEncoding {
 		etag += "gzip"
@@ -328,9 +330,9 @@ func writeJSONStatus(w http.ResponseWriter, status int, value any) {
 	}
 }
 
-func acceptsGzip(header string) bool {
+func gzipPreference(header string) (bool, bool) {
 	if strings.TrimSpace(header) == "" {
-		return false
+		return false, false
 	}
 
 	gzipQuality := -1.0
@@ -365,12 +367,12 @@ func acceptsGzip(header string) bool {
 	}
 
 	if gzipQuality >= 0 {
-		return gzipQuality > 0
+		return gzipQuality > 0, gzipQuality == 0
 	}
 	if wildcardQuality >= 0 {
-		return wildcardQuality > 0
+		return wildcardQuality > 0, wildcardQuality == 0
 	}
-	return false
+	return false, false
 }
 
 func ifNoneMatch(header string, etag string) bool {

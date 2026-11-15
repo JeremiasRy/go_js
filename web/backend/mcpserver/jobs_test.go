@@ -411,6 +411,40 @@ func TestJobResultCompressesLargePayloadWithoutAcceptEncoding(t *testing.T) {
 	}
 }
 
+func TestJobResultCompressesLargePayloadWhenProxyRequestsIdentity(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, _ := manager.EnsureSession(uuid.NewString())
+	largeOutput := strings.Repeat("large-result-", largeResultCompressionThreshold/len("large-result-")+1)
+	job := insertSuccessJob(t, store, session.SessionID, largeOutput)
+
+	response := resultRequest(t, server, server.URL+"/session/"+session.SessionID+"/jobs/"+job.JobID.String()+"/result", "identity", "")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	if response.Header.Get("Content-Encoding") != "gzip" {
+		t.Fatalf("expected gzip for a large payload, got %q", response.Header.Get("Content-Encoding"))
+	}
+}
+
+func TestJobResultLargePayloadHonorsGzipQZero(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, _ := manager.EnsureSession(uuid.NewString())
+	largeOutput := strings.Repeat("large-result-", largeResultCompressionThreshold/len("large-result-")+1)
+	job := insertSuccessJob(t, store, session.SessionID, largeOutput)
+
+	response := resultRequest(t, server, server.URL+"/session/"+session.SessionID+"/jobs/"+job.JobID.String()+"/result", "gzip;q=0, *;q=1", "")
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	if response.Header.Get("Content-Encoding") != "" {
+		t.Fatalf("expected identity when gzip is explicitly refused, got %q", response.Header.Get("Content-Encoding"))
+	}
+}
+
 func TestJobResultIdentityWhenGzipNotAccepted(t *testing.T) {
 	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
