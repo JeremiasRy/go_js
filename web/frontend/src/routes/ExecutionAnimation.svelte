@@ -38,7 +38,7 @@
     const emptyEventLoop: EventLoopState = {
         phase: "booting",
         work: 0,
-        timers: [],
+        work_items: [],
     };
 
     let frameIndex = $state(0);

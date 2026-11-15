@@ -5,6 +5,7 @@ import (
 	"go_js/eventloop"
 	"go_js/heap"
 	"go_js/object"
+	"go_js/trace"
 	"go_js/value"
 	"math"
 	"sync/atomic"
@@ -271,6 +272,10 @@ func (m *Main) Work(callbackChannel chan *object.JobChannelMessage, done func())
 	callbackChannel <- msg
 }
 
+func (*Main) TraceWorkItem() trace.WorkItem {
+	return trace.WorkItem{Kind: "main", Label: "main script", Source: "main"}
+}
+
 type SetTimeout struct {
 	ObjNativeFn
 	time        int
@@ -314,6 +319,27 @@ func (st *SetTimeout) Repeats() bool {
 func (st *SetTimeout) SetTraceMetadata(label, source string) {
 	st.traceLabel = label
 	st.traceSource = source
+}
+
+func (st *SetTimeout) TraceWorkItem() trace.WorkItem {
+	label := st.traceLabel
+	if label == "" {
+		label = st.name
+	}
+	if label == "" {
+		label = "timer"
+	}
+	source := st.traceSource
+	if source == "" {
+		source = st.name
+	}
+	return trace.WorkItem{
+		Kind:    "timer",
+		Label:   label,
+		Source:  source,
+		DelayMS: st.time,
+		Repeats: st.interval,
+	}
 }
 
 func (st *SetTimeout) Set(ms int, fn object.Callable, this value.Value, args []value.Value) {

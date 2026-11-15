@@ -77,7 +77,7 @@ export type ExecutionLimits = {
   max_frames: number;
   max_stack: number;
   max_queue_items: number;
-  max_timers: number;
+  max_work_items: number;
   max_value_chars: number;
 };
 
@@ -165,6 +165,16 @@ export type QueueState = {
   tasks_omitted?: number;
 };
 
+export type WorkItem = {
+  id: string;
+  kind: string;
+  label: string;
+  source?: string;
+  fn?: string;
+  delay_ms?: number;
+  repeats?: boolean;
+};
+
 export type TimerItem = {
   id: number;
   delay_ms: number;
@@ -184,8 +194,8 @@ export type EventLoopState = {
   next_queue?: QueueName;
   current_job?: QueueItem;
   work: number;
-  timers: TimerItem[];
-  timers_omitted?: number;
+  work_items: WorkItem[];
+  work_omitted?: number;
 };
 
 export type ExecutionEventType =

@@ -323,7 +323,7 @@ func TestTraceBudgetKeepsEventStateOutputAndAccounting(t *testing.T) {
 		MaxFrames:     13,
 		MaxStack:      8,
 		MaxQueueItems: 4,
-		MaxTimers:     4,
+		MaxWorkItems:  4,
 		MaxValueChars: 80,
 	})
 	t.Cleanup(trace.Disable)
@@ -415,7 +415,7 @@ func TestSubVMTraceSharesExhaustedStepBudget(t *testing.T) {
 		MaxFrames:     8,
 		MaxStack:      8,
 		MaxQueueItems: 4,
-		MaxTimers:     4,
+		MaxWorkItems:  4,
 		MaxValueChars: 80,
 	})
 	t.Cleanup(trace.Disable)

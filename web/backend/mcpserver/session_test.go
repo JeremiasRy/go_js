@@ -276,7 +276,7 @@ func encodedResult(output string) string {
 				"max_frames":      10000,
 				"max_stack":       64,
 				"max_queue_items": 32,
-				"max_timers":      16,
+				"max_work_items":  16,
 				"max_value_chars": 160,
 			},
 		},

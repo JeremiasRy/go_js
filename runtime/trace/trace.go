@@ -12,7 +12,7 @@ const (
 	DefaultMaxFrames     = 10000
 	DefaultMaxStack      = 64
 	DefaultMaxQueueItems = 32
-	DefaultMaxTimers     = 16
+	DefaultMaxWorkItems  = 16
 	DefaultMaxValueChars = 160
 )
 
@@ -20,7 +20,7 @@ type Limits struct {
 	MaxFrames     int `json:"max_frames"`
 	MaxStack      int `json:"max_stack"`
 	MaxQueueItems int `json:"max_queue_items"`
-	MaxTimers     int `json:"max_timers"`
+	MaxWorkItems  int `json:"max_work_items"`
 	MaxValueChars int `json:"max_value_chars"`
 }
 
@@ -29,7 +29,7 @@ func DefaultLimits() Limits {
 		MaxFrames:     DefaultMaxFrames,
 		MaxStack:      DefaultMaxStack,
 		MaxQueueItems: DefaultMaxQueueItems,
-		MaxTimers:     DefaultMaxTimers,
+		MaxWorkItems:  DefaultMaxWorkItems,
 		MaxValueChars: DefaultMaxValueChars,
 	}
 }
@@ -45,8 +45,8 @@ func (l Limits) normalized() Limits {
 	if l.MaxQueueItems <= 0 {
 		l.MaxQueueItems = defaults.MaxQueueItems
 	}
-	if l.MaxTimers <= 0 {
-		l.MaxTimers = defaults.MaxTimers
+	if l.MaxWorkItems <= 0 {
+		l.MaxWorkItems = defaults.MaxWorkItems
 	}
 	if l.MaxValueChars <= 0 {
 		l.MaxValueChars = defaults.MaxValueChars
@@ -159,12 +159,22 @@ type QueueItem struct {
 }
 
 type EventLoopState struct {
-	Phase         string      `json:"phase"`
-	NextQueue     string      `json:"next_queue,omitempty"`
-	CurrentJob    *QueueItem  `json:"current_job,omitempty"`
-	Work          int64       `json:"work"`
-	Timers        []TimerItem `json:"timers"`
-	TimersOmitted int         `json:"timers_omitted,omitempty"`
+	Phase       string     `json:"phase"`
+	NextQueue   string     `json:"next_queue,omitempty"`
+	CurrentJob  *QueueItem `json:"current_job,omitempty"`
+	Work        int64      `json:"work"`
+	WorkItems   []WorkItem `json:"work_items"`
+	WorkOmitted int        `json:"work_omitted,omitempty"`
+}
+
+type WorkItem struct {
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	Label   string `json:"label"`
+	Source  string `json:"source,omitempty"`
+	Fn      string `json:"fn,omitempty"`
+	DelayMS int    `json:"delay_ms,omitempty"`
+	Repeats bool   `json:"repeats,omitempty"`
 }
 
 type TimerItem struct {

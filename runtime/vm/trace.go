@@ -102,8 +102,8 @@ func (vm *VM) FinishTrace(output string) *trace.Execution {
 			Detail: "program finished successfully",
 		},
 		EventLoop: trace.EventLoopState{
-			Phase:  "done",
-			Timers: []trace.TimerItem{},
+			Phase:     "done",
+			WorkItems: []trace.WorkItem{},
 		},
 		Queues: queues,
 	}
@@ -567,25 +567,14 @@ func (vm *VM) methodHandleView(callee value.Value) trace.ValueView {
 func (vm *VM) loopState(queues trace.Queues, done bool) trace.EventLoopState {
 	limits := vm.traceLimits
 	eventLoop := eventloop.SnapshotState()
-	timers := native.TimerSnapshot()
+	workItems := eventLoop.Items
 	omitted := 0
-	if limits.MaxTimers > 0 && len(timers) > limits.MaxTimers {
-		omitted = len(timers) - limits.MaxTimers
-		timers = timers[:limits.MaxTimers]
+	if limits.MaxWorkItems > 0 && len(workItems) > limits.MaxWorkItems {
+		omitted = len(workItems) - limits.MaxWorkItems
+		workItems = workItems[:limits.MaxWorkItems]
 	}
-	timerItems := make([]trace.TimerItem, 0, len(timers))
-	timerArmed := false
-	for _, timer := range timers {
-		if timer.State == "pending" {
-			timerArmed = true
-		}
-		timerItems = append(timerItems, trace.TimerItem{
-			ID:      timer.ID,
-			DelayMS: timer.DelayMS,
-			Label:   timer.Label,
-			Repeats: timer.Repeats,
-			State:   timer.State,
-		})
+	if workItems == nil {
+		workItems = []trace.WorkItem{}
 	}
 
 	currentJob := trace.CurrentJob()
@@ -607,17 +596,17 @@ func (vm *VM) loopState(queues trace.Queues, done bool) trace.EventLoopState {
 		phase = "executing"
 	case nextQueue != "":
 		phase = "queued"
-	case eventLoop.Work > 0 || timerArmed:
+	case eventLoop.Work > 0:
 		phase = "waiting"
 	}
 
 	return trace.EventLoopState{
-		Phase:         phase,
-		NextQueue:     nextQueue,
-		CurrentJob:    currentJob,
-		Work:          eventLoop.Work,
-		Timers:        timerItems,
-		TimersOmitted: omitted,
+		Phase:       phase,
+		NextQueue:   nextQueue,
+		CurrentJob:  currentJob,
+		Work:        eventLoop.Work,
+		WorkItems:   workItems,
+		WorkOmitted: omitted,
 	}
 }
 

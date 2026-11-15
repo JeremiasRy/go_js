@@ -3,6 +3,7 @@ package native
 import (
 	"go_js/eventloop"
 	"go_js/object"
+	"go_js/trace"
 	"go_js/value"
 )
 
@@ -102,6 +103,19 @@ func (asyncFn *ObjAsyncFunction) Pause(s []value.Value, ip int, localStart int, 
 func (asyncFn *ObjAsyncFunction) Await(p *ObjPromise) {
 	asyncFn.Awaiting = p
 	eventloop.Dispatch(asyncFn)
+}
+
+func (asyncFn *ObjAsyncFunction) TraceWorkItem() trace.WorkItem {
+	name := asyncFn.Name
+	if name == "" {
+		name = "async function"
+	}
+	return trace.WorkItem{
+		Kind:   "async",
+		Label:  "resume await in " + name,
+		Source: "await",
+		Fn:     name,
+	}
 }
 
 func (asyncFn *ObjAsyncFunction) Work(callbackChannel chan *object.JobChannelMessage, done func()) {

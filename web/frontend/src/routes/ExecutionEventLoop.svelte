@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { ExecutionFrame, EventLoopState, TimerItem } from "../types";
+    import type { ExecutionFrame, EventLoopState, WorkItem } from "../types";
 
     type Props = {
         eventLoop: EventLoopState;
@@ -60,19 +60,25 @@
             : eventLoop.phase,
     );
 
-    const timerFlash = $derived(
+    const workItems = $derived(eventLoop.work_items ?? []);
+    const workFlash = $derived(
         frame?.event?.type === "timer_scheduled" ||
-            frame?.event?.type === "timer_cancelled",
+            frame?.event?.type === "timer_cancelled" ||
+            frame?.event?.type === "job_start" ||
+            frame?.event?.type === "job_end" ||
+            frame?.event?.type === "enqueue",
     );
 
-    function timerClasses(timer: TimerItem): string {
-        switch (timer.state) {
-            case "pending":
+    function workClasses(item: WorkItem): string {
+        switch (item.kind) {
+            case "timer":
                 return "border-amber-200 bg-amber-50 text-amber-700";
-            case "fired":
+            case "async":
+                return "border-cyan-200 bg-cyan-50 text-cyan-700";
+            case "fetch":
+                return "border-violet-200 bg-violet-50 text-violet-700";
+            case "main":
                 return "border-emerald-200 bg-emerald-50 text-emerald-700";
-            case "cancelled":
-                return "border-red-200 bg-red-50 text-red-600";
             default:
                 return "border-slate-200 bg-slate-50 text-slate-500";
         }
@@ -128,62 +134,70 @@
                     </p>
                 </div>
                 <div class="rounded-md bg-slate-50 px-2 py-1">
-                    <p class="text-slate-400">timers</p>
+                    <p class="text-slate-400">work</p>
                     <p class="truncate font-semibold text-slate-700">
-                        {eventLoop.timers.length +
-                            (eventLoop.timers_omitted ?? 0)}
+                        {eventLoop.work}
                     </p>
                 </div>
             </div>
         </div>
 
         <div
-            class="shrink-0 rounded-lg border p-2 transition-all {timerFlash
-                ? 'timer-flash border-amber-300'
+            class="shrink-0 rounded-lg border p-2 transition-all {workFlash
+                ? 'work-flash border-amber-300'
                 : 'border-slate-200'} bg-white"
         >
             <div class="flex items-center justify-between gap-2">
                 <span
                     class="text-[10px] font-semibold uppercase tracking-wide text-slate-400"
                 >
-                    Timers
+                    Work
                 </span>
                 <span class="text-[9px] text-slate-400">
-                    {eventLoop.timers.length + (eventLoop.timers_omitted ?? 0)} tracked
+                    {eventLoop.work} outstanding
                 </span>
             </div>
-            {#if eventLoop.timers.length === 0}
-                <p class="mt-1 text-xs text-slate-400">No timers scheduled.</p>
+            {#if workItems.length === 0}
+                <p class="mt-1 text-xs text-slate-400">
+                    No background work running.
+                </p>
             {:else}
                 <ul class="mt-1 flex flex-col gap-1">
-                    {#each eventLoop.timers as timer (timer.id)}
+                    {#each workItems as item (item.id)}
                         <li
-                            class="flex min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1 {timerClasses(
-                                timer,
+                            class="flex min-w-0 items-center gap-1.5 rounded-md border px-1.5 py-1 {workClasses(
+                                item,
                             )}"
                         >
-                            <span class="shrink-0 font-mono text-[9px]"
-                                >#{timer.id}</span
-                            >
-                            <span
-                                class="min-w-0 flex-1 truncate text-[10px] font-medium"
-                            >
-                                {timer.label}
-                            </span>
-                            <span class="shrink-0 text-[9px]"
-                                >{timer.delay_ms}ms</span
-                            >
                             <span
                                 class="shrink-0 rounded bg-white/70 px-1 py-0.5 text-[8px] font-semibold uppercase"
                             >
-                                {timer.state}
+                                {item.kind}
                             </span>
+                            <span
+                                class="min-w-0 flex-1 truncate text-[10px] font-medium"
+                                title={item.label}
+                            >
+                                {item.label}
+                            </span>
+                            {#if item.delay_ms !== undefined}
+                                <span class="shrink-0 text-[9px]"
+                                    >{item.delay_ms}ms</span
+                                >
+                            {/if}
+                            {#if item.repeats}
+                                <span
+                                    class="shrink-0 rounded bg-white/70 px-1 py-0.5 text-[8px] font-semibold uppercase"
+                                >
+                                    repeat
+                                </span>
+                            {/if}
                         </li>
                     {/each}
                 </ul>
-                {#if eventLoop.timers_omitted}
+                {#if eventLoop.work_omitted}
                     <p class="mt-1 text-[9px] text-slate-400">
-                        +{eventLoop.timers_omitted} more hidden by the trace limit
+                        +{eventLoop.work_omitted} more hidden by the trace limit
                     </p>
                 {/if}
             {/if}
@@ -213,11 +227,11 @@
 </div>
 
 <style>
-    .timer-flash {
-        animation: timer-flash 450ms ease-out;
+    .work-flash {
+        animation: work-flash 450ms ease-out;
     }
 
-    @keyframes timer-flash {
+    @keyframes work-flash {
         0% {
             box-shadow: 0 0 0 2px rgb(245 158 11 / 45%);
         }

@@ -11,8 +11,8 @@ func stepFrame(note string) Frame {
 		Kind: "step",
 		Note: note,
 		EventLoop: EventLoopState{
-			Phase:  "executing",
-			Timers: []TimerItem{},
+			Phase:     "executing",
+			WorkItems: []WorkItem{},
 		},
 		Queues: Queues{
 			MicroTasks: []QueueItem{},
@@ -156,7 +156,7 @@ func TestExecutionJSONShape(t *testing.T) {
 	recorder.AppendFrame(Frame{
 		Kind:      "end",
 		Event:     &Event{Type: "done"},
-		EventLoop: EventLoopState{Phase: "done", Timers: []TimerItem{}},
+		EventLoop: EventLoopState{Phase: "done", WorkItems: []WorkItem{}},
 		Queues:    Queues{MicroTasks: []QueueItem{}, Tasks: []QueueItem{}},
 	}, 0, "")
 
@@ -174,7 +174,7 @@ func TestExecutionJSONShape(t *testing.T) {
 		`"max_frames":10000`,
 		`"max_stack":64`,
 		`"max_queue_items":32`,
-		`"max_timers":16`,
+		`"max_work_items":16`,
 		`"max_value_chars":160`,
 	} {
 		if !strings.Contains(text, expected) {

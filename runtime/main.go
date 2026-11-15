@@ -145,7 +145,7 @@ func main() {
 			MaxFrames:     flags.TraceMaxFrames,
 			MaxStack:      trace.DefaultMaxStack,
 			MaxQueueItems: trace.DefaultMaxQueueItems,
-			MaxTimers:     trace.DefaultMaxTimers,
+			MaxWorkItems:  trace.DefaultMaxWorkItems,
 			MaxValueChars: trace.DefaultMaxValueChars,
 		})
 	}
