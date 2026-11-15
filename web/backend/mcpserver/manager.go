@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go_js_demo/db"
 	"go_js_demo/worker"
 )
 
@@ -191,19 +192,30 @@ func (m *Manager) HandleMCP(w http.ResponseWriter, r *http.Request) {
 	session.mcp.ServeHTTP(w, r)
 }
 
-func (m *Manager) DeliverJobResult(jobID uuid.UUID, status string, result string) {
+func (m *Manager) DeliverJobUpdate(update worker.JobResult) {
+	terminal := update.Status == db.JobSucceeded || update.Status == db.JobFailed
+
 	m.mu.Lock()
-	binding, ok := m.jobs[jobID]
-	if ok {
-		delete(m.jobs, jobID)
+	binding, ok := m.jobs[update.JobID]
+	if ok && terminal {
+		delete(m.jobs, update.JobID)
 	}
 	m.mu.Unlock()
 
-	if !ok {
+	var session *Session
+	if ok {
+		session = binding.session
+	} else if update.SessionID != "" {
+		session = m.getOrCreateSession(update.SessionID)
+		if !terminal {
+			m.bindJob(session, update.JobID)
+		}
+	} else {
+		log.Printf("Dropping update for unbound job %s without a session", shortID(update.JobID.String()))
 		return
 	}
 
-	binding.session.completeJob(jobID, status, result)
+	session.applyJobUpdate(update)
 }
 
 func (m *Manager) bindJob(session *Session, jobID uuid.UUID) {

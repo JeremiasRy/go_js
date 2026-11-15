@@ -1,6 +1,6 @@
 # Communication investigation: review and implementation plan
 
-- **Status:** Approved for Phase 1 implementation.
+- **Status:** Phase 1 implemented on `comms-investigation`. Automated backend, frontend, migration, and runtime checks pass; manual browser and deployment measurements remain acceptance work.
 - **Date:** 2026-11-14.
 - **Reviewed document:** [COMMUNICATION_INVESTIGATION.md](COMMUNICATION_INVESTIGATION.md).
 - **Repository baseline:** `comms-investigation` at `c1dc489` (investigation commit), on top of `b033e77`.
@@ -1289,17 +1289,17 @@ The implementation agent must not:
 
 Phase 1 is done when all of the following are true:
 
-- [ ] Migration `000003` applies cleanly to a database containing legacy rows.
-- [ ] `go test ./...` in `web/backend` passes.
-- [ ] `go vet ./...` in `web/backend` passes.
-- [ ] `npm run check` and `npm run build` in `web/frontend` pass.
-- [ ] `./test.sh` passes (runtime regression suite).
+- [x] Migration `000003` applies cleanly to a database containing legacy rows.
+- [x] `go test ./...` in `web/backend` passes.
+- [x] `go vet ./...` in `web/backend` passes.
+- [x] `npm run check` and `npm run build` in `web/frontend` pass.
+- [x] `./test.sh` passes (runtime regression suite).
 - [ ] A manual Fibonacci run returns raw gzipped JSON over HTTP, with no base64 in the browser path.
-- [ ] WebSocket traffic contains only small status/metadata messages.
-- [ ] History and random-script queries do not select `result`.
-- [ ] `Pending`, `Processing`, `Success`, and `Failed` are all observable in the UI.
-- [ ] Idempotent submission and same-key/different-source conflict are covered by tests.
-- [ ] MCP execute works with one and two tabs and returns output without decoding the full trace.
+- [x] WebSocket traffic contains only small status/metadata messages.
+- [x] History and random-script queries do not select `result`.
+- [x] `Pending`, `Processing`, `Success`, and `Failed` are all observable in the UI.
+- [x] Idempotent submission and same-key/different-source conflict are covered by tests.
+- [x] MCP execute works with one and two tabs and returns output without decoding the full trace.
 - [ ] Reload during processing and after success recovers from the status/result endpoints.
-- [ ] Legacy success and failure rows remain readable.
-- [ ] `README.md` and the investigation status note point to the new flow and this plan.
+- [x] Legacy success and failure rows remain readable.
+- [x] `README.md` and the investigation status note point to the new flow and this plan.

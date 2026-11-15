@@ -2,10 +2,10 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"net/http"
+
+	"go_js_demo/db"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -43,12 +43,16 @@ func newMCPHandler(runner toolRunner) http.Handler {
 			return nil, executeToolOutput{}, err
 		}
 
-		if outcome.Status != "Success" {
-			return nil, executeToolOutput{}, fmt.Errorf("execution failed: %s", outcome.Result)
+		if outcome.Status != db.JobSucceeded {
+			message := outcome.ErrorMessage
+			if message == "" {
+				message = "the interpreter failed to run the code"
+			}
+			return nil, executeToolOutput{}, fmt.Errorf("execution failed: %s", message)
 		}
 
 		return nil, executeToolOutput{
-			Output: decodeOutput(outcome.Result),
+			Output: outcome.Output,
 			JobID:  outcome.JobID.String(),
 		}, nil
 	})
@@ -63,20 +67,4 @@ func newMCPHandler(runner toolRunner) http.Handler {
 			MaxRequestBodyBytes: maxMessageSize,
 		},
 	)
-}
-
-func decodeOutput(result string) string {
-	decoded, err := base64.StdEncoding.DecodeString(result)
-	if err != nil {
-		return result
-	}
-
-	var payload struct {
-		Output string `json:"output"`
-	}
-	if err := json.Unmarshal(decoded, &payload); err != nil {
-		return result
-	}
-
-	return payload.Output
 }

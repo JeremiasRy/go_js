@@ -1,12 +1,13 @@
 package mcpserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"go_js_demo/db"
 	"go_js_demo/worker"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -21,53 +22,82 @@ import (
 )
 
 type fakeStore struct {
-	mu   sync.Mutex
-	jobs map[uuid.UUID]db.UserScriptJob
+	mu            sync.Mutex
+	jobs          map[uuid.UUID]*db.UserScriptJob
+	metadataReads int
+	resultReads   int
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{jobs: make(map[uuid.UUID]db.UserScriptJob)}
+	return &fakeStore{jobs: make(map[uuid.UUID]*db.UserScriptJob)}
 }
 
-func (f *fakeStore) InsertNewJob(sessionID string, src string, _ context.Context) (uuid.UUID, error) {
+func metadataCopy(job *db.UserScriptJob) *db.UserScriptJob {
+	copy := *job
+	copy.Result = ""
+	return &copy
+}
+
+func (f *fakeStore) InsertNewJob(sessionID, clientRequestID, src string, _ context.Context) (*db.UserScriptJob, bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	job := db.UserScriptJob{
-		JobId:     uuid.New(),
-		SessionID: sessionID,
-		Src:       src,
-		JobStatus: db.JobPending,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	if clientRequestID != "" {
+		for _, existing := range f.jobs {
+			if existing.SessionID == sessionID && existing.ClientRequestID == clientRequestID {
+				if existing.Src != src {
+					return nil, false, db.ErrClientRequestConflict
+				}
+				return metadataCopy(existing), false, nil
+			}
+		}
 	}
-	f.jobs[job.JobId] = job
-	return job.JobId, nil
+
+	now := time.Now()
+	job := &db.UserScriptJob{
+		JobID:           uuid.New(),
+		SessionID:       sessionID,
+		Src:             src,
+		JobStatus:       db.JobPending,
+		ResultEncoding:  "base64",
+		ClientRequestID: clientRequestID,
+		Revision:        1,
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	f.jobs[job.JobID] = job
+	return metadataCopy(job), true, nil
 }
 
-func (f *fakeStore) UpdateJob(status db.JobStatus, result string, jobID uuid.UUID, _ context.Context) error {
+func (f *fakeStore) UpdateJob(jobID uuid.UUID, completion db.Completion, _ context.Context) (*db.UserScriptJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	job, ok := f.jobs[jobID]
 	if !ok {
-		return fmt.Errorf("job %s not found", jobID)
+		return nil, db.ErrJobNotFound
 	}
-	job.JobStatus = status
-	job.Result = result
-	job.UpdatedAt = time.Now()
-	f.jobs[jobID] = job
-	return nil
+	now := time.Now()
+	job.JobStatus = completion.Status
+	job.Result = completion.Result
+	job.ResultEncoding = completion.ResultEncoding
+	job.ResultFormatVersion = completion.ResultFormatVersion
+	job.Output = completion.Output
+	job.Revision++
+	job.UpdatedAt = now
+	job.CompletedAt = &now
+	return metadataCopy(job), nil
 }
 
 func (f *fakeStore) GetJobsBySessionID(sessionID string, _ context.Context) ([]db.UserScriptJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.metadataReads++
 
 	jobs := make([]db.UserScriptJob, 0)
 	for _, job := range f.jobs {
 		if job.SessionID == sessionID {
-			jobs = append(jobs, job)
+			jobs = append(jobs, *metadataCopy(job))
 		}
 	}
 	sort.Slice(jobs, func(i, j int) bool {
@@ -79,15 +109,70 @@ func (f *fakeStore) GetJobsBySessionID(sessionID string, _ context.Context) ([]d
 func (f *fakeStore) GetRandomJob(_ context.Context) (*db.UserScriptJob, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.metadataReads++
 
 	for _, job := range f.jobs {
 		if job.JobStatus == db.JobFailed {
 			continue
 		}
-		jobCopy := job
-		return &jobCopy, nil
+		return metadataCopy(job), nil
 	}
 	return nil, db.ErrNoJobs
+}
+
+func (f *fakeStore) GetJobBySessionAndID(sessionID string, jobID uuid.UUID, _ context.Context) (*db.UserScriptJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metadataReads++
+
+	job, ok := f.jobs[jobID]
+	if !ok || job.SessionID != sessionID {
+		return nil, db.ErrJobNotFound
+	}
+	return metadataCopy(job), nil
+}
+
+func (f *fakeStore) GetJobBySessionAndClientRequestID(sessionID, clientRequestID string, _ context.Context) (*db.UserScriptJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.metadataReads++
+
+	for _, job := range f.jobs {
+		if job.SessionID == sessionID && job.ClientRequestID == clientRequestID {
+			return metadataCopy(job), nil
+		}
+	}
+	return nil, db.ErrJobNotFound
+}
+
+func (f *fakeStore) GetJobResultBySessionAndID(sessionID string, jobID uuid.UUID, _ context.Context) (*db.UserScriptJob, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resultReads++
+
+	job, ok := f.jobs[jobID]
+	if !ok || job.SessionID != sessionID {
+		return nil, db.ErrJobNotFound
+	}
+	copy := *job
+	return &copy, nil
+}
+
+func (f *fakeStore) storedJob(jobID uuid.UUID) (*db.UserScriptJob, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	job, ok := f.jobs[jobID]
+	if !ok {
+		return nil, false
+	}
+	copy := *job
+	return &copy, true
+}
+
+func (f *fakeStore) jobCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.jobs)
 }
 
 func newTestServer(t *testing.T, manager *Manager) *httptest.Server {
@@ -97,12 +182,25 @@ func newTestServer(t *testing.T, manager *Manager) *httptest.Server {
 	mux.HandleFunc("POST /session", manager.HandleCreateSession)
 	mux.HandleFunc("GET /ws/{session_id}", manager.HandleWS)
 	mux.HandleFunc("GET /session/{session_id}/jobs", manager.HandleSessionJobs)
+	mux.HandleFunc("POST /session/{session_id}/jobs", manager.HandleCreateJob)
+	mux.HandleFunc("GET /session/{session_id}/jobs/{job_id}", manager.HandleJobStatus)
+	mux.HandleFunc("GET /session/{session_id}/jobs/{job_id}/result", manager.HandleJobResult)
 	mux.HandleFunc("GET /scripts/random", manager.HandleRandomJob)
 	mux.HandleFunc("/session/{session_id}/mcp", manager.HandleMCP)
 
 	server := httptest.NewServer(mux)
 	t.Cleanup(server.Close)
 	return server
+}
+
+func newTestManager(t *testing.T) (*fakeStore, chan worker.HeartbeatSignal, *Manager) {
+	t.Helper()
+
+	store := newFakeStore()
+	work := make(chan worker.HeartbeatSignal, 8)
+	manager := NewManager(store, work, time.Minute)
+	t.Cleanup(manager.Close)
+	return store, work, manager
 }
 
 func dialSession(t *testing.T, server *httptest.Server, manager *Manager) (*websocket.Conn, string) {
@@ -186,13 +284,90 @@ func encodedResult(output string) string {
 	return base64.StdEncoding.EncodeToString(payload)
 }
 
-func TestWebSocketCreatesSessionForClientID(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
+func submitJob(t *testing.T, server *httptest.Server, sessionID, clientRequestID, executeRequestID, code string) (int, http.Header, createJobResponse) {
+	t.Helper()
 
+	body, err := json.Marshal(createJobRequest{
+		ClientRequestID:  clientRequestID,
+		ExecuteRequestID: executeRequestID,
+		Code:             code,
+	})
+	if err != nil {
+		t.Fatalf("marshal job request: %v", err)
+	}
+
+	request, err := http.NewRequest(http.MethodPost, server.URL+"/session/"+sessionID+"/jobs", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("create job request: %v", err)
+	}
+	request.Header.Set("Content-Type", "application/json")
+
+	response, err := server.Client().Do(request)
+	if err != nil {
+		t.Fatalf("submit job: %v", err)
+	}
+	defer response.Body.Close()
+
+	var result createJobResponse
+	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
+		t.Fatalf("decode job response: %v", err)
+	}
+	return response.StatusCode, response.Header.Clone(), result
+}
+
+func completeJob(t *testing.T, store *fakeStore, manager *Manager, jobID uuid.UUID, completion db.Completion) db.UserScriptJob {
+	t.Helper()
+
+	updated, err := store.UpdateJob(jobID, completion, context.Background())
+	if err != nil {
+		t.Fatalf("update job: %v", err)
+	}
+
+	update := worker.JobResult{
+		SessionID:       updated.SessionID,
+		ClientRequestID: updated.ClientRequestID,
+		JobID:           updated.JobID,
+		Status:          updated.JobStatus,
+		Revision:        updated.Revision,
+	}
+	if updated.JobStatus == db.JobSucceeded {
+		update.Output = completion.Output
+	} else {
+		update.ErrorMessage = completion.Result
+	}
+	manager.DeliverJobUpdate(update)
+	return *updated
+}
+
+func markProcessing(t *testing.T, store *fakeStore, manager *Manager, jobID uuid.UUID) db.UserScriptJob {
+	t.Helper()
+
+	store.mu.Lock()
+	job, ok := store.jobs[jobID]
+	if !ok {
+		store.mu.Unlock()
+		t.Fatalf("job %s not found", jobID)
+	}
+	job.JobStatus = db.JobProcessing
+	job.Revision++
+	job.UpdatedAt = time.Now()
+	processing := *job
+	store.mu.Unlock()
+
+	manager.DeliverJobUpdate(worker.JobResult{
+		SessionID:       processing.SessionID,
+		ClientRequestID: processing.ClientRequestID,
+		JobID:           processing.JobID,
+		Status:          processing.JobStatus,
+		Revision:        processing.Revision,
+	})
+	return processing
+}
+
+func TestWebSocketCreatesSessionForClientID(t *testing.T) {
+	_, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
+
 	clientID := uuid.NewString()
 	conn, ready := dialSessionByID(t, server, clientID)
 	if ready.Type != MessageSessionReady {
@@ -205,12 +380,9 @@ func TestWebSocketCreatesSessionForClientID(t *testing.T) {
 }
 
 func TestCreateSessionEndpointUsesClientID(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	_, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
+
 	clientID := uuid.NewString()
 	body := strings.NewReader(`{"session_id":"` + clientID + `"}`)
 	response, err := http.Post(server.URL+"/session", "application/json", body)
@@ -243,24 +415,29 @@ func TestCreateSessionEndpointUsesClientID(t *testing.T) {
 }
 
 func TestSessionJobsListsOnlyClientScripts(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	clientID := uuid.NewString()
 	otherClientID := uuid.NewString()
 	ctx := context.Background()
 
-	if _, err := store.InsertNewJob(clientID, "console.log(1)", ctx); err != nil {
+	first, _, err := store.InsertNewJob(clientID, uuid.NewString(), "console.log(1)", ctx)
+	if err != nil {
 		t.Fatalf("insert first job: %v", err)
 	}
-	if _, err := store.InsertNewJob(clientID, "console.log(2)", ctx); err != nil {
+	if _, _, err := store.InsertNewJob(clientID, uuid.NewString(), "console.log(2)", ctx); err != nil {
 		t.Fatalf("insert second job: %v", err)
 	}
-	if _, err := store.InsertNewJob(otherClientID, "console.log(3)", ctx); err != nil {
+	if _, _, err := store.InsertNewJob(otherClientID, uuid.NewString(), "console.log(3)", ctx); err != nil {
 		t.Fatalf("insert other job: %v", err)
+	}
+	if _, err := store.UpdateJob(first.JobID, db.Completion{
+		Status:         db.JobSucceeded,
+		Result:         encodedResult("1"),
+		ResultEncoding: "base64",
+		Output:         "1",
+	}, ctx); err != nil {
+		t.Fatalf("complete first job: %v", err)
 	}
 
 	response, err := http.Get(server.URL + "/session/" + clientID + "/jobs")
@@ -272,8 +449,16 @@ func TestSessionJobsListsOnlyClientScripts(t *testing.T) {
 		t.Fatalf("expected 200, got %d", response.StatusCode)
 	}
 
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatalf("read scripts: %v", err)
+	}
+	if strings.Contains(string(body), `"result"`) {
+		t.Fatalf("history response exposed the result column: %s", body)
+	}
+
 	var jobs []scriptSummary
-	if err := json.NewDecoder(response.Body).Decode(&jobs); err != nil {
+	if err := json.Unmarshal(body, &jobs); err != nil {
 		t.Fatalf("decode scripts: %v", err)
 	}
 	if len(jobs) != 2 {
@@ -287,15 +472,15 @@ func TestSessionJobsListsOnlyClientScripts(t *testing.T) {
 			t.Fatal("listed a script from another client")
 		}
 	}
+	if store.resultReads != 0 {
+		t.Fatalf("history read the result column %d times", store.resultReads)
+	}
 }
 
 func TestSessionJobsRejectsInvalidSessionID(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	_, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
+
 	response, err := http.Get(server.URL + "/session/not-a-session/jobs")
 	if err != nil {
 		t.Fatalf("list scripts: %v", err)
@@ -307,11 +492,7 @@ func TestSessionJobsRejectsInvalidSessionID(t *testing.T) {
 }
 
 func TestRandomJobReturnsStoredScript(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	ctx := context.Background()
 
@@ -324,11 +505,16 @@ func TestRandomJobReturnsStoredScript(t *testing.T) {
 		t.Fatalf("expected 404 when no scripts exist, got %d", empty.StatusCode)
 	}
 
-	failedJobID, err := store.InsertNewJob(uuid.NewString(), "console.log('failed')", ctx)
+	failedJob, _, err := store.InsertNewJob(uuid.NewString(), uuid.NewString(), "console.log('failed')", ctx)
 	if err != nil {
 		t.Fatalf("insert failed job: %v", err)
 	}
-	if err := store.UpdateJob(db.JobFailed, "nope", failedJobID, ctx); err != nil {
+	if _, err := store.UpdateJob(failedJob.JobID, db.Completion{
+		Status:         db.JobFailed,
+		Result:         "nope",
+		ResultEncoding: "text",
+		Output:         "nope",
+	}, ctx); err != nil {
 		t.Fatalf("fail job: %v", err)
 	}
 
@@ -342,7 +528,7 @@ func TestRandomJobReturnsStoredScript(t *testing.T) {
 	}
 
 	sessionID := uuid.NewString()
-	if _, err := store.InsertNewJob(sessionID, "console.log('random')", ctx); err != nil {
+	if _, _, err := store.InsertNewJob(sessionID, uuid.NewString(), "console.log('random')", ctx); err != nil {
 		t.Fatalf("insert job: %v", err)
 	}
 
@@ -365,151 +551,44 @@ func TestRandomJobReturnsStoredScript(t *testing.T) {
 	if job.JobStatus != db.JobPending {
 		t.Fatalf("expected pending status, got %q", job.JobStatus)
 	}
-}
-
-func TestMultipleTabsShareSession(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
-	server := newTestServer(t, manager)
-	session, err := manager.EnsureSession(uuid.NewString())
-	if err != nil {
-		t.Fatalf("ensure session: %v", err)
-	}
-
-	first, firstReady := dialSessionByID(t, server, session.SessionID)
-	if firstReady.SessionID != session.SessionID {
-		t.Fatalf("expected session %q, got %q", session.SessionID, firstReady.SessionID)
-	}
-
-	second, secondReady := dialSessionByID(t, server, session.SessionID)
-	if secondReady.SessionID != session.SessionID {
-		t.Fatalf("expected session %q, got %q", session.SessionID, secondReady.SessionID)
-	}
-
-	writeSocketMessage(t, first, socketMessage{
-		Type: MessageRunSubmit,
-		Code: "console.log(4)",
-	})
-
-	firstAccepted := readSocketMessage(t, first)
-	secondAccepted := readSocketMessage(t, second)
-	if firstAccepted.Type != MessageRunAccepted || secondAccepted.Type != MessageRunAccepted {
-		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunAccepted, firstAccepted.Type, secondAccepted.Type)
-	}
-	if firstAccepted.JobID != secondAccepted.JobID {
-		t.Fatalf("expected a shared job, got %q and %q", firstAccepted.JobID, secondAccepted.JobID)
-	}
-
-	jobID, err := uuid.Parse(firstAccepted.JobID)
-	if err != nil {
-		t.Fatalf("parse job id: %v", err)
-	}
-	raw := encodedResult("4")
-	manager.DeliverJobResult(jobID, "Success", raw)
-
-	firstResult := readSocketMessage(t, first)
-	secondResult := readSocketMessage(t, second)
-	if firstResult.Type != MessageRunResult || secondResult.Type != MessageRunResult {
-		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunResult, firstResult.Type, secondResult.Type)
-	}
-	if firstResult.JobID != jobID.String() || secondResult.JobID != jobID.String() {
-		t.Fatalf("expected both tabs to receive job %q", jobID)
+	if store.resultReads != 0 {
+		t.Fatalf("random job read the result column %d times", store.resultReads)
 	}
 }
 
-func TestWebSocketRunFlow(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+func TestReconnectReceivesLastJobMetadata(t *testing.T) {
+	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	conn, sessionID := dialSession(t, server, manager)
 
-	clientID := uuid.NewString()
-	writeSocketMessage(t, conn, socketMessage{
-		Type:      MessageRunSubmit,
-		RequestID: clientID,
-		Code:      "console.log(2)",
-	})
-
-	accepted := readSocketMessage(t, conn)
-	if accepted.Type != MessageRunAccepted {
-		t.Fatalf("expected %q, got %q (%s)", MessageRunAccepted, accepted.Type, accepted.Error)
+	clientRequestID := uuid.NewString()
+	status, _, created := submitJob(t, server, sessionID, clientRequestID, "", "console.log(3)")
+	if status != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", status)
 	}
-	if _, err := uuid.Parse(accepted.RequestID); err != nil {
-		t.Fatalf("expected backend-generated request id, got %q", accepted.RequestID)
+	pending := readSocketMessage(t, conn)
+	if pending.Type != MessageRunStatus || pending.JobStatus != "Pending" {
+		t.Fatalf("expected pending status, got %#v", pending)
 	}
-	if accepted.RequestID == clientID {
-		t.Fatal("manual runs must not reuse a client-supplied request id")
-	}
-	requestID := accepted.RequestID
-
-	jobID, err := uuid.Parse(accepted.JobID)
+	jobID, err := uuid.Parse(created.JobID)
 	if err != nil {
 		t.Fatalf("parse job id: %v", err)
 	}
 
-	store.mu.Lock()
-	job, ok := store.jobs[jobID]
-	store.mu.Unlock()
-	if !ok {
-		t.Fatalf("job %s was not stored", jobID)
-	}
-	if job.SessionID != sessionID {
-		t.Fatalf("expected job session %q, got %q", sessionID, job.SessionID)
-	}
-
-	raw := encodedResult("2")
-	manager.DeliverJobResult(jobID, "Success", raw)
-
-	result := readSocketMessage(t, conn)
-	if result.Type != MessageRunResult {
-		t.Fatalf("expected %q, got %q", MessageRunResult, result.Type)
-	}
-	if result.RequestID != requestID {
-		t.Fatalf("expected request %q, got %q", requestID, result.RequestID)
-	}
-	if result.JobID != jobID.String() {
-		t.Fatalf("expected job %q, got %q", jobID, result.JobID)
-	}
-	if result.JobStatus != "Success" {
-		t.Fatalf("expected success, got %q", result.JobStatus)
-	}
-	if result.Result != raw {
-		t.Fatalf("unexpected result payload")
-	}
-}
-
-func TestReconnectReceivesLastResult(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
-	server := newTestServer(t, manager)
-	conn, sessionID := dialSession(t, server, manager)
-
-	writeSocketMessage(t, conn, socketMessage{
-		Type: MessageRunSubmit,
-		Code: "console.log(3)",
+	completeJob(t, store, manager, jobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("3"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "3",
 	})
-
-	accepted := readSocketMessage(t, conn)
-	requestID := accepted.RequestID
-	jobID, err := uuid.Parse(accepted.JobID)
-	if err != nil {
-		t.Fatalf("parse job id: %v", err)
+	terminal := readSocketMessage(t, conn)
+	if terminal.Type != MessageRunStatus || terminal.JobStatus != "Success" {
+		t.Fatalf("expected success status, got %#v", terminal)
 	}
 
 	_ = conn.Close()
 	time.Sleep(20 * time.Millisecond)
-
-	raw := encodedResult("3")
-	manager.DeliverJobResult(jobID, "Success", raw)
 
 	reconnected, ready := dialSessionByID(t, server, sessionID)
 	if ready.Type != MessageSessionReady {
@@ -518,17 +597,19 @@ func TestReconnectReceivesLastResult(t *testing.T) {
 	if ready.ActiveRun != nil {
 		t.Fatalf("expected no active run, got %#v", ready.ActiveRun)
 	}
-
-	result := readSocketMessage(t, reconnected)
-	if result.Type != MessageRunResult {
-		t.Fatalf("expected %q, got %q", MessageRunResult, result.Type)
+	if ready.LastJob == nil {
+		t.Fatal("expected last job metadata")
 	}
-	if result.RequestID != requestID {
-		t.Fatalf("expected request %q, got %q", requestID, result.RequestID)
+	if ready.LastJob.JobID != jobID.String() || ready.LastJob.JobStatus != "Success" {
+		t.Fatalf("unexpected last job: %#v", ready.LastJob)
 	}
-	if result.Result != raw {
-		t.Fatalf("expected last run result to be replayed")
+	if ready.LastJob.ClientRequestID != clientRequestID {
+		t.Fatalf("expected client request %q, got %q", clientRequestID, ready.LastJob.ClientRequestID)
 	}
+	if ready.LastJob.ResultURL == "" {
+		t.Fatal("expected a result URL for the last job")
+	}
+	_ = reconnected
 }
 
 func TestMCPActivityExpires(t *testing.T) {
@@ -536,11 +617,7 @@ func TestMCPActivityExpires(t *testing.T) {
 	mcpIdleWindow = 25 * time.Millisecond
 	t.Cleanup(func() { mcpIdleWindow = previousWindow })
 
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	_, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	conn, sessionID := dialSession(t, server, manager)
 
@@ -571,11 +648,7 @@ func TestMCPActivityExpires(t *testing.T) {
 }
 
 func TestMCPExecuteFlow(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	conn, sessionID := dialSession(t, server, manager)
 
@@ -617,28 +690,29 @@ func TestMCPExecuteFlow(t *testing.T) {
 		t.Fatalf("unexpected execute request: %#v", execute)
 	}
 
-	writeSocketMessage(t, conn, socketMessage{
-		Type:      MessageRunSubmit,
-		RequestID: execute.RequestID,
-		Code:      execute.Code,
-	})
-
-	accepted := readSocketMessage(t, conn)
-	if accepted.Type != MessageRunAccepted {
-		t.Fatalf("expected %q, got %q (%s)", MessageRunAccepted, accepted.Type, accepted.Error)
+	httpStatus, _, submitted := submitJob(t, server, sessionID, execute.RequestID, execute.RequestID, execute.Code)
+	if httpStatus != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", httpStatus)
 	}
-
-	jobID, err := uuid.Parse(accepted.JobID)
+	jobID, err := uuid.Parse(submitted.JobID)
 	if err != nil {
 		t.Fatalf("parse job id: %v", err)
 	}
+	pending := readSocketMessage(t, conn)
+	if pending.Type != MessageRunStatus || pending.JobStatus != "Pending" {
+		t.Fatalf("expected pending status, got %#v", pending)
+	}
 
-	raw := encodedResult("2")
-	manager.DeliverJobResult(jobID, "Success", raw)
-
-	result := readSocketMessage(t, conn)
-	if result.Type != MessageRunResult || result.RequestID != execute.RequestID {
-		t.Fatalf("unexpected run result: %#v", result)
+	completeJob(t, store, manager, jobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("2"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "2",
+	})
+	terminal := readSocketMessage(t, conn)
+	if terminal.Type != MessageRunStatus || terminal.JobStatus != "Success" {
+		t.Fatalf("unexpected run status: %#v", terminal)
 	}
 
 	select {
@@ -668,11 +742,7 @@ func TestMCPExecuteFlow(t *testing.T) {
 }
 
 func TestMCPExecuteBroadcastsToEveryTab(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	store, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	session, err := manager.EnsureSession(uuid.NewString())
 	if err != nil {
@@ -722,34 +792,29 @@ func TestMCPExecuteBroadcastsToEveryTab(t *testing.T) {
 		t.Fatalf("unexpected execute requests: %#v and %#v", firstExecute, secondExecute)
 	}
 
-	for _, conn := range []*websocket.Conn{first, second} {
-		writeSocketMessage(t, conn, socketMessage{
-			Type:      MessageRunSubmit,
-			RequestID: firstExecute.RequestID,
-			Code:      firstExecute.Code,
-		})
+	firstHTTPStatus, _, firstSubmitted := submitJob(t, server, session.SessionID, firstExecute.RequestID, firstExecute.RequestID, firstExecute.Code)
+	secondHTTPStatus, _, secondSubmitted := submitJob(t, server, session.SessionID, secondExecute.RequestID, secondExecute.RequestID, secondExecute.Code)
+	if firstHTTPStatus != http.StatusAccepted || secondHTTPStatus != http.StatusAccepted {
+		t.Fatalf("expected both submissions to succeed, got %d and %d", firstHTTPStatus, secondHTTPStatus)
+	}
+	if firstSubmitted.JobID != secondSubmitted.JobID {
+		t.Fatalf("expected one job, got %q and %q", firstSubmitted.JobID, secondSubmitted.JobID)
+	}
+	if store.jobCount() != 1 {
+		t.Fatalf("expected one stored job, got %d", store.jobCount())
 	}
 
-	firstAccepted := readSocketMessage(t, first)
-	secondAccepted := readSocketMessage(t, second)
-	if firstAccepted.Type != MessageRunAccepted || secondAccepted.Type != MessageRunAccepted {
-		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunAccepted, firstAccepted.Type, secondAccepted.Type)
-	}
-	if firstAccepted.JobID != secondAccepted.JobID {
-		t.Fatalf("expected a shared job, got %q and %q", firstAccepted.JobID, secondAccepted.JobID)
-	}
-
-	jobID, err := uuid.Parse(firstAccepted.JobID)
+	jobID, err := uuid.Parse(firstSubmitted.JobID)
 	if err != nil {
 		t.Fatalf("parse job id: %v", err)
 	}
-	manager.DeliverJobResult(jobID, "Success", encodedResult("4"))
-
-	firstResult := readSocketMessage(t, first)
-	secondResult := readSocketMessage(t, second)
-	if firstResult.Type != MessageRunResult || secondResult.Type != MessageRunResult {
-		t.Fatalf("expected both tabs to receive %q, got %q and %q", MessageRunResult, firstResult.Type, secondResult.Type)
-	}
+	completeJob(t, store, manager, jobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("4"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "4",
+	})
 
 	select {
 	case call := <-callDone:
@@ -762,11 +827,7 @@ func TestMCPExecuteBroadcastsToEveryTab(t *testing.T) {
 }
 
 func TestMCPExecuteRejected(t *testing.T) {
-	store := newFakeStore()
-	work := make(chan worker.HeartbeatSignal, 8)
-	manager := NewManager(store, work, time.Minute)
-	t.Cleanup(manager.Close)
-
+	_, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)
 	conn, sessionID := dialSession(t, server, manager)
 
@@ -831,5 +892,241 @@ func TestMCPExecuteRejected(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for rejected tool result")
+	}
+}
+
+func TestWorkerUpdateBeforeSessionBind(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	job, _, err := store.InsertNewJob(session.SessionID, uuid.NewString(), "console.log(5)", context.Background())
+	if err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	processing := markProcessing(t, store, manager, job.JobID)
+
+	conn, ready := dialSessionByID(t, server, session.SessionID)
+	if ready.ActiveRun == nil {
+		t.Fatal("expected active run metadata")
+	}
+	if ready.ActiveRun.JobID != job.JobID.String() || ready.ActiveRun.JobStatus != "Processing" {
+		t.Fatalf("unexpected active run: %#v", ready.ActiveRun)
+	}
+	if ready.ActiveRun.Version != processing.Revision {
+		t.Fatalf("expected version %d, got %d", processing.Revision, ready.ActiveRun.Version)
+	}
+
+	completeJob(t, store, manager, job.JobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("5"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "5",
+	})
+	terminal := readSocketMessage(t, conn)
+	if terminal.Type != MessageRunStatus || terminal.JobStatus != "Success" {
+		t.Fatalf("unexpected terminal update: %#v", terminal)
+	}
+}
+
+func TestTerminalUpdateBeforeSubmitReturns(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	clientRequestID := uuid.NewString()
+	job, _, err := store.InsertNewJob(session.SessionID, clientRequestID, "console.log(6)", context.Background())
+	if err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	if _, err := store.UpdateJob(job.JobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("6"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "6",
+	}, context.Background()); err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+
+	status, _, submitted := submitJob(t, server, session.SessionID, clientRequestID, "", "console.log(6)")
+	if status != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", status)
+	}
+	if submitted.JobID != job.JobID.String() {
+		t.Fatalf("expected job %q, got %q", job.JobID, submitted.JobID)
+	}
+	if submitted.JobStatus != "Success" {
+		t.Fatalf("expected terminal status, got %q", submitted.JobStatus)
+	}
+	if submitted.Created {
+		t.Fatal("expected an idempotent submission")
+	}
+	if submitted.ResultURL == nil || *submitted.ResultURL == "" {
+		t.Fatal("expected a result URL")
+	}
+}
+
+func TestMCPExecuteOutputComesFromWorker(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	conn, sessionID := dialSession(t, server, manager)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	mcpSession, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: server.URL + "/session/" + sessionID + "/mcp",
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect MCP client: %v", err)
+	}
+	t.Cleanup(func() { _ = mcpSession.Close() })
+
+	_ = readSocketMessage(t, conn)
+
+	type callResult struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	callDone := make(chan callResult, 1)
+	go func() {
+		result, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "execute",
+			Arguments: map[string]any{"code": "3 + 3"},
+		})
+		callDone <- callResult{result: result, err: err}
+	}()
+
+	execute := readSocketMessage(t, conn)
+	status, _, submitted := submitJob(t, server, sessionID, execute.RequestID, execute.RequestID, execute.Code)
+	if status != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", status)
+	}
+	jobID, err := uuid.Parse(submitted.JobID)
+	if err != nil {
+		t.Fatalf("parse job id: %v", err)
+	}
+	_ = readSocketMessage(t, conn)
+
+	store.mu.Lock()
+	job := store.jobs[jobID]
+	job.JobStatus = db.JobSucceeded
+	job.Result = "not-base64"
+	job.ResultEncoding = "text"
+	job.Output = "6"
+	job.Revision++
+	job.UpdatedAt = time.Now()
+	revision := job.Revision
+	clientRequestID := job.ClientRequestID
+	store.mu.Unlock()
+
+	manager.DeliverJobUpdate(worker.JobResult{
+		SessionID:       sessionID,
+		ClientRequestID: clientRequestID,
+		JobID:           jobID,
+		Status:          db.JobSucceeded,
+		Revision:        revision,
+		Output:          "6",
+	})
+
+	select {
+	case call := <-callDone:
+		if call.err != nil {
+			t.Fatalf("CallTool failed: %v", call.err)
+		}
+		content, err := json.Marshal(call.result.Content)
+		if err != nil {
+			t.Fatalf("marshal tool content: %v", err)
+		}
+		var contents []struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(content, &contents); err != nil {
+			t.Fatalf("decode tool content: %v", err)
+		}
+		if len(contents) == 0 || !strings.Contains(contents[0].Text, `"output":"6"`) {
+			t.Fatalf("expected worker output, got %s", content)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for tool result")
+	}
+}
+
+func TestResultEndpointReadsResultColumn(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	job, _, err := store.InsertNewJob(session.SessionID, uuid.NewString(), "console.log(1)", context.Background())
+	if err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	if _, err := store.UpdateJob(job.JobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("1"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "1",
+	}, context.Background()); err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+
+	response, err := http.Get(server.URL + "/session/" + session.SessionID + "/jobs/" + job.JobID.String() + "/result")
+	if err != nil {
+		t.Fatalf("get result: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	if store.resultReads != 1 {
+		t.Fatalf("expected one result read, got %d", store.resultReads)
+	}
+}
+
+func TestJobStatusDoesNotReadResultColumn(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	job, _, err := store.InsertNewJob(session.SessionID, uuid.NewString(), "console.log(1)", context.Background())
+	if err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+	if _, err := store.UpdateJob(job.JobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("1"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "1",
+	}, context.Background()); err != nil {
+		t.Fatalf("complete job: %v", err)
+	}
+
+	response, err := http.Get(server.URL + "/session/" + session.SessionID + "/jobs/" + job.JobID.String())
+	if err != nil {
+		t.Fatalf("get status: %v", err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", response.StatusCode)
+	}
+	if store.resultReads != 0 {
+		t.Fatalf("status read the result column %d times", store.resultReads)
 	}
 }

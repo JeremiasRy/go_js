@@ -1,6 +1,6 @@
 # Frontend/backend communication investigation
 
-- **Status:** Reviewed; Phase 1 decisions and implementation scope are in [COMMUNICATION_REVIEW_AND_PLAN.md](COMMUNICATION_REVIEW_AND_PLAN.md).
+- **Status:** Reviewed and implemented through Phase 1; the decisions, contract, and rollout notes are in [COMMUNICATION_REVIEW_AND_PLAN.md](COMMUNICATION_REVIEW_AND_PLAN.md). The execution path described in section 2 is the pre-implementation baseline.
 - **Date:** 2026-11-14.
 - **Repository baseline:** `b033e772db68a1d306a8748c69d1de76c90c5a6b`.
 

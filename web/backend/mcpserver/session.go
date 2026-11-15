@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"go_js_demo/db"
 	"go_js_demo/worker"
@@ -19,11 +20,11 @@ import (
 const (
 	maxMessageSize      = 2 << 20
 	maxCodeSize         = 1 << 20
+	maxClientRequestID  = 128
 	writeWait           = 10 * time.Second
 	pongWait            = 60 * time.Second
 	pingPeriod          = 30 * time.Second
 	jobInsertTimeout    = 5 * time.Second
-	workSignalTimeout   = 5 * time.Second
 	executeTimeout      = 120 * time.Second
 	lastResultRetention = 5 * time.Minute
 	outgoingQueueSize   = 64
@@ -32,10 +33,12 @@ const (
 var mcpIdleWindow = 60 * time.Second
 
 type JobStore interface {
-	InsertNewJob(sessionID string, src string, ctx context.Context) (uuid.UUID, error)
-	UpdateJob(status db.JobStatus, result string, jobID uuid.UUID, ctx context.Context) error
+	InsertNewJob(sessionID, clientRequestID, src string, ctx context.Context) (*db.UserScriptJob, bool, error)
 	GetJobsBySessionID(sessionID string, ctx context.Context) ([]db.UserScriptJob, error)
 	GetRandomJob(ctx context.Context) (*db.UserScriptJob, error)
+	GetJobBySessionAndID(sessionID string, jobID uuid.UUID, ctx context.Context) (*db.UserScriptJob, error)
+	GetJobResultBySessionAndID(sessionID string, jobID uuid.UUID, ctx context.Context) (*db.UserScriptJob, error)
+	GetJobBySessionAndClientRequestID(sessionID, clientRequestID string, ctx context.Context) (*db.UserScriptJob, error)
 }
 
 type Session struct {
@@ -45,14 +48,15 @@ type Session struct {
 	work  chan<- worker.HeartbeatSignal
 	mcp   http.Handler
 
-	mu             sync.Mutex
-	conns          map[*wsConn]struct{}
-	active         *activeRun
-	pendingMCP     *pendingRun
-	lastResult     *completedRun
-	recentRequests map[string]time.Time
-	lastSeen       time.Time
-	closed         bool
+	submitMu sync.Mutex
+
+	mu         sync.Mutex
+	conns      map[*wsConn]struct{}
+	active     *activeRun
+	pendingMCP *pendingRun
+	lastJob    *completedRun
+	lastSeen   time.Time
+	closed     bool
 
 	mcpActive    bool
 	mcpInFlight  int
@@ -61,9 +65,12 @@ type Session struct {
 }
 
 type activeRun struct {
-	requestID string
-	jobID     uuid.UUID
-	waiter    chan runOutcome
+	requestID       string
+	clientRequestID string
+	jobID           uuid.UUID
+	status          db.JobStatus
+	revision        int64
+	waiter          chan runOutcome
 }
 
 type pendingRun struct {
@@ -73,15 +80,35 @@ type pendingRun struct {
 }
 
 type completedRun struct {
-	message     socketMessage
-	completedAt time.Time
+	jobID           uuid.UUID
+	requestID       string
+	clientRequestID string
+	status          db.JobStatus
+	revision        int64
+	output          string
+	errorMessage    string
+	completedAt     time.Time
 }
 
 type runOutcome struct {
-	JobID  uuid.UUID
-	Status string
-	Result string
-	err    error
+	JobID        uuid.UUID
+	Status       db.JobStatus
+	Output       string
+	ErrorMessage string
+	Revision     int64
+	err          error
+}
+
+type SubmitRequest struct {
+	ClientRequestID  string
+	ExecuteRequestID string
+	Code             string
+}
+
+type SubmitResult struct {
+	Job       db.UserScriptJob
+	RequestID string
+	Created   bool
 }
 
 type wsConn struct {
@@ -108,13 +135,12 @@ func (c *wsConn) stop() {
 
 func newSession(id string, mgr *Manager, store JobStore, work chan<- worker.HeartbeatSignal) *Session {
 	s := &Session{
-		id:             id,
-		mgr:            mgr,
-		store:          store,
-		work:           work,
-		conns:          make(map[*wsConn]struct{}),
-		recentRequests: make(map[string]time.Time),
-		lastSeen:       time.Now(),
+		id:       id,
+		mgr:      mgr,
+		store:    store,
+		work:     work,
+		conns:    make(map[*wsConn]struct{}),
+		lastSeen: time.Now(),
 	}
 	s.mcp = newMCPHandler(s)
 	return s
@@ -150,15 +176,18 @@ func (s *Session) attach(raw *websocket.Conn) *wsConn {
 	}
 	if s.active != nil {
 		ready.ActiveRun = &activeRunInfo{
-			RequestID: s.active.requestID,
-			JobID:     jobIDString(s.active.jobID),
+			RequestID:       s.active.requestID,
+			ClientRequestID: s.active.clientRequestID,
+			JobID:           jobIDString(s.active.jobID),
+			JobStatus:       s.active.status.String(),
+			Version:         s.active.revision,
 		}
+	} else if s.lastJob != nil && now.Sub(s.lastJob.completedAt) < lastResultRetention {
+		lastJob := jobStatusInfoFor(s.id, *s.lastJob)
+		ready.LastJob = &lastJob
 	}
 
 	s.enqueueLocked(conn, ready)
-	if s.active == nil && s.lastResult != nil && now.Sub(s.lastResult.completedAt) < lastResultRetention {
-		s.enqueueLocked(conn, s.lastResult.message)
-	}
 	if s.pendingMCP != nil {
 		s.enqueueLocked(conn, socketMessage{
 			Type:      MessageExecuteRequest,
@@ -173,9 +202,11 @@ func (s *Session) attach(raw *websocket.Conn) *wsConn {
 }
 
 func (s *Session) detach(conn *wsConn) {
+	s.submitMu.Lock()
 	s.mu.Lock()
 	if _, ok := s.conns[conn]; !ok {
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		conn.stop()
 		return
 	}
@@ -189,6 +220,7 @@ func (s *Session) detach(conn *wsConn) {
 		s.pendingMCP = nil
 	}
 	s.mu.Unlock()
+	s.submitMu.Unlock()
 
 	conn.stop()
 	if pending != nil {
@@ -223,10 +255,7 @@ func (s *Session) readLoop(conn *wsConn) {
 			continue
 		}
 
-		switch message.Type {
-		case MessageRunSubmit:
-			s.handleRunSubmit(message)
-		case MessageExecuteRejected:
+		if message.Type == MessageExecuteRejected {
 			s.handleExecuteRejected(message)
 		}
 	}
@@ -305,95 +334,176 @@ func (s *Session) enqueueDataLocked(conn *wsConn, data []byte) error {
 	}
 }
 
-func (s *Session) handleRunSubmit(message socketMessage) {
-	incomingID := strings.TrimSpace(message.RequestID)
-	if len(message.Code) > maxCodeSize {
-		s.sendRunError(runErrorID(incomingID), fmt.Sprintf("code exceeds the %d byte limit", maxCodeSize))
-		return
+func (s *Session) Submit(ctx context.Context, req SubmitRequest) (SubmitResult, error) {
+	clientRequestID := strings.TrimSpace(req.ClientRequestID)
+	executeRequestID := strings.TrimSpace(req.ExecuteRequestID)
+	if clientRequestID == "" || len(clientRequestID) > maxClientRequestID {
+		return SubmitResult{}, ErrInvalidClientRequestID
 	}
+	if len(req.Code) > maxCodeSize {
+		return SubmitResult{}, ErrCodeTooLarge
+	}
+
+	s.submitMu.Lock()
+	defer s.submitMu.Unlock()
+
+	var (
+		requestID string
+		waiter    chan runOutcome
+	)
 
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
-		return
-	}
-	if incomingID != "" {
-		if seenAt, ok := s.recentRequests[incomingID]; ok && time.Since(seenAt) < lastResultRetention {
-			s.mu.Unlock()
-			return
-		}
-		if s.active != nil && s.active.requestID == incomingID {
-			s.mu.Unlock()
-			return
-		}
+		return SubmitResult{}, ErrSessionClosed
 	}
 	if s.active != nil {
+		if (executeRequestID != "" && s.active.requestID == executeRequestID) ||
+			(executeRequestID == "" && s.active.clientRequestID == clientRequestID) {
+			active := *s.active
+			s.mu.Unlock()
+
+			job, err := s.store.GetJobBySessionAndID(s.id, active.jobID, ctx)
+			if err != nil {
+				return SubmitResult{}, err
+			}
+			if job.Src != req.Code {
+				return SubmitResult{}, db.ErrClientRequestConflict
+			}
+			return SubmitResult{Job: *job, RequestID: active.requestID, Created: false}, nil
+		}
 		s.mu.Unlock()
-		s.sendRunError(runErrorID(incomingID), ErrSessionBusy.Error())
-		return
+		return SubmitResult{}, ErrSessionBusy
 	}
 
-	requestID := ""
-	var waiter chan runOutcome
-	if s.pendingMCP != nil {
-		if incomingID == "" || incomingID != s.pendingMCP.requestID {
+	if executeRequestID != "" {
+		if s.pendingMCP == nil || s.pendingMCP.requestID != executeRequestID {
 			s.mu.Unlock()
-			s.sendRunError(runErrorID(incomingID), "an agent request is already pending")
-			return
+
+			job, err := s.store.GetJobBySessionAndClientRequestID(s.id, clientRequestID, ctx)
+			if errors.Is(err, db.ErrJobNotFound) {
+				return SubmitResult{}, ErrExecuteRequestExpired
+			}
+			if err != nil {
+				return SubmitResult{}, err
+			}
+			if job.Src != req.Code {
+				return SubmitResult{}, db.ErrClientRequestConflict
+			}
+			return SubmitResult{Job: *job, RequestID: executeRequestID, Created: false}, nil
 		}
 		requestID = s.pendingMCP.requestID
 		waiter = s.pendingMCP.waiter
 		s.pendingMCP = nil
 	} else {
-		requestID = uuid.NewString()
-	}
-
-	now := time.Now()
-	for id, seenAt := range s.recentRequests {
-		if now.Sub(seenAt) >= lastResultRetention {
-			delete(s.recentRequests, id)
+		if s.pendingMCP != nil {
+			s.mu.Unlock()
+			return SubmitResult{}, ErrAgentPending
 		}
-	}
-	s.recentRequests[requestID] = now
-
-	s.active = &activeRun{
-		requestID: requestID,
-		waiter:    waiter,
+		requestID = uuid.NewString()
 	}
 	s.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), jobInsertTimeout)
-	jobID, err := s.store.InsertNewJob(s.id, message.Code, ctx)
-	cancel()
+	job, created, err := s.store.InsertNewJob(s.id, clientRequestID, req.Code, ctx)
 	if err != nil {
-		s.failActive(requestID, fmt.Errorf("failed to queue job: %w", err))
-		return
+		if waiter != nil {
+			waiter <- runOutcome{err: err}
+		}
+		return SubmitResult{}, err
+	}
+
+	if job.JobStatus == db.JobSucceeded || job.JobStatus == db.JobFailed {
+		outcome := runOutcome{
+			JobID:    job.JobID,
+			Status:   job.JobStatus,
+			Output:   job.Output,
+			Revision: job.Revision,
+		}
+		if job.JobStatus == db.JobFailed {
+			if stored, resultErr := s.store.GetJobResultBySessionAndID(s.id, job.JobID, ctx); resultErr == nil {
+				outcome.ErrorMessage = stored.Result
+			}
+		}
+		if waiter != nil {
+			waiter <- outcome
+		}
+		s.send(statusMessageForJob(s.id, *job, requestID))
+		return SubmitResult{Job: *job, RequestID: requestID, Created: created}, nil
 	}
 
 	s.mu.Lock()
-	if s.active != nil && s.active.requestID == requestID {
-		s.active.jobID = jobID
+	if s.closed {
+		s.mu.Unlock()
+		if waiter != nil {
+			waiter <- runOutcome{err: ErrSessionClosed}
+		}
+		return SubmitResult{}, ErrSessionClosed
 	}
+	if s.lastJob != nil && s.lastJob.jobID == job.JobID {
+		completed := *s.lastJob
+		s.mu.Unlock()
+		job.JobStatus = completed.status
+		job.Revision = completed.revision
+		if completed.status == db.JobSucceeded {
+			job.Output = completed.output
+		} else {
+			job.Output = completed.errorMessage
+		}
+		if waiter != nil {
+			waiter <- outcomeForCompleted(completed)
+		}
+		return SubmitResult{Job: *job, RequestID: requestID, Created: created}, nil
+	}
+	if s.active != nil {
+		if s.active.jobID != job.JobID {
+			s.mu.Unlock()
+			if waiter != nil {
+				waiter <- runOutcome{err: ErrSessionBusy}
+			}
+			return SubmitResult{}, ErrSessionBusy
+		}
+		if s.active.requestID == "" {
+			s.active.requestID = requestID
+		}
+		if s.active.waiter == nil && waiter != nil {
+			s.active.waiter = waiter
+		}
+		if job.Revision > s.active.revision {
+			s.active.status = job.JobStatus
+			s.active.revision = job.Revision
+		}
+	} else {
+		s.active = &activeRun{
+			requestID:       requestID,
+			clientRequestID: clientRequestID,
+			jobID:           job.JobID,
+			status:          job.JobStatus,
+			revision:        job.Revision,
+			waiter:          waiter,
+		}
+	}
+	status := s.active.status
+	revision := s.active.revision
 	s.mu.Unlock()
 
-	s.mgr.bindJob(s, jobID)
+	s.mgr.bindJob(s, job.JobID)
 
-	if err := s.send(socketMessage{
-		Type:      MessageRunAccepted,
-		RequestID: requestID,
-		JobID:     jobID.String(),
-	}); err != nil {
-		log.Printf("Session %s could not acknowledge run %s: %v", shortID(s.id), shortID(requestID), err)
+	job.JobStatus = status
+	job.Revision = revision
+	if err := s.send(statusMessageForJob(s.id, *job, requestID)); err != nil {
+		log.Printf("Session %s could not publish status for job %s: %v", shortID(s.id), shortID(job.JobID.String()), err)
 	}
 
 	select {
 	case s.work <- worker.HeartbeatSignal{}:
-	case <-time.After(workSignalTimeout):
-		s.failActiveWithJob(requestID, jobID, "worker queue is full")
+	default:
 	}
+
+	return SubmitResult{Job: *job, RequestID: requestID, Created: created}, nil
 }
 
 func (s *Session) handleExecuteRejected(message socketMessage) {
+	s.submitMu.Lock()
 	s.mu.Lock()
 	pending := s.pendingMCP
 	if pending != nil && pending.requestID == message.RequestID {
@@ -402,6 +512,7 @@ func (s *Session) handleExecuteRejected(message socketMessage) {
 		pending = nil
 	}
 	s.mu.Unlock()
+	s.submitMu.Unlock()
 
 	if pending != nil {
 		reason := message.Error
@@ -414,20 +525,25 @@ func (s *Session) handleExecuteRejected(message socketMessage) {
 
 func (s *Session) Run(ctx context.Context, code string) (runOutcome, error) {
 	if len(code) > maxCodeSize {
-		return runOutcome{}, fmt.Errorf("code exceeds the %d byte limit", maxCodeSize)
+		return runOutcome{}, ErrCodeTooLarge
 	}
+
+	s.submitMu.Lock()
 
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		return runOutcome{}, ErrSessionClosed
 	}
 	if len(s.conns) == 0 {
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		return runOutcome{}, ErrNoFrontend
 	}
 	if s.active != nil || s.pendingMCP != nil {
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		return runOutcome{}, ErrSessionBusy
 	}
 
@@ -447,14 +563,17 @@ func (s *Session) Run(ctx context.Context, code string) (runOutcome, error) {
 	if err != nil {
 		s.pendingMCP = nil
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		return runOutcome{}, err
 	}
 	if err := s.sendDataLocked(data); err != nil {
 		s.pendingMCP = nil
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		return runOutcome{}, err
 	}
 	s.mu.Unlock()
+	s.submitMu.Unlock()
 
 	timer := time.NewTimer(executeTimeout)
 	defer timer.Stop()
@@ -474,84 +593,135 @@ func (s *Session) Run(ctx context.Context, code string) (runOutcome, error) {
 	}
 }
 
-func (s *Session) completeJob(jobID uuid.UUID, status string, result string) {
+func (s *Session) applyJobUpdate(update worker.JobResult) {
+	terminal := update.Status == db.JobSucceeded || update.Status == db.JobFailed
+	var (
+		waiter     chan runOutcome
+		requestID  string
+		clientID   string
+		output     string
+		errorText  string
+		revision   int64
+		status     db.JobStatus
+		shouldSend bool
+	)
+
 	s.mu.Lock()
-	if s.active == nil || s.active.jobID != jobID {
+	if s.lastJob != nil && s.lastJob.jobID == update.JobID && s.lastJob.revision >= update.Revision {
 		s.mu.Unlock()
 		return
 	}
 
-	active := s.active
-	s.active = nil
-	message := socketMessage{
-		Type:      MessageRunResult,
-		RequestID: active.requestID,
-		JobID:     jobID.String(),
-		JobStatus: status,
-		Result:    result,
+	var matched *activeRun
+	if s.active != nil && s.active.jobID == update.JobID {
+		matched = s.active
 	}
-	s.lastResult = &completedRun{
-		message:     message,
-		completedAt: time.Now(),
+
+	if terminal {
+		if matched != nil {
+			waiter = matched.waiter
+			requestID = matched.requestID
+			clientID = matched.clientRequestID
+			s.active = nil
+		}
+		if update.ClientRequestID != "" {
+			clientID = update.ClientRequestID
+		}
+		if clientID == "" && s.lastJob != nil && s.lastJob.jobID == update.JobID {
+			clientID = s.lastJob.clientRequestID
+		}
+
+		completed := completedRun{
+			jobID:           update.JobID,
+			requestID:       requestID,
+			clientRequestID: clientID,
+			status:          update.Status,
+			revision:        update.Revision,
+			output:          update.Output,
+			errorMessage:    update.ErrorMessage,
+			completedAt:     time.Now(),
+		}
+		s.lastJob = &completed
+		status = update.Status
+		revision = update.Revision
+		output = update.Output
+		errorText = update.ErrorMessage
+		shouldSend = true
+	} else if update.Status == db.JobProcessing {
+		if matched == nil {
+			s.active = &activeRun{
+				clientRequestID: update.ClientRequestID,
+				jobID:           update.JobID,
+				status:          update.Status,
+				revision:        update.Revision,
+			}
+			matched = s.active
+		} else if update.Revision > matched.revision {
+			matched.status = update.Status
+			matched.revision = update.Revision
+		}
+		requestID = matched.requestID
+		clientID = matched.clientRequestID
+		if clientID == "" {
+			clientID = update.ClientRequestID
+		}
+		status = matched.status
+		revision = matched.revision
+		shouldSend = true
 	}
 	s.mu.Unlock()
 
-	if err := s.send(message); err != nil {
-		log.Printf("Session %s could not deliver result for job %s: %v", shortID(s.id), shortID(jobID.String()), err)
+	if !shouldSend {
+		return
 	}
 
-	if active.waiter != nil {
-		active.waiter <- runOutcome{
-			JobID:  jobID,
-			Status: status,
-			Result: result,
+	message := socketMessage{
+		Type:            MessageRunStatus,
+		RequestID:       requestID,
+		ClientRequestID: clientID,
+		JobID:           update.JobID.String(),
+		JobStatus:       status.String(),
+		Version:         revision,
+	}
+	if terminal {
+		if status == db.JobSucceeded {
+			message.ResultURL = jobResultPath(s.id, update.JobID)
+		} else {
+			message.Error = errorText
+		}
+	}
+
+	if err := s.send(message); err != nil {
+		log.Printf("Session %s could not deliver status for job %s: %v", shortID(s.id), shortID(update.JobID.String()), err)
+	}
+
+	if waiter != nil {
+		waiter <- runOutcome{
+			JobID:        update.JobID,
+			Status:       status,
+			Output:       output,
+			ErrorMessage: errorText,
+			Revision:     revision,
 		}
 	}
 }
 
-func (s *Session) failActive(requestID string, err error) {
-	s.mu.Lock()
-	if s.active == nil || s.active.requestID != requestID {
-		s.mu.Unlock()
-		return
-	}
-	active := s.active
-	s.active = nil
-	s.mu.Unlock()
-
-	s.sendRunError(requestID, err.Error())
-	if active.waiter != nil {
-		active.waiter <- runOutcome{err: err}
-	}
-}
-
-func (s *Session) failActiveWithJob(requestID string, jobID uuid.UUID, reason string) {
-	ctx, cancel := context.WithTimeout(context.Background(), jobInsertTimeout)
-	_ = s.store.UpdateJob(db.JobFailed, reason, jobID, ctx)
-	cancel()
-	s.failActive(requestID, fmt.Errorf("%s", reason))
-}
-
-func (s *Session) sendRunError(requestID string, reason string) {
-	_ = s.send(socketMessage{
-		Type:      MessageRunError,
-		RequestID: requestID,
-		Error:     reason,
-	})
-}
-
 func (s *Session) clearPendingMCP(requestID string) {
+	s.submitMu.Lock()
 	s.mu.Lock()
 	if s.pendingMCP != nil && s.pendingMCP.requestID == requestID {
 		s.pendingMCP = nil
 	}
 	s.mu.Unlock()
+	s.submitMu.Unlock()
 }
 
 func (s *Session) close() {
+	s.submitMu.Lock()
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
+		s.submitMu.Unlock()
 		return
 	}
 	s.closed = true
@@ -570,6 +740,7 @@ func (s *Session) close() {
 		s.mcpIdleTimer = nil
 	}
 	s.mu.Unlock()
+	s.submitMu.Unlock()
 
 	for _, conn := range conns {
 		conn.stop()
@@ -669,16 +840,57 @@ func jobIDString(id uuid.UUID) string {
 	return id.String()
 }
 
-func runErrorID(incoming string) string {
-	if strings.TrimSpace(incoming) != "" {
-		return incoming
-	}
-	return uuid.NewString()
-}
-
 func shortID(id string) string {
 	if len(id) <= 8 {
 		return id
 	}
 	return id[:8]
+}
+
+func jobResultPath(sessionID string, jobID uuid.UUID) string {
+	return "/session/" + sessionID + "/jobs/" + jobID.String() + "/result"
+}
+
+func jobStatusPath(sessionID string, jobID uuid.UUID) string {
+	return "/session/" + sessionID + "/jobs/" + jobID.String()
+}
+
+func statusMessageForJob(sessionID string, job db.UserScriptJob, requestID string) socketMessage {
+	message := socketMessage{
+		Type:            MessageRunStatus,
+		RequestID:       requestID,
+		ClientRequestID: job.ClientRequestID,
+		JobID:           job.JobID.String(),
+		JobStatus:       job.JobStatus.String(),
+		Version:         job.Revision,
+	}
+	if job.JobStatus == db.JobSucceeded {
+		message.ResultURL = jobResultPath(sessionID, job.JobID)
+	}
+	return message
+}
+
+func jobStatusInfoFor(sessionID string, job completedRun) jobStatusInfo {
+	info := jobStatusInfo{
+		JobID:           job.jobID.String(),
+		ClientRequestID: job.clientRequestID,
+		JobStatus:       job.status.String(),
+		Version:         job.revision,
+	}
+	if job.status == db.JobSucceeded {
+		info.ResultURL = jobResultPath(sessionID, job.jobID)
+	} else {
+		info.Error = job.errorMessage
+	}
+	return info
+}
+
+func outcomeForCompleted(job completedRun) runOutcome {
+	return runOutcome{
+		JobID:        job.jobID,
+		Status:       job.status,
+		Output:       job.output,
+		ErrorMessage: job.errorMessage,
+		Revision:     job.revision,
+	}
 }

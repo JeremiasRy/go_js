@@ -82,17 +82,24 @@ func corsMiddleware(next http.Handler) http.Handler {
 }
 
 func main() {
+	ctx := context.Background()
 	database := db.NewDatabase()
+	staleCutoff := time.Now().Add(-10 * time.Minute)
+	if count, err := database.FailStaleProcessing(staleCutoff, "interrupted by backend restart", ctx); err != nil {
+		log.Printf("Could not reconcile stale processing jobs: %v", err)
+	} else if count > 0 {
+		log.Printf("Marked %d stale processing jobs as failed", count)
+	}
+
 	mvm := microvm.NewMicroVMHandler()
 	sig := make(chan worker.HeartbeatSignal, QUEUE_MAX)
 	results := make(chan worker.JobResult, QUEUE_MAX)
 	mgr := mcpserver.NewManager(database, sig, mcpserver.DefaultSessionTTL)
 	defer mgr.Close()
 
-	ctx := context.Background()
 	go func() {
 		for result := range results {
-			mgr.DeliverJobResult(result.JobID, result.Status, result.Result)
+			mgr.DeliverJobUpdate(result)
 		}
 	}()
 	go worker.SpinUpWorkers(database, mvm, sig, results, WORKER_COUNT, ctx)
@@ -105,6 +112,9 @@ func main() {
 	mux.HandleFunc("POST /session", mgr.HandleCreateSession)
 	mux.HandleFunc("GET /ws/{session_id}", mgr.HandleWS)
 	mux.HandleFunc("GET /session/{session_id}/jobs", mgr.HandleSessionJobs)
+	mux.HandleFunc("POST /session/{session_id}/jobs", mgr.HandleCreateJob)
+	mux.HandleFunc("GET /session/{session_id}/jobs/{job_id}", mgr.HandleJobStatus)
+	mux.HandleFunc("GET /session/{session_id}/jobs/{job_id}/result", mgr.HandleJobResult)
 	mux.HandleFunc("GET /scripts/random", mgr.HandleRandomJob)
 	mux.HandleFunc("/session/{session_id}/mcp", mgr.HandleMCP)
 
