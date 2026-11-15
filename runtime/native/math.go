@@ -2,6 +2,7 @@ package native
 
 import (
 	"go_js/heap"
+	"go_js/object"
 	"go_js/value"
 )
 
@@ -51,8 +52,24 @@ func NewMathMethod(name string, kind MathMethodKind) *MathMethod {
 	return m
 }
 
-func NewMathObject() *ObjObject {
-	m := NewObjectHash()
+type MathObject struct {
+	ObjObject
+}
+
+func (*MathObject) Type() object.ObjType {
+	return object.OBJ_OBJECT
+}
+
+func (*MathObject) String() string {
+	return MATH_OBJECT_NAME
+}
+
+func (*MathObject) Name() string {
+	return MATH_OBJECT_NAME
+}
+
+func NewMathObject() *MathObject {
+	m := &MathObject{ObjObject: *NewObjectHash()}
 	methods := []struct {
 		name string
 		kind MathMethodKind

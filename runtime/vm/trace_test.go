@@ -114,6 +114,26 @@ func TestTraceValueViewNamesConcreteObjects(t *testing.T) {
 	if anonymousView.Type != "object" || anonymousView.Display != "[Object object]" {
 		t.Fatalf("expected anonymous object display, got %s %q", anonymousView.Type, anonymousView.Display)
 	}
+
+	dateView := vm.valueView(value.EncodeHandle(heap.Allocate(native.NewDateObject(0))))
+	if dateView.Type != "object" || !strings.HasPrefix(dateView.Display, "Date: ") {
+		t.Fatalf("expected a named Date display, got %s %q", dateView.Type, dateView.Display)
+	}
+
+	mathView := vm.valueView(value.EncodeHandle(heap.Allocate(native.NewMathObject())))
+	if mathView.Type != "object" || mathView.Display != "[Math]" {
+		t.Fatalf("expected Math object name, got %s %q", mathView.Type, mathView.Display)
+	}
+
+	reflectView := vm.valueView(value.EncodeHandle(heap.Allocate(native.NewReflectObject())))
+	if reflectView.Type != "object" || reflectView.Display != "[Reflect]" {
+		t.Fatalf("expected Reflect object name, got %s %q", reflectView.Type, reflectView.Display)
+	}
+
+	jsonView := vm.valueView(value.EncodeHandle(heap.Allocate(native.NewJSONObject())))
+	if jsonView.Type != "object" || jsonView.Display != "JSON" {
+		t.Fatalf("expected JSON object name, got %s %q", jsonView.Type, jsonView.Display)
+	}
 }
 
 func TestSnapshotNamesLiveLocalSlots(t *testing.T) {

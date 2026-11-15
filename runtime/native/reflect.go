@@ -2,6 +2,7 @@ package native
 
 import (
 	"go_js/heap"
+	"go_js/object"
 	"go_js/value"
 )
 
@@ -33,8 +34,24 @@ func (fn *ReflectMethod) Name() string {
 	return fn.name
 }
 
-func NewReflectObject() *ObjObject {
-	obj := NewObject()
+type ReflectObject struct {
+	ObjObject
+}
+
+func (*ReflectObject) Type() object.ObjType {
+	return object.OBJ_OBJECT
+}
+
+func (*ReflectObject) String() string {
+	return REFLECT_OBJECT_NAME
+}
+
+func (*ReflectObject) Name() string {
+	return REFLECT_OBJECT_NAME
+}
+
+func NewReflectObject() *ReflectObject {
+	obj := &ReflectObject{ObjObject: *NewObject()}
 	for _, name := range []string{
 		"get", "set", "has", "deleteProperty", "defineProperty",
 		"getOwnPropertyDescriptor", "ownKeys", "getPrototypeOf",

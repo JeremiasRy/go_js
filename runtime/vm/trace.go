@@ -707,6 +707,10 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 		view.Type = "error"
 		view.Display = truncateDisplay(display, maxChars)
 		return view
+	case *native.DateObject:
+		view.Type = "object"
+		view.Display = truncateDisplay("Date: "+o.String(), maxChars)
+		return view
 	case *native.ObjClass:
 		view.Type = "class"
 		view.Display = truncateDisplay(o.String(), maxChars)
@@ -769,6 +773,12 @@ func (vm *VM) valueViewDepth(v value.Value, depth int, maxChars int) trace.Value
 		view.Type = "function"
 		view.Display = traceFunctionDisplay("fn", name)
 		view.Function = &trace.FunctionView{Name: name, Arity: callable.GetArity()}
+		return view
+	}
+
+	if display := obj.String(); display != "" && display != "[Object object]" {
+		view.Type = "object"
+		view.Display = truncateDisplay(display, maxChars)
 		return view
 	}
 
