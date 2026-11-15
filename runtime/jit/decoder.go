@@ -58,11 +58,12 @@ func decodeChunk(code []byte) ([]Instruction, error) {
 			instr.Operands = []int{int(code[next]), int(code[next+1])}
 			next += 2
 		case chunk.OP_SET_GLOBAL_NAMED:
-			if next+2 > len(code) {
+			if next+5 > len(code) {
 				return nil, fmt.Errorf("truncated global at %d", ip)
 			}
-			instr.Operands = []int{int(code[next]), int(code[next+1])}
-			next += 2
+			name, _ := readUint32BE(code, next+1)
+			instr.Operands = []int{int(code[next]), name}
+			next += 5
 		case chunk.OP_MEMBER_UPDATE:
 			if next+2 > len(code) {
 				return nil, fmt.Errorf("truncated member update at %d", ip)
@@ -70,11 +71,13 @@ func decodeChunk(code []byte) ([]Instruction, error) {
 			instr.Operands = []int{int(code[next]), int(code[next+1])}
 			next += 2
 		case chunk.OP_NEW_REGEXP:
-			if next+2 > len(code) {
+			if next+8 > len(code) {
 				return nil, fmt.Errorf("truncated regexp at %d", ip)
 			}
-			instr.Operands = []int{int(code[next]), int(code[next+1])}
-			next += 2
+			pattern, _ := readUint32BE(code, next)
+			flags, _ := readUint32BE(code, next+4)
+			instr.Operands = []int{pattern, flags}
+			next += 8
 		case chunk.OP_PUSH_METHOD:
 			if next+2 > len(code) {
 				return nil, fmt.Errorf("truncated method at %d", ip)
@@ -88,11 +91,12 @@ func decodeChunk(code []byte) ([]Instruction, error) {
 			instr.Operands = []int{int(code[next]), int(code[next+1])}
 			next += 2
 		case chunk.OP_WITH_GET, chunk.OP_WITH_SET:
-			if next+2 > len(code) {
+			if next+5 > len(code) {
 				return nil, fmt.Errorf("truncated with at %d", ip)
 			}
-			instr.Operands = []int{int(code[next]), int(code[next+1])}
-			next += 2
+			name, _ := readUint32BE(code, next+1)
+			instr.Operands = []int{int(code[next]), name}
+			next += 5
 		case chunk.OP_GET_ITERATOR:
 			if next >= len(code) {
 				return nil, fmt.Errorf("truncated iterator at %d", ip)
@@ -120,19 +124,26 @@ func decodeChunk(code []byte) ([]Instruction, error) {
 			}
 			amount := int(code[next])
 			next++
-			if next+amount > len(code) {
+			if next+amount*4 > len(code) {
 				return nil, fmt.Errorf("truncated rest object operands at %d", ip)
 			}
 			operands := []int{amount}
 			for range amount {
-				operands = append(operands, int(code[next]))
-				next++
+				key, _ := readUint32BE(code, next)
+				operands = append(operands, key)
+				next += 4
 			}
 			instr.Operands = operands
-		case chunk.OP_CONSTANT, chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL,
+		case chunk.OP_CONSTANT, chunk.OP_GET_GLOBAL_BY_NAME, chunk.OP_DEFINE_GLOBAL_NAMED:
+			index, ok := readUint32BE(code, next)
+			if !ok {
+				return nil, fmt.Errorf("truncated constant at %d", ip)
+			}
+			instr.Operands = []int{index}
+			next += 4
+		case chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL,
 			chunk.OP_GET_LOCAL, chunk.OP_SET_LOCAL, chunk.OP_DEFINE_LOCAL_SLOT,
-			chunk.OP_GET_LOCAL_RAW, chunk.OP_GET_GLOBAL_BY_NAME,
-			chunk.OP_DEFINE_GLOBAL_NAMED, chunk.OP_NEW,
+			chunk.OP_GET_LOCAL_RAW, chunk.OP_NEW,
 			chunk.OP_DEFINE_HEAP_VAR_AT, chunk.OP_DEFINE_ARGUMENTS_HEAP,
 			chunk.OP_CATCH_BIND, chunk.OP_GET_CATCH, chunk.OP_SET_CATCH,
 			chunk.OP_ITERATOR_NEXT_SLOT, chunk.OP_ITERATOR_CURRENT_SLOT,

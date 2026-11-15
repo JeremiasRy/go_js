@@ -75,7 +75,7 @@ func (m *Manager) HandleRandomJob(w http.ResponseWriter, r *http.Request) {
 
 func summarizeJob(job db.UserScriptJob) scriptSummary {
 	return scriptSummary{
-		JobID:     job.JobId.String(),
+		JobID:     job.JobID.String(),
 		SessionID: job.SessionID,
 		Src:       job.Src,
 		JobStatus: job.JobStatus,

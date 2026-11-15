@@ -103,13 +103,24 @@ func ReadOp(ip int, c value.ValueChunk, sb *strings.Builder) (int, bool) {
 		next++
 
 	case chunk.OP_SET_GLOBAL_NAMED:
-		if next+2 > len(opCode) {
+		if next+5 > len(opCode) {
 			return len(opCode), true
 		}
 		fmt.Fprintf(sb, "%04d | slot: %d \n", next*4, opCode[next])
 		next++
-		fmt.Fprintf(sb, "%04d | name: %d \n", next*4, opCode[next])
+		name, _ := readUint32At(opCode, next)
+		fmt.Fprintf(sb, "%04d | name: %d \n", next*4, name)
+		next += 4
+
+	case chunk.OP_WITH_GET, chunk.OP_WITH_SET:
+		if next+5 > len(opCode) {
+			return len(opCode), true
+		}
+		fmt.Fprintf(sb, "%04d | slot: %d \n", next*4, opCode[next])
 		next++
+		name, _ := readUint32At(opCode, next)
+		fmt.Fprintf(sb, "%04d | name: %d \n", next*4, name)
+		next += 4
 
 	case chunk.OP_MEMBER_UPDATE:
 		if next+2 > len(opCode) {
@@ -129,13 +140,14 @@ func ReadOp(ip int, c value.ValueChunk, sb *strings.Builder) (int, bool) {
 		next++
 
 	case chunk.OP_NEW_REGEXP:
-		if next+2 > len(opCode) {
+		if next+8 > len(opCode) {
 			return len(opCode), true
 		}
-		fmt.Fprintf(sb, "%04d | pattern: %d \n", next*4, opCode[next])
-		next++
-		fmt.Fprintf(sb, "%04d | flags: %d \n", next*4, opCode[next])
-		next++
+		pattern, _ := readUint32At(opCode, next)
+		flags, _ := readUint32At(opCode, next+4)
+		fmt.Fprintf(sb, "%04d | pattern: %d \n", next*4, pattern)
+		fmt.Fprintf(sb, "%04d | flags: %d \n", next*4, flags)
+		next += 8
 
 	case chunk.OP_PUSH_METHOD:
 		if next+2 > len(opCode) {
@@ -192,22 +204,29 @@ func ReadOp(ip int, c value.ValueChunk, sb *strings.Builder) (int, bool) {
 		fmt.Fprintf(sb, "%04d | %d \n", next*4, amount)
 		next++
 		for range amount {
-			if next >= len(opCode) {
+			if next+4 > len(opCode) {
 				return len(opCode), true
 			}
-			idx := opCode[next]
+			idx, _ := readUint32At(opCode, next)
 			label := fmt.Sprintf("%d", idx)
-			if int(idx) < len(c.Constants) {
+			if idx < len(c.Constants) {
 				label = native.String(c.Constants[idx])
 			}
 			fmt.Fprintf(sb, "%04d | %s \n", next*4, label)
-			next++
+			next += 4
 		}
 
-	case chunk.OP_CONSTANT, chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL,
+	case chunk.OP_CONSTANT, chunk.OP_GET_GLOBAL_BY_NAME, chunk.OP_DEFINE_GLOBAL_NAMED:
+		if next+4 > len(opCode) {
+			return len(opCode), true
+		}
+		idx, _ := readUint32At(opCode, next)
+		fmt.Fprintf(sb, "%04d | %d \n", next*4, idx)
+		next += 4
+
+	case chunk.OP_GET_GLOBAL, chunk.OP_SET_GLOBAL,
 		chunk.OP_GET_LOCAL, chunk.OP_SET_LOCAL, chunk.OP_DEFINE_LOCAL_SLOT,
-		chunk.OP_GET_LOCAL_RAW, chunk.OP_GET_GLOBAL_BY_NAME,
-		chunk.OP_DEFINE_GLOBAL_NAMED, chunk.OP_NEW,
+		chunk.OP_GET_LOCAL_RAW, chunk.OP_NEW,
 		chunk.OP_DEFINE_HEAP_VAR_AT, chunk.OP_DEFINE_ARGUMENTS_HEAP,
 		chunk.OP_CATCH_BIND, chunk.OP_GET_CATCH, chunk.OP_SET_CATCH,
 		chunk.OP_ITERATOR_NEXT_SLOT, chunk.OP_ITERATOR_CURRENT_SLOT,

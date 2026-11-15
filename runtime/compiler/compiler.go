@@ -348,6 +348,25 @@ func functionSlotCount(fs *FunctionScope) int {
 	}
 	return count
 }
+func (fs *FunctionScope) nextLocalSlot() int {
+	next := 0
+	for _, variable := range fs.vars {
+		if variable.scope == HEAP || variable.slot < next {
+			continue
+		}
+		next = variable.slot + 1
+	}
+	for block := fs.block; block != nil; block = block.parent {
+		for _, variable := range block.vars {
+			if variable.scope == HEAP || variable.slot < next {
+				continue
+			}
+			next = variable.slot + 1
+		}
+	}
+	return next
+}
+
 func (fs *FunctionScope) getCurrentSlot() int {
 	if fs.tableScope == GLOBAL && fs.block == nil {
 		return fs.globalBase + functionSlotCount(fs) - 1
@@ -367,8 +386,7 @@ func (fs *FunctionScope) getCurrentSlot() int {
 		return fs.globalBase + count
 	}
 
-	count += functionSlotCount(fs)
-	return count
+	return fs.nextLocalSlot()
 }
 
 func (fs *FunctionScope) addVariable(name string, type_ VariableType, undeclared bool, fn object.Callable) {
@@ -505,6 +523,15 @@ func defineSetTimeout(main *object.ObjFunction, symbolTable *FunctionScope) {
 
 	symbolTable.addVariable(SET_TIMEOUT_NAME, CONST, false, nil)
 	main.ValueChunk().WriteConstant(value.EncodeHandle(setTimeouthandle))
+	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
+}
+
+func defineAbortController(main *object.ObjFunction, symbolTable *FunctionScope) {
+	ctor := native.NewAbortControllerConstructor()
+	ctorHandle := heap.Allocate(ctor)
+
+	symbolTable.addVariable(native.ABORT_CONTROLLER_NAME, CONST, false, nil)
+	main.ValueChunk().WriteConstant(value.EncodeHandle(ctorHandle))
 	main.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL)
 }
 
@@ -915,6 +942,7 @@ func Compile(ast *parser.Node) (*object.ObjFunction, error) {
 	defineObjectConstructor(setup, global)
 	defineConsole(setup, global)
 	defineSetTimeout(setup, global)
+	defineAbortController(setup, global)
 	defineErrorConstructor(setup, global)
 	defineArrayConstructor(setup, global)
 	definePromiseConstructor(setup, global)
@@ -1025,6 +1053,9 @@ func withAstTracking(node *parser.Node, fn object.Callable, action func()) {
 }
 
 func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	if current == nil {
+		return
+	}
 	withAstTracking(current, fn, func() {
 		switch current.Type {
 		case parser.NODE_PROGRAM:
@@ -1058,7 +1089,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
 						} else {
 							name := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(entry.name))))
-							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot), name)
+							fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot))
+							fn.ValueChunk().EmitUint32(uint32(name))
 						}
 						variable.allocated = true
 					}
@@ -1213,14 +1245,16 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 								slot = 255
 							}
 							nameArg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(left.Name))))
-							fn.ValueChunk().EmitBytes(chunk.OP_WITH_SET, slot, nameArg)
+							fn.ValueChunk().EmitBytes(chunk.OP_WITH_SET, slot)
+							fn.ValueChunk().EmitUint32(uint32(nameArg))
 							break
 						}
 						fn.ValueChunk().EmitByte(chunk.OP_DUP)
 						if variable.undeclared {
 							if defineOp == chunk.OP_DEFINE_GLOBAL && !module {
 								nameArg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(left.Name))))
-								fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_GLOBAL_NAMED, nameArg)
+								fn.ValueChunk().EmitByte(chunk.OP_DEFINE_GLOBAL_NAMED)
+								fn.ValueChunk().EmitUint32(uint32(nameArg))
 							} else {
 								fn.ValueChunk().EmitByte(defineOp)
 							}
@@ -1305,53 +1339,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					fn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
 
-				functions := []*Variable{}
-				for _, variable := range symbolTable.vars {
-					if variable.type_ == FUNCTION {
-						functions = append(functions, variable)
-					}
-				}
-
-				slices.SortFunc(functions, func(a *Variable, b *Variable) int {
-					return cmp.Compare(a.slot, b.slot)
-				})
-
-				for _, variable := range functions {
-					fnValue := heap.Allocate(variable.fn)
-
-					slot := fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-
-					if uint8(variable.slot) != slot {
-						panic("things went south")
-					}
-
-					fn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-				}
-
-				emitVarInitializers(symbolTable, fn)
 				emitArgumentsHeap(fn)
 				emitPatternParameters(current.Params, symbolTable, fn)
-
-				if fn.GetArity() > 0 {
-					heapVars := []int{}
-
-					for i, n := range current.Params {
-						withAstTracking(n, fn, func() {
-							if v, found := symbolTable.vars[parameterName(n)]; found {
-								if v.scope == HEAP {
-									heapVars = append(heapVars, i, v.slot)
-								}
-							}
-						})
-					}
-
-					if len(heapVars) > 0 {
-						fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
-						for _, slot := range heapVars {
-							fn.ValueChunk().EmitByte(uint8(slot))
-						}
-					}
-				}
+				emitHeapParameters(current.Params, symbolTable, fn)
+				emitHoistedFunctions(symbolTable, fn)
+				emitVarInitializers(symbolTable, fn)
 
 				emitParameterDefaults(current.Params, symbolTable, fn)
 
@@ -1402,52 +1394,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
 
-				functions := []*Variable{}
-				for _, variable := range symbolTable.vars {
-					if variable.type_ == FUNCTION {
-						functions = append(functions, variable)
-					}
-				}
-
-				slices.SortFunc(functions, func(a *Variable, b *Variable) int {
-					return cmp.Compare(a.slot, b.slot)
-				})
-
-				for _, variable := range functions {
-					fnValue := heap.Allocate(variable.fn)
-					slot := newFn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-
-					if uint8(variable.slot) != slot {
-						panic("things went south")
-					}
-
-					newFn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-				}
-
-				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
 				emitPatternParameters(current.Params, symbolTable, newFn)
-
-				if len(current.Params) > 0 {
-					heapVars := []int{}
-
-					for i, n := range current.Params {
-						withAstTracking(n, fn, func() {
-							if v, found := symbolTable.vars[parameterName(n)]; found {
-								if v.scope == HEAP {
-									heapVars = append(heapVars, i, v.slot)
-								}
-							}
-						})
-					}
-
-					if len(heapVars) > 0 {
-						newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
-						for _, slot := range heapVars {
-							newFn.ValueChunk().EmitByte(uint8(slot))
-						}
-					}
-				}
+				emitHeapParameters(current.Params, symbolTable, newFn)
+				emitHoistedFunctions(symbolTable, newFn)
+				emitVarInitializers(symbolTable, newFn)
 
 				emitParameterDefaults(current.Params, symbolTable, newFn)
 
@@ -1502,52 +1453,11 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 					newFn.ValueChunk().EmitByte(chunk.OP_CREATE_HEAP_SCOPE)
 				}
 
-				functions := []*Variable{}
-				for _, variable := range symbolTable.vars {
-					if variable.type_ == FUNCTION {
-						functions = append(functions, variable)
-					}
-				}
-
-				slices.SortFunc(functions, func(a, b *Variable) int {
-					return cmp.Compare(a.slot, b.slot)
-				})
-
-				for _, variable := range functions {
-					fnValue := heap.Allocate(variable.fn)
-					slot := newFn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
-
-					if uint8(variable.slot) != slot {
-						panic("things went south")
-					}
-
-					newFn.ValueChunk().EmitByte(chunk.OP_DEFINE_LOCAL)
-				}
-
-				emitVarInitializers(symbolTable, newFn)
 				emitArgumentsHeap(newFn)
 				emitPatternParameters(current.Params, symbolTable, newFn)
-
-				if len(current.Params) > 0 {
-					heapVars := []int{}
-
-					for i, n := range current.Params {
-						withAstTracking(n, newFn, func() {
-							if v, found := symbolTable.vars[parameterName(n)]; found {
-								if v.scope == HEAP {
-									heapVars = append(heapVars, i, v.slot)
-								}
-							}
-						})
-					}
-
-					if len(heapVars) > 0 {
-						newFn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
-						for _, slot := range heapVars {
-							newFn.ValueChunk().EmitByte(uint8(slot))
-						}
-					}
-				}
+				emitHeapParameters(current.Params, symbolTable, newFn)
+				emitHoistedFunctions(symbolTable, newFn)
+				emitVarInitializers(symbolTable, newFn)
 
 				emitParameterDefaults(current.Params, symbolTable, newFn)
 
@@ -1897,7 +1807,7 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 							fn.ValueChunk().EmitBytes(getOp, uint8(obj.slot), chunk.OP_CREATE_REST_OBJECT, uint8(len(exclude)))
 							for _, exclude := range exclude {
 								slot := fn.ValueChunk().AddConstant(exclude)
-								fn.ValueChunk().EmitByte(slot)
+								fn.ValueChunk().EmitUint32(uint32(slot))
 							}
 
 							var defineOp uint8
@@ -2056,7 +1966,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if current.Regex != nil {
 					pattern := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Regex.Pattern))))
 					flags := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Regex.Flags))))
-					fn.ValueChunk().EmitBytes(chunk.OP_NEW_REGEXP, pattern, flags)
+					fn.ValueChunk().EmitByte(chunk.OP_NEW_REGEXP)
+					fn.ValueChunk().EmitUint32(uint32(pattern))
+					fn.ValueChunk().EmitUint32(uint32(flags))
 					return
 				}
 				switch v := current.Value.(type) {
@@ -2154,10 +2066,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				if variable == nil {
 					arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
 					if withDepth > 0 {
-						fn.ValueChunk().EmitBytes(chunk.OP_WITH_GET, 255, arg)
+						fn.ValueChunk().EmitBytes(chunk.OP_WITH_GET, 255)
+						fn.ValueChunk().EmitUint32(uint32(arg))
 						return
 					}
-					fn.ValueChunk().EmitBytes(chunk.OP_GET_GLOBAL_BY_NAME, arg)
+					fn.ValueChunk().EmitByte(chunk.OP_GET_GLOBAL_BY_NAME)
+					fn.ValueChunk().EmitUint32(uint32(arg))
 					return
 				}
 
@@ -2167,7 +2081,8 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 						slot = 255
 					}
 					arg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(current.Name))))
-					fn.ValueChunk().EmitBytes(chunk.OP_WITH_GET, slot, arg)
+					fn.ValueChunk().EmitBytes(chunk.OP_WITH_GET, slot)
+					fn.ValueChunk().EmitUint32(uint32(arg))
 					return
 				}
 
@@ -2365,10 +2280,12 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				generateByteCode(current.Initializer, symbolTable, fn)
 
 				testStart := len(fn.ValueChunk().Code)
-				generateByteCode(current.Test, symbolTable, fn)
-
-				fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
-				jumpStart := uint32(len(fn.ValueChunk().Code) - 4)
+				jumpStart := -1
+				if current.Test != nil {
+					generateByteCode(current.Test, symbolTable, fn)
+					fn.ValueChunk().EmitBytes(chunk.OP_JUMP_IF_FALSE, 0, 0, 0, 0)
+					jumpStart = len(fn.ValueChunk().Code) - 4
+				}
 				pushLoop(BLOCK_SCOPES[current.BodyNode])
 				for _, node := range current.BodyNode.Body {
 					generateByteCode(node, symbolTable, fn)
@@ -2393,7 +2310,9 @@ func generateByteCode(current *parser.Node, symbolTable *FunctionScope, fn objec
 				fn.ValueChunk().PatchUint32(uint32(len(fn.ValueChunk().Code)-4), uint32(testStart))
 
 				loopEnd := uint32(len(fn.ValueChunk().Code))
-				fn.ValueChunk().PatchUint32(jumpStart, loopEnd)
+				if jumpStart >= 0 {
+					fn.ValueChunk().PatchUint32(uint32(jumpStart), loopEnd)
+				}
 
 				for range initializerLocals {
 					fn.ValueChunk().EmitByte(chunk.OP_POP_LOCAL)
@@ -3741,6 +3660,48 @@ func emitArgumentsHeap(fn object.Callable) {
 	}
 }
 
+func emitHeapParameters(params []*parser.Node, symbolTable *FunctionScope, fn object.Callable) {
+	heapVars := []int{}
+	for i, n := range params {
+		withAstTracking(n, fn, func() {
+			if v, found := symbolTable.vars[parameterName(n)]; found && v.scope == HEAP {
+				heapVars = append(heapVars, i, v.slot)
+			}
+		})
+	}
+	if len(heapVars) == 0 {
+		return
+	}
+	fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VARS_FROM_ARGUMENTS, uint8(len(heapVars)/2))
+	for _, slot := range heapVars {
+		fn.ValueChunk().EmitByte(uint8(slot))
+	}
+}
+
+func emitHoistedFunctions(symbolTable *FunctionScope, fn object.Callable) {
+	functions := []*Variable{}
+	for _, variable := range symbolTable.vars {
+		if variable.type_ == FUNCTION {
+			functions = append(functions, variable)
+		}
+	}
+	slices.SortFunc(functions, func(a, b *Variable) int {
+		return cmp.Compare(a.slot, b.slot)
+	})
+	for _, variable := range functions {
+		fnValue := heap.Allocate(variable.fn)
+		fn.ValueChunk().WriteConstant(value.EncodeHandle(fnValue))
+		switch variable.scope {
+		case LOCAL:
+			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_LOCAL_SLOT, uint8(variable.slot))
+		case HEAP:
+			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_HEAP_VAR_AT, uint8(variable.slot))
+		case GLOBAL:
+			fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL, uint8(variable.slot))
+		}
+	}
+}
+
 func emitVarInitializers(symbolTable *FunctionScope, fn object.Callable) {
 	for _, variable := range symbolTable.varOrder {
 		if variable.type_ != VAR || variable.declared {
@@ -3761,7 +3722,8 @@ func emitVarInitializers(symbolTable *FunctionScope, fn object.Callable) {
 					}
 				}
 				nameArg := fn.ValueChunk().AddConstant(value.EncodeHandle(heap.Allocate(native.NewLightString(name))))
-				fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot), nameArg)
+				fn.ValueChunk().EmitBytes(chunk.OP_SET_GLOBAL_NAMED, uint8(variable.slot))
+				fn.ValueChunk().EmitUint32(uint32(nameArg))
 			}
 		case LOCAL:
 			fn.ValueChunk().EmitBytes(chunk.OP_DEFINE_LOCAL_SLOT, uint8(variable.slot))
@@ -3945,7 +3907,7 @@ func generatePatternDeclaration(pattern, initializer *parser.Node, symbolTable *
 						fn.ValueChunk().EmitByte(chunk.OP_CREATE_REST_OBJECT)
 						fn.ValueChunk().EmitByte(uint8(len(excluded)))
 						for _, key := range excluded {
-							fn.ValueChunk().EmitByte(fn.ValueChunk().AddConstant(key))
+							fn.ValueChunk().EmitUint32(uint32(fn.ValueChunk().AddConstant(key)))
 						}
 					}
 					if property.Argument != nil {

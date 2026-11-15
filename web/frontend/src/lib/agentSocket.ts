@@ -1,6 +1,20 @@
+import type { JobStatus } from "../types";
+
 export type ActiveRunInfo = {
     request_id: string;
+    client_request_id?: string;
     job_id?: string;
+    job_status?: JobStatus;
+    version?: number;
+};
+
+export type LastJobInfo = {
+    job_id: string;
+    client_request_id?: string;
+    job_status: JobStatus;
+    version: number;
+    result_url?: string;
+    error?: string;
 };
 
 export type MCPStatus = "waiting" | "active" | "idle";
@@ -12,6 +26,7 @@ export type ServerMessage =
           mcp_status: MCPStatus;
           mcp_last_seen?: string;
           active_run?: ActiveRunInfo;
+          last_job?: LastJobInfo;
       }
     | {
           type: "mcp.status";
@@ -24,34 +39,21 @@ export type ServerMessage =
           code: string;
       }
     | {
-          type: "run.accepted";
-          request_id: string;
+          type: "run.status";
+          request_id?: string;
+          client_request_id?: string;
           job_id: string;
-      }
-    | {
-          type: "run.result";
-          request_id: string;
-          job_id: string;
-          job_status: "Success" | "Failed" | "Pending" | "Processing";
-          result: string;
-      }
-    | {
-          type: "run.error";
-          request_id: string;
-          error: string;
+          job_status: JobStatus;
+          version: number;
+          result_url?: string;
+          error?: string;
       };
 
-export type ClientMessage =
-    | {
-          type: "run.submit";
-          request_id?: string;
-          code: string;
-      }
-    | {
-          type: "execute.rejected";
-          request_id: string;
-          error: string;
-      };
+export type ClientMessage = {
+    type: "execute.rejected";
+    request_id: string;
+    error: string;
+};
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 

@@ -19,6 +19,7 @@
         HighlightOptions,
         HighlightStatus,
         PageStatus,
+        InterpretDetails,
         InterpretResult,
         JobStatus,
         ScriptJob,
@@ -31,9 +32,18 @@
     import { createSessionBootstrap, resolveUrl } from "$lib/agentSession";
     import { fetchRandomScript, fetchSessionScripts } from "$lib/scriptsApi";
     import {
+        fetchJobResult,
+        fetchJobStatus,
+        JobApiError,
+        JobPendingError,
+        submitJob,
+        type JobStatusResponse,
+    } from "$lib/jobsApi";
+    import {
         connectAgentSocket,
         type AgentSocket,
         type ConnectionStatus,
+        type LastJobInfo,
         type MCPStatus,
         type ServerMessage,
     } from "$lib/agentSocket";
@@ -46,6 +56,21 @@
         "min-h-0 bg-white border border-slate-200 rounded-xl shadow-sm flex flex-col overflow-hidden";
     const CARD_HEADER_CLASS =
         "h-9 bg-slate-100 px-4 border-b border-slate-200 text-sm font-semibold text-slate-600 shrink-0 flex items-center justify-between gap-2";
+    const ACTIVE_JOB_KEY = "go-js-active-job-v1";
+
+    type StoredActiveJob = {
+        client_request_id: string;
+        request_id?: string;
+        job_id?: string;
+    };
+
+    type ActiveJob = {
+        jobId: string;
+        requestId: string;
+        clientRequestId: string;
+        version: number;
+        status: JobStatus;
+    };
 
     type EditorTab = "editor" | "examples";
     type ResultView = "result" | "animation";
@@ -53,8 +78,8 @@
     let editorContainer: HTMLElement;
     let view: EditorView;
     let editorTab = $state<EditorTab>("editor");
-    let jobId = $state<null | string>(null);
-    let activeRequestId = $state<null | string>(null);
+    let activeJob = $state<ActiveJob | null>(null);
+    let pendingClientRequestId = $state<string | null>(null);
     let pageState = $state<PageStatus>("input");
     let interpretResult = $state<InterpretResult | null>(null);
     let debugChunks = $state<DisassembledChunk[]>([]);
@@ -66,6 +91,9 @@
     let copyState = $state<"idle" | "copied" | "failed">("idle");
     let socket: AgentSocket | null = null;
     let runTimeout: ReturnType<typeof setTimeout> | null = null;
+    let jobPollTimer: ReturnType<typeof setTimeout> | null = null;
+    let jobPolling = false;
+    let resultAbort: AbortController | null = null;
     let sessionId = $state<string | null>(null);
     let scripts = $state<ScriptJob[]>([]);
     let scriptsLoading = $state(false);
@@ -77,7 +105,9 @@
     let outputExpanded = $state(true);
     let resultView = $state<ResultView>("result");
     let isBusy = $derived(
-        pageState === "submitting" || pageState === "running",
+        pageState === "submitting" ||
+            pageState === "running" ||
+            pageState === "loading",
     );
     let showResults = $derived(
         pageState === "done" &&
@@ -93,9 +123,11 @@
             ? `Submitting${".".repeat(runDots + 1)}`
             : pageState === "running"
               ? `Running${".".repeat(runDots + 1)}`
-              : runError !== null
-                ? "Run failed"
-                : "",
+              : pageState === "loading"
+                ? `Loading result${".".repeat(runDots + 1)}`
+                : runError !== null
+                  ? "Run failed"
+                  : "",
     );
     const reveal = new Tween(0, { duration: 350, easing: cubicOut });
 
@@ -264,6 +296,9 @@
                     onMessage: handleServerMessage,
                     onStatus: (status) => {
                         serverStatus = status;
+                        if (status === "disconnected") {
+                            maybeStartJobPolling();
+                        }
                     },
                 });
             } catch (error) {
@@ -283,6 +318,9 @@
             socket?.close();
             socket = null;
             clearRunTimeout();
+            stopJobPolling();
+            resultAbort?.abort();
+            resultAbort = null;
         };
     });
 
@@ -301,6 +339,7 @@
     $effect(() => {
         switch (pageState) {
             case "done":
+            case "loading":
             case "running":
             case "submitting": {
                 view.dispatch({
@@ -398,12 +437,467 @@
                 return;
             }
 
-            activeRequestId = null;
-            jobId = null;
             runError = "Timed out waiting for the interpreter.";
-            interpretResult = null;
-            pageState = "error";
+            if (activeJob !== null) {
+                startJobPolling();
+            }
         }, 120_000);
+    }
+
+    function readStoredJob(): StoredActiveJob | null {
+        if (typeof window === "undefined") {
+            return null;
+        }
+
+        try {
+            const raw = sessionStorage.getItem(ACTIVE_JOB_KEY);
+            if (raw === null) {
+                return null;
+            }
+            const stored = JSON.parse(raw) as Partial<StoredActiveJob>;
+            if (
+                typeof stored.client_request_id !== "string" ||
+                stored.client_request_id === ""
+            ) {
+                return null;
+            }
+            return {
+                client_request_id: stored.client_request_id,
+                request_id:
+                    typeof stored.request_id === "string"
+                        ? stored.request_id
+                        : undefined,
+                job_id:
+                    typeof stored.job_id === "string"
+                        ? stored.job_id
+                        : undefined,
+            };
+        } catch {
+            return null;
+        }
+    }
+
+    function writeStoredJob(job: StoredActiveJob) {
+        if (typeof window === "undefined") {
+            return;
+        }
+
+        try {
+            sessionStorage.setItem(ACTIVE_JOB_KEY, JSON.stringify(job));
+        } catch {
+            return;
+        }
+    }
+
+    function clearStoredJob() {
+        if (typeof window === "undefined") {
+            return;
+        }
+
+        try {
+            sessionStorage.removeItem(ACTIVE_JOB_KEY);
+        } catch {
+            return;
+        }
+    }
+
+    function storedJobMatches(
+        jobId: string,
+        clientRequestId: string | undefined = undefined,
+    ): boolean {
+        const stored = readStoredJob();
+        if (stored === null) {
+            return false;
+        }
+        if (stored.job_id !== undefined && stored.job_id === jobId) {
+            return true;
+        }
+        return (
+            clientRequestId !== undefined &&
+            stored.client_request_id === clientRequestId
+        );
+    }
+
+    function stopJobPolling() {
+        jobPolling = false;
+        if (jobPollTimer !== null) {
+            clearTimeout(jobPollTimer);
+            jobPollTimer = null;
+        }
+    }
+
+    function currentActiveJob(): ActiveJob | null {
+        return activeJob;
+    }
+
+    function currentPageState(): PageStatus {
+        return pageState;
+    }
+
+    function startJobPolling() {
+        const id = sessionId;
+        if (id === null || jobPolling) {
+            return;
+        }
+
+        jobPolling = true;
+        const tick = async () => {
+            jobPollTimer = null;
+            const job = activeJob;
+            if (job === null) {
+                jobPolling = false;
+                return;
+            }
+            if (job.status !== "Pending" && job.status !== "Processing") {
+                jobPolling = false;
+                return;
+            }
+
+            try {
+                const response = await fetchJobStatus(id, job.jobId);
+                applyJobStatus(response);
+            } catch (error) {
+                console.error(error);
+            }
+
+            const next = activeJob;
+            if (
+                jobPolling &&
+                next !== null &&
+                (next.status === "Pending" || next.status === "Processing")
+            ) {
+                jobPollTimer = setTimeout(() => {
+                    void tick();
+                }, 1_000);
+            } else {
+                jobPolling = false;
+            }
+        };
+
+        jobPollTimer = setTimeout(() => {
+            void tick();
+        }, 1_000);
+    }
+
+    function maybeStartJobPolling() {
+        if (serverStatus === "connected") {
+            stopJobPolling();
+            return;
+        }
+        startJobPolling();
+    }
+
+    async function loadJobResult(
+        jobIdToLoad: string,
+        resultUrl: string | null | undefined,
+    ) {
+        resultAbort?.abort();
+        const controller = new AbortController();
+        resultAbort = controller;
+
+        const id = sessionId;
+        const url =
+            typeof resultUrl === "string" && resultUrl !== ""
+                ? resultUrl
+                : id !== null
+                  ? `/session/${encodeURIComponent(id)}/jobs/${encodeURIComponent(jobIdToLoad)}/result`
+                  : null;
+        if (url === null) {
+            runError = "Could not load the execution result.";
+            pageState = "error";
+            return;
+        }
+
+        pageState = "loading";
+
+        for (let attempt = 0; attempt < 6; attempt += 1) {
+            if (controller.signal.aborted) {
+                return;
+            }
+
+            try {
+                const details = (await fetchJobResult(url)) as InterpretDetails;
+                if (controller.signal.aborted) {
+                    return;
+                }
+
+                clearRunTimeout();
+                runError = null;
+                debugChunks = details.debug_chunks ?? [];
+                interpretResult = {
+                    jobStatus: "Success",
+                    result: details,
+                };
+                generateLookUp({
+                    node: details.ast,
+                    target: lookUp,
+                });
+                outputExpanded = true;
+                resultView = "result";
+                pageState = "done";
+                pendingClientRequestId = null;
+                activeJob = null;
+                stopJobPolling();
+                resultAbort = null;
+                return;
+            } catch (error) {
+                if (controller.signal.aborted) {
+                    return;
+                }
+                if (error instanceof JobPendingError) {
+                    await new Promise((resolve) =>
+                        setTimeout(resolve, error.retryAfterMs),
+                    );
+                    continue;
+                }
+
+                console.error(error);
+                clearRunTimeout();
+                activeJob = null;
+                pendingClientRequestId = null;
+                resultAbort = null;
+                stopJobPolling();
+                debugChunks = [];
+                interpretResult = {
+                    jobStatus: "Failed",
+                    result: null,
+                };
+                if (
+                    error instanceof JobApiError &&
+                    error.code === "execution_failed"
+                ) {
+                    runError =
+                        error.message ||
+                        "The interpreter failed to run your code.";
+                    pageState = "done";
+                    return;
+                }
+
+                runError = "Could not load the execution result.";
+                pageState = "error";
+                return;
+            }
+        }
+
+        clearRunTimeout();
+        activeJob = null;
+        pendingClientRequestId = null;
+        resultAbort = null;
+        stopJobPolling();
+        debugChunks = [];
+        interpretResult = {
+            jobStatus: "Failed",
+            result: null,
+        };
+        runError = "The execution result is taking too long to load.";
+        pageState = "error";
+    }
+
+    function applyJobStatus(
+        response: JobStatusResponse,
+        options: { submittedByThisTab?: boolean } = {},
+    ) {
+        const incomingClientID = response.client_request_id ?? "";
+        const matchesPending =
+            pendingClientRequestId !== null &&
+            incomingClientID !== "" &&
+            incomingClientID === pendingClientRequestId;
+        const matchesActive =
+            activeJob !== null && activeJob.jobId === response.job_id;
+
+        if (
+            !options.submittedByThisTab &&
+            !matchesPending &&
+            !matchesActive
+        ) {
+            return;
+        }
+
+        let created = false;
+        if (activeJob === null) {
+            if (!options.submittedByThisTab && !matchesPending) {
+                return;
+            }
+            activeJob = {
+                jobId: response.job_id,
+                requestId: response.request_id ?? "",
+                clientRequestId:
+                    incomingClientID || pendingClientRequestId || "",
+                version: response.version,
+                status: response.job_status,
+            };
+            created = true;
+        } else if (activeJob.jobId !== response.job_id) {
+            return;
+        }
+
+        if (!created && response.version < activeJob.version) {
+            return;
+        }
+        if (
+            !created &&
+            response.version === activeJob.version &&
+            response.job_status === activeJob.status
+        ) {
+            if (matchesPending) {
+                pendingClientRequestId = null;
+            }
+            return;
+        }
+
+        activeJob = {
+            ...activeJob,
+            requestId: response.request_id ?? activeJob.requestId,
+            clientRequestId:
+                incomingClientID || activeJob.clientRequestId,
+            version: response.version,
+            status: response.job_status,
+        };
+        if (matchesPending) {
+            pendingClientRequestId = null;
+        }
+        selectedScriptId = activeJob.jobId;
+        writeStoredJob({
+            client_request_id: activeJob.clientRequestId,
+            request_id: activeJob.requestId || undefined,
+            job_id: activeJob.jobId,
+        });
+
+        switch (response.job_status) {
+            case "Pending":
+                pageState = "running";
+                maybeStartJobPolling();
+                void loadSessionScripts();
+                break;
+            case "Processing":
+                pageState = "running";
+                maybeStartJobPolling();
+                break;
+            case "Success":
+                clearRunTimeout();
+                pageState = "loading";
+                pendingClientRequestId = null;
+                stopJobPolling();
+                void loadSessionScripts();
+                void loadJobResult(activeJob.jobId, response.result_url);
+                break;
+            case "Failed":
+                clearRunTimeout();
+                runError =
+                    response.error?.message ||
+                    "The interpreter failed to run your code.";
+                debugChunks = [];
+                interpretResult = {
+                    jobStatus: "Failed",
+                    result: null,
+                };
+                activeJob = null;
+                pendingClientRequestId = null;
+                stopJobPolling();
+                pageState = "done";
+                void loadSessionScripts();
+                break;
+        }
+    }
+
+    function handleRunStatus(
+        message: Extract<ServerMessage, { type: "run.status" }>,
+    ) {
+        const incomingClientID = message.client_request_id ?? "";
+        const matchesPending =
+            pendingClientRequestId !== null &&
+            incomingClientID !== "" &&
+            incomingClientID === pendingClientRequestId;
+        const matchesActive =
+            activeJob !== null && activeJob.jobId === message.job_id;
+        if (!matchesPending && !matchesActive) {
+            return;
+        }
+
+        applyJobStatus({
+            job_id: message.job_id,
+            request_id: message.request_id,
+            client_request_id: message.client_request_id,
+            job_status: message.job_status,
+            version: message.version,
+            result_url: message.result_url,
+            error:
+                message.error !== undefined
+                    ? {
+                          code: "execution_failed",
+                          message: message.error,
+                      }
+                    : undefined,
+        });
+    }
+
+    function handleLastJob(last: LastJobInfo) {
+        const matchesStored = storedJobMatches(
+            last.job_id,
+            last.client_request_id,
+        );
+        const matchesPending =
+            pendingClientRequestId !== null &&
+            last.client_request_id === pendingClientRequestId;
+        if (!matchesStored && !matchesPending) {
+            return;
+        }
+
+        if (last.job_status === "Success") {
+            activeJob = {
+                jobId: last.job_id,
+                requestId: "",
+                clientRequestId: last.client_request_id ?? "",
+                version: last.version,
+                status: "Success",
+            };
+            pendingClientRequestId = null;
+            selectedScriptId = last.job_id;
+            pageState = "loading";
+            clearRunTimeout();
+            writeStoredJob({
+                client_request_id: activeJob.clientRequestId,
+                job_id: activeJob.jobId,
+            });
+            void loadJobResult(last.job_id, last.result_url);
+            void loadSessionScripts();
+            return;
+        }
+
+        if (last.job_status === "Failed") {
+            activeJob = null;
+            pendingClientRequestId = null;
+            selectedScriptId = last.job_id;
+            clearRunTimeout();
+            runError =
+                last.error?.trim() ||
+                "The interpreter failed to run your code.";
+            debugChunks = [];
+            interpretResult = {
+                jobStatus: "Failed",
+                result: null,
+            };
+            pageState = "done";
+            void loadSessionScripts();
+            return;
+        }
+
+        activeJob = {
+            jobId: last.job_id,
+            requestId: "",
+            clientRequestId: last.client_request_id ?? "",
+            version: last.version,
+            status: last.job_status,
+        };
+        pendingClientRequestId = null;
+        selectedScriptId = last.job_id;
+        pageState = "running";
+        armRunTimeout();
+        writeStoredJob({
+            client_request_id: activeJob.clientRequestId,
+            job_id: activeJob.jobId,
+        });
+        startJobPolling();
     }
 
     async function loadSessionScripts() {
@@ -552,104 +1046,15 @@
             : "border-slate-200 bg-white hover:bg-slate-50";
     }
 
-    function handleRunAccepted(message: {
-        request_id: string;
-        job_id: string;
-    }) {
-        if (activeRequestId === null && pageState !== "submitting") {
+    function rejectExecute(requestID: string | undefined, message: string) {
+        if (requestID === undefined) {
             return;
         }
-        if (
-            activeRequestId !== null &&
-            activeRequestId !== message.request_id
-        ) {
-            return;
-        }
-
-        activeRequestId = message.request_id;
-        jobId = message.job_id;
-        selectedScriptId = message.job_id;
-        pageState = "running";
-        void loadSessionScripts();
-    }
-
-    function handleRunResult(message: {
-        request_id: string;
-        job_id: string;
-        job_status: string;
-        result: string;
-    }) {
-        const isCurrentRun =
-            activeRequestId !== null
-                ? activeRequestId === message.request_id
-                : (pageState === "submitting" || pageState === "running") &&
-                  (jobId === null || jobId === message.job_id);
-        if (!isCurrentRun) {
-            return;
-        }
-
-        clearRunTimeout();
-        activeRequestId = null;
-        jobId = null;
-        void loadSessionScripts();
-
-        if (message.job_status === "Success") {
-            try {
-                const interpretDetails = JSON.parse(atob(message.result));
-                runError = null;
-                debugChunks = interpretDetails.debug_chunks ?? [];
-                interpretResult = {
-                    jobStatus: "Success",
-                    result: interpretDetails,
-                };
-                generateLookUp({
-                    node: interpretDetails.ast,
-                    target: lookUp,
-                });
-                outputExpanded = true;
-                resultView = "result";
-                pageState = "done";
-            } catch (error) {
-                console.error(error);
-                runError = "The interpreter returned an invalid result.";
-                debugChunks = [];
-                interpretResult = {
-                    jobStatus: "Failed",
-                    result: null,
-                };
-                pageState = "done";
-            }
-            return;
-        }
-
-        runError =
-            typeof message.result === "string" && message.result.trim() !== ""
-                ? message.result
-                : "The interpreter failed to run your code.";
-        interpretResult = {
-            jobStatus: "Failed",
-            result: null,
-        };
-        pageState = "done";
-    }
-
-    function handleRunError(message: { request_id: string; error: string }) {
-        if (
-            activeRequestId !== null &&
-            activeRequestId !== message.request_id
-        ) {
-            return;
-        }
-        if (activeRequestId === null && pageState !== "submitting") {
-            return;
-        }
-
-        clearRunTimeout();
-        activeRequestId = null;
-        jobId = null;
-        runError = message.error || "The interpreter could not start your run.";
-        interpretResult = null;
-        pageState = "error";
+        socket?.send({
+            type: "execute.rejected",
+            request_id: requestID,
+            error: message,
+        });
     }
 
     async function handleExecuteRequest(message: {
@@ -657,20 +1062,23 @@
         code: string;
     }) {
         if (view === undefined) {
-            socket?.send({
-                type: "execute.rejected",
-                request_id: message.request_id,
-                error: "The editor is not ready yet.",
-            });
+            rejectExecute(
+                message.request_id,
+                "The editor is not ready yet.",
+            );
             return;
         }
 
-        if (pageState === "submitting" || pageState === "running") {
-            socket?.send({
-                type: "execute.rejected",
-                request_id: message.request_id,
-                error: "The editor is busy running another request.",
-            });
+        if (
+            activeJob !== null ||
+            pageState === "submitting" ||
+            pageState === "running" ||
+            pageState === "loading"
+        ) {
+            rejectExecute(
+                message.request_id,
+                "The editor is busy running another request.",
+            );
             return;
         }
 
@@ -685,7 +1093,7 @@
         });
         await tick();
 
-        submitAgentCode(message.request_id);
+        await sendRun(message.code, message.request_id);
     }
 
     function handleServerMessage(message: ServerMessage) {
@@ -693,11 +1101,43 @@
             case "session.ready": {
                 mcpStatus = message.mcp_status;
                 mcpLastSeen = message.mcp_last_seen ?? null;
-                if (message.active_run !== undefined) {
-                    activeRequestId = message.active_run.request_id;
-                    jobId = message.active_run.job_id ?? null;
-                    pageState = "running";
-                    armRunTimeout();
+
+                const active = message.active_run;
+                if (active?.job_id !== undefined) {
+                    const matchesPending =
+                        pendingClientRequestId !== null &&
+                        active.client_request_id === pendingClientRequestId;
+                    const matchesStored = storedJobMatches(
+                        active.job_id,
+                        active.client_request_id,
+                    );
+                    if (matchesPending || matchesStored) {
+                        activeJob = {
+                            jobId: active.job_id,
+                            requestId: active.request_id,
+                            clientRequestId:
+                                active.client_request_id ?? "",
+                            version: active.version ?? 1,
+                            status: active.job_status ?? "Processing",
+                        };
+                        pendingClientRequestId = null;
+                        selectedScriptId = active.job_id;
+                        pageState = "running";
+                        armRunTimeout();
+                        stopJobPolling();
+                        writeStoredJob({
+                            client_request_id:
+                                activeJob.clientRequestId,
+                            request_id: activeJob.requestId || undefined,
+                            job_id: activeJob.jobId,
+                        });
+                        void loadSessionScripts();
+                    }
+                    return;
+                }
+
+                if (message.last_job !== undefined) {
+                    handleLastJob(message.last_job);
                 }
                 return;
             }
@@ -708,76 +1148,110 @@
             case "execute.request":
                 void handleExecuteRequest(message);
                 return;
-            case "run.accepted":
-                handleRunAccepted(message);
-                return;
-            case "run.result":
-                handleRunResult(message);
-                return;
-            case "run.error":
-                handleRunError(message);
+            case "run.status":
+                handleRunStatus(message);
                 return;
         }
     }
 
-    function submitCode(): boolean {
-        return sendRun(view.state.doc.toString());
+    function submitCode(): void {
+        void sendRun(view.state.doc.toString());
     }
 
-    function submitAgentCode(requestId: string): boolean {
-        return sendRun(view.state.doc.toString(), requestId);
-    }
-
-    function sendRun(code: string, requestId: string | undefined = undefined): boolean {
+    async function sendRun(
+        code: string,
+        executeRequestId: string | undefined = undefined,
+    ): Promise<boolean> {
         if (
-            activeRequestId !== null ||
+            activeJob !== null ||
             pageState === "submitting" ||
-            pageState === "running"
+            pageState === "running" ||
+            pageState === "loading"
         ) {
+            rejectExecute(
+                executeRequestId,
+                "The editor is busy running another request.",
+            );
             return false;
         }
-        if (socket === null || serverStatus !== "connected") {
+        const id = sessionId;
+        if (id === null) {
             runError =
-                "The editor connection is not ready. Reconnecting, please try again.";
+                "The editor session is not ready. Reload the page and try again.";
             pageState = "error";
+            rejectExecute(
+                executeRequestId,
+                "The editor session is not ready.",
+            );
             return false;
         }
 
+        const clientRequestId = executeRequestId ?? crypto.randomUUID();
         runError = null;
         interpretResult = null;
-        jobId = null;
-        activeRequestId = requestId ?? null;
+        debugChunks = [];
+        activeJob = null;
+        resultView = "result";
+        highlight = null;
+        astElements.clear();
+        lookUp.clear();
+        pendingClientRequestId = clientRequestId;
         pageState = "submitting";
         armRunTimeout();
+        writeStoredJob({
+            client_request_id: clientRequestId,
+            request_id: executeRequestId,
+        });
 
-        const sent =
-            requestId === undefined
-                ? socket.send({
-                      type: "run.submit",
-                      code,
-                  })
-                : socket.send({
-                      type: "run.submit",
-                      request_id: requestId,
-                      code,
-                  });
+        try {
+            const response = await submitJob(id, {
+                code,
+                client_request_id: clientRequestId,
+                ...(executeRequestId !== undefined
+                    ? { execute_request_id: executeRequestId }
+                    : {}),
+            });
+            applyJobStatus(response, { submittedByThisTab: true });
+            return true;
+        } catch (error) {
+            console.error(error);
+            const adoptedJob = currentActiveJob();
+            const state = currentPageState();
+            if (
+                (adoptedJob !== null &&
+                    adoptedJob.clientRequestId === clientRequestId) ||
+                state === "loading" ||
+                state === "done"
+            ) {
+                maybeStartJobPolling();
+                return true;
+            }
 
-        if (!sent) {
+            const message =
+                error instanceof JobApiError
+                    ? error.message
+                    : "Could not submit your code. Please try again.";
             clearRunTimeout();
-            activeRequestId = null;
-            runError = "Could not submit your code. Please try again.";
+            pendingClientRequestId = null;
+            clearStoredJob();
+            stopJobPolling();
+            runError = message;
+            interpretResult = null;
             pageState = "error";
+            rejectExecute(executeRequestId, message);
             return false;
         }
-
-        return true;
     }
 
     function resetPage() {
         clearRunTimeout();
+        stopJobPolling();
+        resultAbort?.abort();
+        resultAbort = null;
         pageState = "input";
-        jobId = null;
-        activeRequestId = null;
+        activeJob = null;
+        pendingClientRequestId = null;
+        clearStoredJob();
         interpretResult = null;
         debugChunks = [];
         runError = null;
@@ -1077,8 +1551,7 @@
             >
                 <button
                     onclick={() => submitCode()}
-                    disabled={pageState !== "input" ||
-                        serverStatus !== "connected"}
+                    disabled={pageState !== "input" || sessionId === null}
                     class="inline-flex min-w-28 items-center justify-center gap-2 bg-[#00ADD8] hover:bg-[#00758D] text-white px-4 py-2 rounded-lg transition-colors font-medium disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                 >
                     {#if isBusy}
@@ -1086,7 +1559,11 @@
                             class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white/40 border-t-white"
                             aria-hidden="true"
                         ></span>
-                        {pageState === "submitting" ? "Submitting" : "Running"}
+                        {pageState === "submitting"
+                            ? "Submitting"
+                            : pageState === "loading"
+                              ? "Loading"
+                              : "Running"}
                     {:else}
                         Submit
                     {/if}

@@ -76,20 +76,27 @@ The MCP activity indicator is separate from the browser connection. It shows
 traffic, so manual runs work without an MCP client connected.
 
 Every browser tab keeps its own WebSocket connection to `/ws/<client-id>`, and
-all tabs for the same client share one session. Both manual submissions and MCP
-tool calls use that session:
+all tabs for the same client share one session. The WebSocket carries only small
+status notifications; job submission and results use HTTP:
 
-1. An MCP client calls the `execute` tool.
-2. The backend pushes the code to every connected tab over WebSocket.
-3. The tabs replace the editor contents, and the first submission is accepted.
-4. The backend queues the job for the Firecracker worker pool.
-5. The result is pushed back to every connected tab over WebSocket and returned
-   to the waiting MCP tool call.
+1. Manual runs submit `POST /session/<client-id>/jobs` with a `client_request_id`.
+2. `GET /session/<client-id>/jobs/<job-id>` returns the authoritative status,
+   and `GET /session/<client-id>/jobs/<job-id>/result` returns raw JSON with gzip
+   when the browser accepts it.
+3. An MCP client calls the `execute` tool.
+4. The backend pushes the code to every connected tab over WebSocket.
+5. The tabs replace the editor contents, and the first HTTP submission is accepted
+   using the execute request ID as its idempotency key.
+6. The backend queues the job for the Firecracker worker pool and broadcasts
+   `run.status` events for `Pending`, `Processing`, and the terminal state.
+7. The browser fetches the result over HTTP, while the MCP tool call receives the
+   output extracted by the worker.
 
 The session survives brief WebSocket disconnects and expires 30 minutes after the
-last browser tab disconnects. Session and in-flight job state are kept in memory;
-restarting the backend invalidates active sessions, but the stable client id
-recreates the same MCP URL on the next page load.
+last browser tab disconnects. Status polling recovers terminal jobs after a
+backend restart. Session and in-flight job state are kept in memory; restarting
+the backend invalidates active sessions, but the stable client id recreates the
+same MCP URL on the next page load.
 
 For frontend development, the SvelteKit dev server proxies `/ws`, `/session`, and
 `/scripts` to port `8000`, so the same browser-origin URLs work in development and
