@@ -826,6 +826,100 @@ func TestMCPExecuteBroadcastsToEveryTab(t *testing.T) {
 	}
 }
 
+func TestMCPExecuteKeepsPendingWhenOnlyOneTabRejects(t *testing.T) {
+	store, _, manager := newTestManager(t)
+	server := newTestServer(t, manager)
+	session, err := manager.EnsureSession(uuid.NewString())
+	if err != nil {
+		t.Fatalf("ensure session: %v", err)
+	}
+
+	first, _ := dialSessionByID(t, server, session.SessionID)
+	second, _ := dialSessionByID(t, server, session.SessionID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1"}, nil)
+	mcpSession, err := client.Connect(ctx, &mcp.StreamableClientTransport{
+		Endpoint: server.URL + "/session/" + session.SessionID + "/mcp",
+	}, nil)
+	if err != nil {
+		t.Fatalf("connect MCP client: %v", err)
+	}
+	t.Cleanup(func() { _ = mcpSession.Close() })
+
+	_ = readSocketMessage(t, first)
+	_ = readSocketMessage(t, second)
+
+	type callResult struct {
+		result *mcp.CallToolResult
+		err    error
+	}
+	callDone := make(chan callResult, 1)
+	go func() {
+		result, err := mcpSession.CallTool(ctx, &mcp.CallToolParams{
+			Name:      "execute",
+			Arguments: map[string]any{"code": "4 + 4"},
+		})
+		callDone <- callResult{result: result, err: err}
+	}()
+
+	firstExecute := readSocketMessage(t, first)
+	secondExecute := readSocketMessage(t, second)
+	if firstExecute.Type != MessageExecuteRequest || secondExecute.Type != MessageExecuteRequest {
+		t.Fatalf("expected both tabs to receive the execute request, got %q and %q", firstExecute.Type, secondExecute.Type)
+	}
+
+	writeSocketMessage(t, first, socketMessage{
+		Type:      MessageExecuteRejected,
+		RequestID: firstExecute.RequestID,
+		Error:     "the editor is busy",
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	status, _, submitted := submitJob(t, server, session.SessionID, secondExecute.RequestID, secondExecute.RequestID, secondExecute.Code)
+	if status != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", status)
+	}
+	jobID, err := uuid.Parse(submitted.JobID)
+	if err != nil {
+		t.Fatalf("parse job id: %v", err)
+	}
+	_ = readSocketMessage(t, first)
+	_ = readSocketMessage(t, second)
+
+	completeJob(t, store, manager, jobID, db.Completion{
+		Status:              db.JobSucceeded,
+		Result:              encodedResult("8"),
+		ResultEncoding:      "base64",
+		ResultFormatVersion: 2,
+		Output:              "8",
+	})
+
+	select {
+	case call := <-callDone:
+		if call.err != nil {
+			t.Fatalf("CallTool failed after a single tab rejected: %v", call.err)
+		}
+		content, err := json.Marshal(call.result.Content)
+		if err != nil {
+			t.Fatalf("marshal tool content: %v", err)
+		}
+		var contents []struct {
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(content, &contents); err != nil {
+			t.Fatalf("decode tool content: %v", err)
+		}
+		if len(contents) == 0 || !strings.Contains(contents[0].Text, `"output":"8"`) {
+			t.Fatalf("expected tool output 8, got %s", content)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for the second tab to execute the request")
+	}
+}
+
 func TestMCPExecuteRejected(t *testing.T) {
 	_, _, manager := newTestManager(t)
 	server := newTestServer(t, manager)

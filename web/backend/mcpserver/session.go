@@ -74,9 +74,10 @@ type activeRun struct {
 }
 
 type pendingRun struct {
-	requestID string
-	code      string
-	waiter    chan runOutcome
+	requestID  string
+	code       string
+	waiter     chan runOutcome
+	rejections map[*wsConn]string
 }
 
 type completedRun struct {
@@ -214,9 +215,23 @@ func (s *Session) detach(conn *wsConn) {
 	delete(s.conns, conn)
 	s.lastSeen = time.Now()
 
-	var pending *pendingRun
+	var (
+		pending    *pendingRun
+		pendingErr error
+	)
+	if s.pendingMCP != nil {
+		delete(s.pendingMCP.rejections, conn)
+	}
 	if len(s.conns) == 0 && s.active == nil {
 		pending = s.pendingMCP
+		pendingErr = ErrNoFrontend
+		s.pendingMCP = nil
+	} else if s.pendingMCP != nil && len(s.pendingMCP.rejections) >= len(s.conns) {
+		pending = s.pendingMCP
+		for _, reason := range pending.rejections {
+			pendingErr = fmt.Errorf("%s", reason)
+			break
+		}
 		s.pendingMCP = nil
 	}
 	s.mu.Unlock()
@@ -224,7 +239,7 @@ func (s *Session) detach(conn *wsConn) {
 
 	conn.stop()
 	if pending != nil {
-		pending.waiter <- runOutcome{err: ErrNoFrontend}
+		pending.waiter <- runOutcome{err: pendingErr}
 	}
 }
 
@@ -256,7 +271,7 @@ func (s *Session) readLoop(conn *wsConn) {
 		}
 
 		if message.Type == MessageExecuteRejected {
-			s.handleExecuteRejected(message)
+			s.handleExecuteRejected(conn, message)
 		}
 	}
 }
@@ -502,23 +517,38 @@ func (s *Session) Submit(ctx context.Context, req SubmitRequest) (SubmitResult, 
 	return SubmitResult{Job: *job, RequestID: requestID, Created: created}, nil
 }
 
-func (s *Session) handleExecuteRejected(message socketMessage) {
+func (s *Session) handleExecuteRejected(conn *wsConn, message socketMessage) {
+	reason := strings.TrimSpace(message.Error)
+	if reason == "" {
+		reason = "frontend rejected the execute request"
+	}
+
 	s.submitMu.Lock()
 	s.mu.Lock()
 	pending := s.pendingMCP
-	if pending != nil && pending.requestID == message.RequestID {
+	if pending == nil || pending.requestID != message.RequestID {
+		s.mu.Unlock()
+		s.submitMu.Unlock()
+		return
+	}
+	if pending.rejections == nil {
+		pending.rejections = map[*wsConn]string{}
+	}
+	pending.rejections[conn] = reason
+	for rejectedConn := range pending.rejections {
+		if _, connected := s.conns[rejectedConn]; !connected {
+			delete(pending.rejections, rejectedConn)
+		}
+	}
+
+	allRejected := len(s.conns) > 0 && len(pending.rejections) >= len(s.conns)
+	if allRejected {
 		s.pendingMCP = nil
-	} else {
-		pending = nil
 	}
 	s.mu.Unlock()
 	s.submitMu.Unlock()
 
-	if pending != nil {
-		reason := message.Error
-		if reason == "" {
-			reason = "frontend rejected the execute request"
-		}
+	if allRejected {
 		pending.waiter <- runOutcome{err: fmt.Errorf("%s", reason)}
 	}
 }
@@ -550,9 +580,10 @@ func (s *Session) Run(ctx context.Context, code string) (runOutcome, error) {
 	requestID := uuid.NewString()
 	waiter := make(chan runOutcome, 1)
 	s.pendingMCP = &pendingRun{
-		requestID: requestID,
-		code:      code,
-		waiter:    waiter,
+		requestID:  requestID,
+		code:       code,
+		waiter:     waiter,
+		rejections: map[*wsConn]string{},
 	}
 
 	data, err := json.Marshal(socketMessage{
