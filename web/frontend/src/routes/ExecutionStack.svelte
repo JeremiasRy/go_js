@@ -95,6 +95,16 @@
             : (vm.frames_omitted ?? 0) + activeFrame.index + 1,
     );
 
+    const topAbsolute = $derived(
+        vm === null
+            ? -1
+            : Math.min(vm.stack_top - 1, vm.stack_base + vm.stack.length - 1),
+    );
+
+    function isPlaceholder(value: ValueView, abs: number): boolean {
+        return value.type === "undefined" && !value.name && abs !== topAbsolute;
+    }
+
     const slots = $derived.by<Slot[]>(() => {
         const state = vm;
         if (state === null) {
@@ -108,7 +118,7 @@
 
         for (let abs = capturedStart; abs < end; abs += 1) {
             const value = state.stack[abs - capturedStart];
-            if (value === undefined) {
+            if (value === undefined || isPlaceholder(value, abs)) {
                 continue;
             }
 
@@ -129,15 +139,23 @@
 
     const displaySlots = $derived([...slots].reverse());
 
-    const hiddenSlots = $derived(
-        vm === null ? 0 : Math.max(vm.stack_base, vm.stack_omitted ?? 0),
-    );
+    const hiddenSlots = $derived.by(() => {
+        const state = vm;
+        if (state === null) {
+            return 0;
+        }
 
-    const topAbsolute = $derived(
-        vm === null
-            ? -1
-            : Math.min(vm.stack_top - 1, vm.stack_base + vm.stack.length - 1),
-    );
+        let hidden = Math.max(state.stack_base, state.stack_omitted ?? 0);
+        const capturedEnd = state.stack_base + state.stack.length;
+        const end = Math.min(state.stack_top, capturedEnd);
+        for (let abs = state.stack_base; abs < end; abs += 1) {
+            const value = state.stack[abs - state.stack_base];
+            if (value !== undefined && isPlaceholder(value, abs)) {
+                hidden += 1;
+            }
+        }
+        return hidden;
+    });
 
     const panelTitle = $derived(
         frame?.kind === "jit" ? "JIT stack" : "VM stack",
